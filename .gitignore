@@ -1,0 +1,32 @@
+# local cold storage (pre-existing convention)
+archived/
+
+# secrets — never committed, no exceptions
+.env
+.env.*
+*.pem
+
+# runtime state (ledger.db is backed up out-of-band, not via git)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# editors/os
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
