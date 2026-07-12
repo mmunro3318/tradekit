@@ -9,6 +9,7 @@ Public surface (implemented in P0 M0.2):
     Predicate (price_touch | price_close | time_expiry), InvalidationSpec
     ThesisContract, EntrySpec, EVBlock
     Event (envelope) + typed payload models (taxonomy DESIGN §6.3)
+    EventFilter, ChainReport                 # ledger query/audit contracts
     ProposedAction, Verdict, VerdictToken, RuleHit
     OrderRequest, OrderAck, Fill, Grade, MarketSnapshot, RunManifest
     json_schemas() -> dict[str, dict]   # JSON Schema export for non-Python agents

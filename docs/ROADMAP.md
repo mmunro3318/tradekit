@@ -22,7 +22,7 @@
 - [ ] `AssetRef` (symbol/venue/asset_class/tick_size) + `quantize(value, tick_size)` (G2)
 - [ ] Predicate DSL: `price_touch | price_close | time_expiry` discriminated union (§5.2)
 - [ ] `ThesisContract` + `EntrySpec` + `EVBlock` + `InvalidationSpec` (measurable | structural) (§5.1)
-- [ ] Event envelope + typed payload models for the v1 taxonomy (§6.3)
+- [ ] Event envelope with v1-taxonomy type validation (§6.3); typed per-event payload models land with their producing subsystems (P2/P3 — see tests/ASSUMPTIONS.md item 10)
 - [ ] `ProposedAction`, `Verdict`/`VerdictToken`, `RuleHit` (§5.3)
 - [ ] `OrderRequest` / `OrderAck` / `Fill` / `Grade` / `MarketSnapshot` / `RunManifest` (§5.3)
 - [ ] `json_schemas()` export (feeds `tk schema export`)
