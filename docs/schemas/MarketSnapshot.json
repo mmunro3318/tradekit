@@ -1,0 +1,49 @@
+{
+  "properties": {
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "ts_utc": {
+      "format": "date-time",
+      "title": "Ts Utc",
+      "type": "string"
+    },
+    "prices": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ]
+      },
+      "title": "Prices",
+      "type": "object"
+    },
+    "regime": {
+      "additionalProperties": true,
+      "title": "Regime",
+      "type": "object"
+    },
+    "derivatives": {
+      "additionalProperties": true,
+      "title": "Derivatives",
+      "type": "object"
+    },
+    "correlations": {
+      "additionalProperties": true,
+      "title": "Correlations",
+      "type": "object"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "ts_utc"
+  ],
+  "title": "MarketSnapshot",
+  "type": "object"
+}

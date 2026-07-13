@@ -1,0 +1,21 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "time_expiry",
+      "title": "Kind",
+      "type": "string"
+    },
+    "by": {
+      "format": "date-time",
+      "title": "By",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "by"
+  ],
+  "title": "TimeExpiry",
+  "type": "object"
+}

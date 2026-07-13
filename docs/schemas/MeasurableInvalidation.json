@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "PriceClose": {
+      "additionalProperties": false,
+      "properties": {
+        "cmp": {
+          "enum": [
+            "gte",
+            "lte"
+          ],
+          "title": "Cmp",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "timeframe": {
+          "default": "1h",
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        },
+        "kind": {
+          "const": "price_close",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmp",
+        "value",
+        "by",
+        "kind"
+      ],
+      "title": "PriceClose",
+      "type": "object"
+    },
+    "PriceTouch": {
+      "additionalProperties": false,
+      "properties": {
+        "cmp": {
+          "enum": [
+            "gte",
+            "lte"
+          ],
+          "title": "Cmp",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "timeframe": {
+          "default": "1h",
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        },
+        "kind": {
+          "const": "price_touch",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmp",
+        "value",
+        "by",
+        "kind"
+      ],
+      "title": "PriceTouch",
+      "type": "object"
+    },
+    "TimeExpiry": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "time_expiry",
+          "title": "Kind",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "by"
+      ],
+      "title": "TimeExpiry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "measurable",
+      "title": "Kind",
+      "type": "string"
+    },
+    "predicate": {
+      "discriminator": {
+        "mapping": {
+          "price_close": "#/$defs/PriceClose",
+          "price_touch": "#/$defs/PriceTouch",
+          "time_expiry": "#/$defs/TimeExpiry"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PriceTouch"
+        },
+        {
+          "$ref": "#/$defs/PriceClose"
+        },
+        {
+          "$ref": "#/$defs/TimeExpiry"
+        }
+      ],
+      "title": "Predicate"
+    }
+  },
+  "required": [
+    "kind",
+    "predicate"
+  ],
+  "title": "MeasurableInvalidation",
+  "type": "object"
+}

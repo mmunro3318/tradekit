@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cmp": {
+      "enum": [
+        "gte",
+        "lte"
+      ],
+      "title": "Cmp",
+      "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Value"
+    },
+    "timeframe": {
+      "default": "1h",
+      "title": "Timeframe",
+      "type": "string"
+    },
+    "by": {
+      "format": "date-time",
+      "title": "By",
+      "type": "string"
+    },
+    "kind": {
+      "const": "price_close",
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cmp",
+    "value",
+    "by",
+    "kind"
+  ],
+  "title": "PriceClose",
+  "type": "object"
+}

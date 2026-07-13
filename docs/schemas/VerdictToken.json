@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "verdict_id": {
+      "title": "Verdict Id",
+      "type": "string"
+    },
+    "policy_version_hash": {
+      "title": "Policy Version Hash",
+      "type": "string"
+    }
+  },
+  "required": [
+    "verdict_id",
+    "policy_version_hash"
+  ],
+  "title": "VerdictToken",
+  "type": "object"
+}

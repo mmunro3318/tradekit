@@ -1,0 +1,26 @@
+{
+  "description": "verify_chain() result (ASSUMPTIONS 13).",
+  "properties": {
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    },
+    "first_bad_seq": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "First Bad Seq"
+    }
+  },
+  "required": [
+    "ok"
+  ],
+  "title": "ChainReport",
+  "type": "object"
+}

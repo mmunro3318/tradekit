@@ -1,0 +1,48 @@
+{
+  "description": "Ledger query shape (ASSUMPTIONS 12); since/until are inclusive.\n\nAware datetimes required: a naive bound would be read as machine-local\ntime and silently shift the window (TD-17, reviewer D2, ASSUMPTIONS 20).",
+  "properties": {
+    "types": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Types"
+    },
+    "since": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Since"
+    },
+    "until": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Until"
+    }
+  },
+  "title": "EventFilter",
+  "type": "object"
+}

@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "properties": {
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "venue": {
+          "title": "Venue",
+          "type": "string"
+        },
+        "asset_class": {
+          "title": "Asset Class",
+          "type": "string"
+        },
+        "tick_size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Tick Size"
+        }
+      },
+      "required": [
+        "symbol",
+        "venue",
+        "asset_class",
+        "tick_size"
+      ],
+      "title": "AssetRef",
+      "type": "object"
+    },
+    "OrderRequest": {
+      "properties": {
+        "thesis_id": {
+          "title": "Thesis Id",
+          "type": "string"
+        },
+        "account_ref": {
+          "title": "Account Ref",
+          "type": "string"
+        },
+        "asset": {
+          "$ref": "#/$defs/AssetRef"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "order_type": {
+          "enum": [
+            "market",
+            "limit",
+            "stop",
+            "stop_limit"
+          ],
+          "title": "Order Type",
+          "type": "string"
+        },
+        "qty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Qty"
+        },
+        "limit_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit Price"
+        }
+      },
+      "required": [
+        "thesis_id",
+        "account_ref",
+        "asset",
+        "side",
+        "order_type",
+        "qty"
+      ],
+      "title": "OrderRequest",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "requested_by": {
+      "title": "Requested By",
+      "type": "string"
+    },
+    "thesis_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Thesis Id"
+    },
+    "order": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OrderRequest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "kind",
+    "account_ref",
+    "requested_by"
+  ],
+  "title": "ProposedAction",
+  "type": "object"
+}

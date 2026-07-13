@@ -2,6 +2,16 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-12 (evening) — git init; ROADMAP; P0 COMPLETE (done-gate met)
+
+- `git init` on main; baseline commit of doc set. `.gitignore` hardened (.env, data/, *.db never committable); `.gitattributes` normalizes line endings.
+- **ROADMAP.md** written (P0–P5, milestone/story checkboxes, done-gates per phase).
+- **P0 built via the four-stage workflow**: CTO pinned interfaces → TDD team (agent tdd-p0) wrote 38 failing tests + 19 ratified ASSUMPTIONS → dev team (dev-p0) implemented contracts + ledger to green → reviewer (reviewer-p0) verdict FIX-FIRST with 9 defects, all verified by execution.
+- Notable review catches: **D1 quantize matched tick exponent, not grid** (0.05/0.5/5 ticks passed through un-quantized — falsified the G2 guarantee); D2 naive datetimes read as machine-local time in query bounds; D3 hash-preimage delimiter forgeable via control chars in identity fields; D5 the deep-module lint wasn't actually enforcing. All fixed by CTO same session; enforcement probe-verified. Agent metrics started at docs/reviews/agent-metrics.md (tdd-p0: B+, dev-p0: B).
+- M0.4: `tk schema export` (22 schemas → docs/schemas/), `tk ledger verify|rebuild|query`, P0 replay done-gate test. **Final: 73 tests green, ruff clean, mypy clean (strict flags on contracts/ledger), real-CLI smoke `chain OK`.**
+- ASSUMPTIONS.md now 22 items (20–22 added in fix round). Commits: 7f37184 → 7768e74 → d446ffb (red) → 5f93f15 (green) → c31cbf1 (fixes) → this.
+- Next: P1 MAE core (data layer first — Kraken needs no key; CoinGecko demo key is Mike's remaining hands-item, plus creating the GitHub remote for first CI run).
+
 ## 2026-07-12 (later) — Adversarial review incorporated; DESIGN.md → v0.2
 
 - Mike approved all v0.1 decisions incl. the three §18 asks (TD-10 promotion tightening, $25 live cap, advisory cooling-off). Confirmed rolling our own paper engine; futures *signals* deprioritized below stocks/crypto (we never trade futures — it's positioning data for spot theses); options = "maybe, later" → P5+ deferred list.

@@ -1,0 +1,41 @@
+{
+  "properties": {
+    "order_type": {
+      "enum": [
+        "market",
+        "limit",
+        "stop",
+        "stop_limit"
+      ],
+      "title": "Order Type",
+      "type": "string"
+    },
+    "limit_price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit Price"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "order_type",
+    "valid_until"
+  ],
+  "title": "EntrySpec",
+  "type": "object"
+}

@@ -1,0 +1,68 @@
+{
+  "properties": {
+    "order_id": {
+      "title": "Order Id",
+      "type": "string"
+    },
+    "thesis_id": {
+      "title": "Thesis Id",
+      "type": "string"
+    },
+    "ts_utc": {
+      "format": "date-time",
+      "title": "Ts Utc",
+      "type": "string"
+    },
+    "price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Price"
+    },
+    "qty": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Qty"
+    },
+    "fees_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Fees Usd"
+    },
+    "quote_snapshot": {
+      "additionalProperties": true,
+      "title": "Quote Snapshot",
+      "type": "object"
+    }
+  },
+  "required": [
+    "order_id",
+    "thesis_id",
+    "ts_utc",
+    "price",
+    "qty",
+    "fees_usd"
+  ],
+  "title": "Fill",
+  "type": "object"
+}

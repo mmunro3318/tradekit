@@ -1,0 +1,40 @@
+{
+  "properties": {
+    "order_id": {
+      "title": "Order Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "ts_utc": {
+      "format": "date-time",
+      "title": "Ts Utc",
+      "type": "string"
+    },
+    "venue_order_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Venue Order Id"
+    }
+  },
+  "required": [
+    "order_id",
+    "status",
+    "ts_utc"
+  ],
+  "title": "OrderAck",
+  "type": "object"
+}

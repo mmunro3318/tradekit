@@ -1,0 +1,84 @@
+{
+  "description": "Envelope: matches the \u00a76.2 column list (ASSUMPTIONS 9).",
+  "properties": {
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "ts_utc": {
+      "format": "date-time",
+      "title": "Ts Utc",
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "RunStarted",
+        "ConfigChanged",
+        "PolicyVersionLoaded",
+        "ThesisDrafted",
+        "ThesisSubmitted",
+        "MarketSnapshotTaken",
+        "SizingComputed",
+        "ReviewCompleted",
+        "ThesisApproved",
+        "ThesisRejected",
+        "ThesisActivated",
+        "ActionProposed",
+        "VerdictIssued",
+        "OrderSubmitted",
+        "OrderAck",
+        "OrderCancelled",
+        "FillRecorded",
+        "InvalidationAttested",
+        "ThesisGraded",
+        "SeriesClosed",
+        "PromotionGranted",
+        "PromotionConfirmed",
+        "Demoted",
+        "CircuitBreakerTripped",
+        "HaltSet",
+        "HaltCleared",
+        "GateViolationDetected",
+        "LessonRecorded",
+        "ReconciliationRun"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "actor": {
+      "title": "Actor",
+      "type": "string"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "schema_ver": {
+      "title": "Schema Ver",
+      "type": "integer"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    }
+  },
+  "required": [
+    "event_id",
+    "ts_utc",
+    "type",
+    "actor",
+    "schema_ver",
+    "payload"
+  ],
+  "title": "Event",
+  "type": "object"
+}

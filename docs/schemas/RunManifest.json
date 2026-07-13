@@ -1,0 +1,38 @@
+{
+  "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "framework": {
+      "title": "Framework",
+      "type": "string"
+    },
+    "prompt": {
+      "title": "Prompt",
+      "type": "string"
+    },
+    "prompt_sha256": {
+      "title": "Prompt Sha256",
+      "type": "string"
+    },
+    "config_version": {
+      "title": "Config Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "run_id",
+    "model",
+    "framework",
+    "prompt",
+    "prompt_sha256",
+    "config_version"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

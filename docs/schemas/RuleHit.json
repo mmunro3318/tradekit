@@ -1,0 +1,46 @@
+{
+  "properties": {
+    "rule_id": {
+      "title": "Rule Id",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "pass",
+        "fail"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "measured": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Measured"
+    },
+    "limit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit"
+    }
+  },
+  "required": [
+    "rule_id",
+    "outcome"
+  ],
+  "title": "RuleHit",
+  "type": "object"
+}

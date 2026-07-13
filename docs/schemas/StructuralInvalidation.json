@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "structural",
+      "title": "Kind",
+      "type": "string"
+    },
+    "description": {
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "requires_attestation": {
+      "const": true,
+      "default": true,
+      "title": "Requires Attestation",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "kind",
+    "description"
+  ],
+  "title": "StructuralInvalidation",
+  "type": "object"
+}

@@ -11,35 +11,37 @@
 
 ### M0.1 Repo bootstrap
 - [x] git init on `main`, doc baseline commit, hardened `.gitignore`
-- [ ] `.gitattributes` (line-ending normalization)
-- [ ] `pyproject.toml` — uv-managed, py3.12 pinned, deps per DESIGN §3 (P0 subset: pydantic, typer, python-ulid; dev: pytest, pytest-cov, ruff, mypy)
-- [ ] src-layout skeleton: `tradekit/{contracts,ledger,cli}` + module `__init__` interface stubs
-- [ ] Ruff + mypy config (strict on contracts/ledger/policy/thesis per TD-1/§3); private-internals import lint rule (§1)
-- [ ] CI workflow: uv sync → ruff → mypy → pytest, windows-latest + ubuntu-latest matrix
+- [x] `.gitattributes` (line-ending normalization)
+- [x] `pyproject.toml` — uv-managed, py3.12 pinned, deps per DESIGN §3 (P0 subset: pydantic, typer, python-ulid; dev: pytest, pytest-cov, ruff, mypy)
+- [x] src-layout skeleton: `tradekit/{contracts,ledger,cli}` + module `__init__` interface stubs
+- [x] Ruff + mypy config (strict on contracts/ledger/policy/thesis per TD-1/§3); private-internals import lint via TID251 (probe-verified; known per-file-ignore gap documented in pyproject — revisit with import-linter)
+- [x] CI workflow: uv sync → ruff → mypy → pytest, windows-latest + ubuntu-latest matrix (first run once remote exists)
 - [ ] GitHub remote created and pushed (Mike's hands: create empty repo `tradekit`)
 
 ### M0.2 `tradekit.contracts` (shared leaf; TD-3, TD-23)
-- [ ] `AssetRef` (symbol/venue/asset_class/tick_size) + `quantize(value, tick_size)` (G2)
-- [ ] Predicate DSL: `price_touch | price_close | time_expiry` discriminated union (§5.2)
-- [ ] `ThesisContract` + `EntrySpec` + `EVBlock` + `InvalidationSpec` (measurable | structural) (§5.1)
-- [ ] Event envelope with v1-taxonomy type validation (§6.3); typed per-event payload models land with their producing subsystems (P2/P3 — see tests/ASSUMPTIONS.md item 10)
-- [ ] `ProposedAction`, `Verdict`/`VerdictToken`, `RuleHit` (§5.3)
-- [ ] `OrderRequest` / `OrderAck` / `Fill` / `Grade` / `MarketSnapshot` / `RunManifest` (§5.3)
-- [ ] `json_schemas()` export (feeds `tk schema export`)
+- [x] `AssetRef` (symbol/venue/asset_class/tick_size) + `quantize(value, tick_size)` (G2; grid-snap fix reviewer D1)
+- [x] Predicate DSL: `price_touch | price_close | time_expiry` discriminated union (§5.2)
+- [x] `ThesisContract` + `EntrySpec` + `EVBlock` + `InvalidationSpec` (measurable | structural) (§5.1)
+- [x] Event envelope with v1-taxonomy type validation (§6.3); typed per-event payload models land with their producing subsystems (P2/P3 — see tests/ASSUMPTIONS.md item 10)
+- [x] `ProposedAction`, `Verdict`/`VerdictToken`, `RuleHit` (§5.3)
+- [x] `OrderRequest` / `OrderAck` / `Fill` / `Grade` / `MarketSnapshot` / `RunManifest` (§5.3)
+- [x] `json_schemas()` export (feeds `tk schema export`)
 
 ### M0.3 `tradekit.ledger` (TD-4, TD-22)
-- [ ] DB bootstrap: WAL, `busy_timeout`, schema migration v1 (events + FTS5) (§6.2)
-- [ ] `append(event)` — canonical JSON, hash chain over all columns, bounded retry-with-jitter (TD-16)
-- [ ] `query(filter)` + `search(text)` (FTS5)
-- [ ] `verify_chain()` (§6.2)
-- [ ] Read-model projection framework + `rebuild()` (idempotent; projections for `runs` + `config_versions` in P0, rest land with their subsystems)
-- [ ] `run_id` stamping from `TK_RUN_ID` (TD-20)
+- [x] DB bootstrap: WAL, `busy_timeout`, schema migration v1 (events + FTS5) (§6.2)
+- [x] `append(event)` — canonical JSON (strict, no silent coercion), length-prefixed hash preimage over all columns, bounded retry-with-jitter (TD-16)
+- [x] `query(filter)` + `search(text)` (FTS5, phrase-quoted input)
+- [x] `verify_chain()` (§6.2; also checks stored prev_hash linkage)
+- [x] Read-model projection framework + `rebuild()` (idempotent; projections for `runs` + `config_versions` in P0, rest land with their subsystems)
+- [x] `run_id` stamping from `TK_RUN_ID` (TD-20)
 
 ### M0.4 `tradekit.cli` (thin shell; TD-15)
-- [ ] `tk` entrypoint: `--json` flag convention, stable exit codes, `TK_RUN_ID` plumbing
-- [ ] `tk schema export`
-- [ ] `tk ledger query|verify|rebuild`
-- [ ] P0 replay test: scripted sequence → chain verifies, rebuild idempotent (ring-3 harness seed, TD-18)
+- [x] `tk` entrypoint: `--json` flag convention, stable exit codes, `TK_RUN_ID` plumbing (env-based, read by ledger at append)
+- [x] `tk schema export`
+- [x] `tk ledger query|verify|rebuild`
+- [x] P0 replay test: scripted sequence → chain verifies, rebuild idempotent (ring-3 harness seed, TD-18)
+
+**P0 done-gate met 2026-07-12** (73 tests green on local Windows; CI matrix pending remote): chain verifies, rebuild idempotent, tamper on any column detected, CLI verbs live.
 
 ---
 

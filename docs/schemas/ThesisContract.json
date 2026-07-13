@@ -1,0 +1,514 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "properties": {
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "venue": {
+          "title": "Venue",
+          "type": "string"
+        },
+        "asset_class": {
+          "title": "Asset Class",
+          "type": "string"
+        },
+        "tick_size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Tick Size"
+        }
+      },
+      "required": [
+        "symbol",
+        "venue",
+        "asset_class",
+        "tick_size"
+      ],
+      "title": "AssetRef",
+      "type": "object"
+    },
+    "EVBlock": {
+      "properties": {
+        "p_win": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "P Win"
+        },
+        "reward_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Reward Usd"
+        },
+        "risk_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Risk Usd"
+        },
+        "ev_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Ev Usd"
+        }
+      },
+      "required": [
+        "p_win",
+        "reward_usd",
+        "risk_usd",
+        "ev_usd"
+      ],
+      "title": "EVBlock",
+      "type": "object"
+    },
+    "EntrySpec": {
+      "properties": {
+        "order_type": {
+          "enum": [
+            "market",
+            "limit",
+            "stop",
+            "stop_limit"
+          ],
+          "title": "Order Type",
+          "type": "string"
+        },
+        "limit_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit Price"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_type",
+        "valid_until"
+      ],
+      "title": "EntrySpec",
+      "type": "object"
+    },
+    "MeasurableInvalidation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "measurable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "predicate": {
+          "discriminator": {
+            "mapping": {
+              "price_close": "#/$defs/PriceClose",
+              "price_touch": "#/$defs/PriceTouch",
+              "time_expiry": "#/$defs/TimeExpiry"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PriceTouch"
+            },
+            {
+              "$ref": "#/$defs/PriceClose"
+            },
+            {
+              "$ref": "#/$defs/TimeExpiry"
+            }
+          ],
+          "title": "Predicate"
+        }
+      },
+      "required": [
+        "kind",
+        "predicate"
+      ],
+      "title": "MeasurableInvalidation",
+      "type": "object"
+    },
+    "PriceClose": {
+      "additionalProperties": false,
+      "properties": {
+        "cmp": {
+          "enum": [
+            "gte",
+            "lte"
+          ],
+          "title": "Cmp",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "timeframe": {
+          "default": "1h",
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        },
+        "kind": {
+          "const": "price_close",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmp",
+        "value",
+        "by",
+        "kind"
+      ],
+      "title": "PriceClose",
+      "type": "object"
+    },
+    "PriceTouch": {
+      "additionalProperties": false,
+      "properties": {
+        "cmp": {
+          "enum": [
+            "gte",
+            "lte"
+          ],
+          "title": "Cmp",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "timeframe": {
+          "default": "1h",
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        },
+        "kind": {
+          "const": "price_touch",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmp",
+        "value",
+        "by",
+        "kind"
+      ],
+      "title": "PriceTouch",
+      "type": "object"
+    },
+    "StructuralInvalidation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "structural",
+          "title": "Kind",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "requires_attestation": {
+          "const": true,
+          "default": true,
+          "title": "Requires Attestation",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "description"
+      ],
+      "title": "StructuralInvalidation",
+      "type": "object"
+    },
+    "TimeExpiry": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "time_expiry",
+          "title": "Kind",
+          "type": "string"
+        },
+        "by": {
+          "format": "date-time",
+          "title": "By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "by"
+      ],
+      "title": "TimeExpiry",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "thesis_id": {
+      "title": "Thesis Id",
+      "type": "string"
+    },
+    "schema_ver": {
+      "default": 1,
+      "title": "Schema Ver",
+      "type": "integer"
+    },
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "asset": {
+      "$ref": "#/$defs/AssetRef"
+    },
+    "direction": {
+      "enum": [
+        "long",
+        "short"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "strategy_tag": {
+      "title": "Strategy Tag",
+      "type": "string"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "entry": {
+      "$ref": "#/$defs/EntrySpec"
+    },
+    "horizon_end": {
+      "format": "date-time",
+      "title": "Horizon End",
+      "type": "string"
+    },
+    "target_price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Target Price"
+    },
+    "stop_price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Stop Price"
+    },
+    "invalidation": {
+      "discriminator": {
+        "mapping": {
+          "measurable": "#/$defs/MeasurableInvalidation",
+          "structural": "#/$defs/StructuralInvalidation"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MeasurableInvalidation"
+        },
+        {
+          "$ref": "#/$defs/StructuralInvalidation"
+        }
+      ],
+      "title": "Invalidation"
+    },
+    "size_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Size Usd"
+    },
+    "sizing_method": {
+      "const": "min_atr_kelly",
+      "title": "Sizing Method",
+      "type": "string"
+    },
+    "ev_block": {
+      "$ref": "#/$defs/EVBlock"
+    },
+    "success_criteria": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "price_close": "#/$defs/PriceClose",
+            "price_touch": "#/$defs/PriceTouch",
+            "time_expiry": "#/$defs/TimeExpiry"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/PriceTouch"
+          },
+          {
+            "$ref": "#/$defs/PriceClose"
+          },
+          {
+            "$ref": "#/$defs/TimeExpiry"
+          }
+        ]
+      },
+      "title": "Success Criteria",
+      "type": "array"
+    },
+    "failure_criteria": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "price_close": "#/$defs/PriceClose",
+            "price_touch": "#/$defs/PriceTouch",
+            "time_expiry": "#/$defs/TimeExpiry"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/PriceTouch"
+          },
+          {
+            "$ref": "#/$defs/PriceClose"
+          },
+          {
+            "$ref": "#/$defs/TimeExpiry"
+          }
+        ]
+      },
+      "title": "Failure Criteria",
+      "type": "array"
+    },
+    "market_snapshot_id": {
+      "title": "Market Snapshot Id",
+      "type": "string"
+    },
+    "review_artifact_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Review Artifact Id"
+    }
+  },
+  "required": [
+    "thesis_id",
+    "account_ref",
+    "asset",
+    "direction",
+    "strategy_tag",
+    "rationale",
+    "entry",
+    "horizon_end",
+    "target_price",
+    "stop_price",
+    "invalidation",
+    "size_usd",
+    "sizing_method",
+    "ev_block",
+    "success_criteria",
+    "failure_criteria",
+    "market_snapshot_id"
+  ],
+  "title": "ThesisContract",
+  "type": "object"
+}

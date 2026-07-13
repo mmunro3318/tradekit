@@ -1,0 +1,50 @@
+{
+  "properties": {
+    "thesis_id": {
+      "title": "Thesis Id",
+      "type": "string"
+    },
+    "result": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "VOID"
+      ],
+      "title": "Result",
+      "type": "string"
+    },
+    "evaluated": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Evaluated",
+      "type": "array"
+    },
+    "pnl_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Pnl Usd"
+    },
+    "ambiguous_bar": {
+      "default": false,
+      "title": "Ambiguous Bar",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "thesis_id",
+    "result",
+    "evaluated",
+    "pnl_usd"
+  ],
+  "title": "Grade",
+  "type": "object"
+}

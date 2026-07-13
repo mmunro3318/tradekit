@@ -1,0 +1,36 @@
+{
+  "properties": {
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "venue": {
+      "title": "Venue",
+      "type": "string"
+    },
+    "asset_class": {
+      "title": "Asset Class",
+      "type": "string"
+    },
+    "tick_size": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Tick Size"
+    }
+  },
+  "required": [
+    "symbol",
+    "venue",
+    "asset_class",
+    "tick_size"
+  ],
+  "title": "AssetRef",
+  "type": "object"
+}
