@@ -39,3 +39,19 @@ All 19 assumptions **ratified** as written, with one scope note:
 
 Changing any ratified line later requires updating tests + this file in the
 same commit (DESIGN maintenance rule applies here too).
+
+---
+
+## Round-2 additions — reviewer FIX-FIRST round, 2026-07-12 (CTO)
+
+20. Every boundary datetime in contracts (`EventFilter.since/until`,
+    `Predicate.by`, `EntrySpec.valid_until`, `ThesisContract.horizon_end`) is
+    pydantic `AwareDatetime` — naive datetimes are a ValidationError, never
+    machine-local guesswork (TD-17, reviewer D2).
+21. Event payloads must be JSON-native; `Ledger.append` raises TypeError on
+    anything `json.dumps` cannot represent without a fallback (no silent
+    str-coercion; reviewer D4). Sharpens assumption 10.
+22. `event_id`/`actor`/`run_id` reject control characters (< 0x20) at the
+    envelope; the hash preimage additionally length-prefixes every field and
+    uses a non-"" NULL marker, so field boundaries are unforgeable even for
+    adversarially-authored rows (reviewer D3).

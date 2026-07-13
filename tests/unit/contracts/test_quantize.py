@@ -6,6 +6,8 @@ tick, a `gte`/`lte` grading predicate flips and a thesis grades wrong.
 
 from decimal import Decimal
 
+import pytest
+
 from tradekit.contracts import quantize
 
 
@@ -44,6 +46,24 @@ def test_idempotent_on_already_quantized_decimal() -> None:
         f"{once!r} -> {twice!r}: re-quantizing an on-tick Decimal must be a no-op — "
         "predicates are quantized at submit and measured values at grading, same utility "
         "both sides (§13), so a second pass must never move the value"
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "tick", "expected"),
+    [
+        ("10.02", "0.05", "10.00"),  # off-grid at same exponent — exponent-only rounding misses it
+        ("10.03", "0.05", "10.05"),
+        ("10.3", "0.5", "10.5"),
+        ("12", "5", "10"),
+    ],
+)
+def test_non_power_of_ten_ticks_snap_to_grid(value: str, tick: str, expected: str) -> None:
+    got = quantize(Decimal(value), Decimal(tick))
+    assert got == Decimal(expected), (
+        f"quantize({value}, tick={tick}) -> {got!r}, expected {expected}: ticks like 0.05/0.5/5 "
+        "are real Kraken grids — matching only the tick's EXPONENT lets off-grid prices "
+        "through and falsifies the G2 guarantee exactly where ticks aren't 10^-n (reviewer D1)"
     )
 
 

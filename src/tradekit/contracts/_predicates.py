@@ -7,11 +7,10 @@ validates with missing or contradictory fields is free text in disguise.
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 from tradekit.contracts._base import StrictFrozenModel
 
@@ -20,7 +19,7 @@ class _PricePredicate(StrictFrozenModel):
     cmp: Literal["gte", "lte"]
     value: Decimal  # absolute price, resolved at submit time — never a percent (§5.2)
     timeframe: str = "1h"  # bar granularity used for evaluation; spec default (§5.2)
-    by: datetime  # deadline (usually horizon_end); grading's hard stop
+    by: AwareDatetime  # deadline (usually horizon_end); grading's hard stop (TD-17, reviewer D2)
 
 
 class PriceTouch(_PricePredicate):
@@ -34,7 +33,7 @@ class PriceClose(_PricePredicate):
 class TimeExpiry(StrictFrozenModel):
     # `by` alone (§5.2); extra="forbid" on the base rejects stray cmp/value.
     kind: Literal["time_expiry"]
-    by: datetime
+    by: AwareDatetime
 
 
 Predicate = Annotated[PriceTouch | PriceClose | TimeExpiry, Field(discriminator="kind")]

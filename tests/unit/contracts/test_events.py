@@ -47,6 +47,18 @@ def test_run_id_is_optional_on_envelope(make_event) -> None:
     assert make_event(run_id="run-x").run_id == "run-x"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("actor", "mike\x1fpayload-shift"), ("run_id", "run\x00null"), ("actor", "a\nb")],
+)
+def test_control_chars_rejected_in_identity_fields(make_event, field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        make_event(**{field: value})
+    # A control char in an identity field could smuggle hash-preimage structure
+    # (delimiter forgery) or garble audit output — die at the envelope, before
+    # the ledger ever sees it (reviewer D3, ASSUMPTIONS 22, §6.2).
+
+
 def test_json_schemas_covers_core_contracts() -> None:
     schemas = json_schemas()
     assert isinstance(schemas, dict)

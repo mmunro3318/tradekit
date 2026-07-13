@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Literal
+
+from pydantic import AwareDatetime
 
 from tradekit.contracts._base import FrozenModel
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
@@ -20,7 +21,7 @@ class AssetRef(FrozenModel):
 class EntrySpec(FrozenModel):
     order_type: Literal["market", "limit", "stop", "stop_limit"]
     limit_price: Decimal | None = None  # limit/trigger price where order_type needs one
-    valid_until: datetime
+    valid_until: AwareDatetime  # TD-17, reviewer D2
 
 
 class EVBlock(FrozenModel):
@@ -41,7 +42,7 @@ class ThesisContract(FrozenModel):
     rationale: str  # falsifiable catalyst, prose (reviewed, not graded)
 
     entry: EntrySpec
-    horizon_end: datetime  # UTC; grading hard stop
+    horizon_end: AwareDatetime  # UTC; grading hard stop (TD-17)
     target_price: Decimal  # success predicate anchor
     stop_price: Decimal  # failure predicate anchor (price-based)
     invalidation: InvalidationSpec  # structural; separate from stop (F1)

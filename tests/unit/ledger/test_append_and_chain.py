@@ -53,8 +53,14 @@ def test_verify_chain_ok_after_appends(ledger, make_event) -> None:
 @pytest.mark.parametrize(
     ("column", "new_value"),
     [
-        ("actor", "mallory"),  # NON-payload column — the G-review fix (§6.2)
+        # EVERY column, per the test's own claim (§6.2 all-columns preimage;
+        # reviewer gap 2 — two columns let a partial preimage pass silently).
+        ("actor", "mallory"),
         ("payload", '{"tampered": true}'),
+        ("ts_utc", "2030-01-01T00:00:00.000000+00:00"),
+        ("type", "HaltCleared"),
+        ("run_id", "mallory-run"),
+        ("schema_ver", "999"),
     ],
 )
 def test_tampering_any_column_breaks_chain(
@@ -74,6 +80,16 @@ def test_tampering_any_column_breaks_chain(
         f"first_bad_seq={report.first_bad_seq}, expected 2: the audit surface must "
         "localize the break to the first tampered row (verify_chain docstring)"
     )
+
+
+def test_append_rejects_non_json_native_payload(ledger, make_event) -> None:
+    from decimal import Decimal
+
+    with pytest.raises(TypeError):
+        ledger.append(make_event(payload={"price": Decimal("1.00")}))
+    # Silent str-coercion would make the queried event differ from what the
+    # producer held in memory — the source of truth must reject what it cannot
+    # represent losslessly (reviewer D4, ASSUMPTIONS 10/21).
 
 
 def test_verify_chain_on_empty_ledger(ledger) -> None:

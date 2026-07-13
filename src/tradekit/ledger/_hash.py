@@ -11,20 +11,26 @@ from typing import Any
 # collide with one in practice, and unambiguous in raw-SQL inspection.
 GENESIS_HASH = "0" * 64
 
-# ASCII unit separator. json.dumps escapes control characters (0x1f serializes
-# as ) and the
-# other fields are ULIDs / ISO timestamps / taxonomy strings, so the delimiter
-# cannot be forged from inside a field value.
-_DELIM = "\x1f"
-
-# NULL run_id enters the preimage as "" — the DB keeps NULL, only the hash
-# input uses the sentinel.
-_NULL_RUN_ID = ""
-
 
 def canonical_json(payload: dict[str, Any]) -> str:
-    """Canonical JSON (sorted keys, no whitespace, RFC-8785 style, §6.2)."""
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    """Canonical JSON (sorted keys, no whitespace, RFC-8785 style, §6.2).
+
+    No ``default=`` fallback: a non-JSON-native value (Decimal, datetime, ...)
+    raises TypeError at append instead of being silently coerced to a string
+    that differs from what the producer holds in memory (reviewer D4,
+    ASSUMPTIONS 10/21).
+    """
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _lp(field: str | None) -> str:
+    """Length-prefix a preimage field: '<len>:<value>', None -> 'N'.
+
+    Length-prefixing makes field boundaries unforgeable regardless of field
+    content — no delimiter can be smuggled inside a value to shift bytes
+    between adjacent fields — and None is distinct from "" (reviewer D3).
+    """
+    return "N" if field is None else f"{len(field)}:{field}"
 
 
 def event_hash(
@@ -38,16 +44,16 @@ def event_hash(
     payload_json: str,
 ) -> str:
     """sha256 over prev_hash ‖ all other columns, in DDL column order."""
-    preimage = _DELIM.join(
+    preimage = "|".join(
         (
-            prev_hash,
-            event_id,
-            ts_utc,
-            type_,
-            actor,
-            run_id if run_id is not None else _NULL_RUN_ID,
-            str(schema_ver),
-            payload_json,
+            _lp(prev_hash),
+            _lp(event_id),
+            _lp(ts_utc),
+            _lp(type_),
+            _lp(actor),
+            _lp(run_id),
+            _lp(str(schema_ver)),
+            _lp(payload_json),
         )
     )
     return hashlib.sha256(preimage.encode("utf-8")).hexdigest()

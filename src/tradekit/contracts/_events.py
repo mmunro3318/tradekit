@@ -8,10 +8,9 @@ CTO-ratified).
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, field_validator
 
 from tradekit.contracts._base import FrozenModel
 
@@ -60,13 +59,26 @@ class Event(FrozenModel):
     schema_ver: int
     payload: dict[str, Any]
 
+    @field_validator("event_id", "actor", "run_id")
+    @classmethod
+    def _no_control_chars(cls, v: str | None) -> str | None:
+        # Control characters in identity fields could smuggle preimage
+        # structure or garble audit output (reviewer D3, ASSUMPTIONS 22).
+        if v is not None and any(ord(c) < 0x20 for c in v):
+            raise ValueError("control characters are not allowed in ledger identity fields")
+        return v
+
 
 class EventFilter(FrozenModel):
-    """Ledger query shape (ASSUMPTIONS 12); since/until are inclusive."""
+    """Ledger query shape (ASSUMPTIONS 12); since/until are inclusive.
+
+    Aware datetimes required: a naive bound would be read as machine-local
+    time and silently shift the window (TD-17, reviewer D2, ASSUMPTIONS 20).
+    """
 
     types: list[str] | None = None
-    since: datetime | None = None
-    until: datetime | None = None
+    since: AwareDatetime | None = None
+    until: AwareDatetime | None = None
 
 
 class ChainReport(FrozenModel):

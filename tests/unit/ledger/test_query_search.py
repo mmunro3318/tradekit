@@ -77,3 +77,22 @@ def test_search_no_match_returns_empty_list(ledger, populated_ids) -> None:
         "no-match must be an empty list, not an exception — agents call search "
         "speculatively every session (§11 brief/search flow)"
     )
+
+
+@pytest.mark.parametrize("hostile", ['AND (', 'quetzalcoatl" OR "x', "NEAR(a b)", "*"])
+def test_search_treats_input_as_text_not_query_syntax(ledger, populated_ids, hostile) -> None:
+    result = ledger.search(hostile)
+    assert isinstance(result, list), (
+        f"search({hostile!r}) must treat input as a text value, never FTS5 query syntax "
+        "(ASSUMPTIONS 17) — agents pass arbitrary strings here every session"
+    )
+
+
+def test_event_filter_rejects_naive_datetimes() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EventFilter(since=datetime(2026, 1, 1, 10, 30))
+    # A naive bound would be read as machine-local time and silently shift the
+    # window — grading sweeps and series accounting ride these filters
+    # (TD-17, reviewer D2, ASSUMPTIONS 20).

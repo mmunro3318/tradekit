@@ -40,9 +40,29 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "TID", "RUF"]
 
 # Deep-module enforcement (DESIGN §1 consequence 1): underscore-internals of one
-# module may never be imported by another. Entries accrue as internals appear.
+# module may never be imported by another. TID251 bans each internal module
+# globally; per-file-ignores below re-allow a module's OWN internals. Known gap
+# (accepted, reviewer D5): inside an ignored dir, imports of ANOTHER module's
+# internals also escape TID251 — revisit with import-linter when module count
+# grows. Entries accrue as internals appear.
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "parents"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"tradekit.contracts._base".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._events".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._execution".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._predicates".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._quantize".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._schemas".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.contracts._thesis".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.ledger._db".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
+"tradekit.ledger._hash".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
+"tradekit.ledger._projections".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
+
+[tool.ruff.lint.per-file-ignores]
+"src/tradekit/contracts/**" = ["TID251"]
+"src/tradekit/ledger/**" = ["TID251"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -54,15 +74,12 @@ no_implicit_optional = true
 
 # Strict where money and state live (DESIGN §3): contracts, ledger, policy, thesis.
 [[tool.mypy.overrides]]
-module = "tradekit.contracts.*"
+module = ["tradekit.contracts.*", "tradekit.ledger.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
 disallow_any_generics = true
-warn_return_any = true
-
-[[tool.mypy.overrides]]
-module = "tradekit.ledger.*"
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-disallow_any_generics = true
+check_untyped_defs = true
+strict_equality = true
 warn_return_any = true

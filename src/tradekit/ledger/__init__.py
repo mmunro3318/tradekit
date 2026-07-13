@@ -110,18 +110,17 @@ class Ledger:
     def search(self, text: str, k: int = 20) -> list[Event]:
         """FTS5 keyword search over event payloads (TD-20)."""
         # Quoted as an FTS5 phrase: user text is a query *value*, never query
-        # syntax. No match — or syntactically hostile input — returns [].
+        # syntax — hostile input can't raise, so a genuine fault (corrupted or
+        # missing FTS table) is allowed to propagate instead of masquerading
+        # as "no results" (reviewer D6).
         phrase = '"' + text.replace('"', '""') + '"'
-        try:
-            rows = self._con.execute(
-                f"SELECT {_db.EVENT_COLUMNS} FROM events"
-                " WHERE event_id IN"
-                "   (SELECT event_id FROM events_fts WHERE events_fts MATCH ?)"
-                " ORDER BY seq LIMIT ?",
-                (phrase, k),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return []
+        rows = self._con.execute(
+            f"SELECT {_db.EVENT_COLUMNS} FROM events"
+            " WHERE event_id IN"
+            "   (SELECT event_id FROM events_fts WHERE events_fts MATCH ?)"
+            " ORDER BY seq LIMIT ?",
+            (phrase, k),
+        ).fetchall()
         return [_db.row_to_event(row) for row in rows]
 
     def verify_chain(self) -> ChainReport:
