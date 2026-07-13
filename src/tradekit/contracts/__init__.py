@@ -12,6 +12,7 @@ Public surface (implemented in P0 M0.2):
     EventFilter, ChainReport                 # ledger query/audit contracts
     ProposedAction, Verdict, VerdictToken, RuleHit
     OrderRequest, OrderAck, Fill, Grade, MarketSnapshot, RunManifest
+    TradeRecord, StrategyMetrics             # trade-log evaluation (§9.4)
     json_schemas() -> dict[str, dict]   # JSON Schema export for non-Python agents
 
 Note on payload models: per the CTO ratification of ASSUMPTIONS 10, the P0
@@ -32,6 +33,7 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
 from tradekit.contracts._quantize import quantize
 from tradekit.contracts._schemas import json_schemas
@@ -54,7 +56,9 @@ __all__ = [
     "ProposedAction",
     "RuleHit",
     "RunManifest",
+    "StrategyMetrics",
     "ThesisContract",
+    "TradeRecord",
     "Verdict",
     "VerdictToken",
     "json_schemas",

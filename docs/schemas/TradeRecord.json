@@ -1,0 +1,97 @@
+{
+  "description": "One completed round-trip trade, as agents submit them for evaluation.",
+  "properties": {
+    "entry_ts": {
+      "format": "date-time",
+      "title": "Entry Ts",
+      "type": "string"
+    },
+    "exit_ts": {
+      "format": "date-time",
+      "title": "Exit Ts",
+      "type": "string"
+    },
+    "entry_price": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Entry Price"
+    },
+    "exit_price": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Exit Price"
+    },
+    "side": {
+      "enum": [
+        "long",
+        "short"
+      ],
+      "title": "Side",
+      "type": "string"
+    },
+    "size_usd": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Size Usd"
+    },
+    "fees_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "default": "0",
+      "title": "Fees Usd"
+    },
+    "strategy_tag": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Strategy Tag"
+    }
+  },
+  "required": [
+    "entry_ts",
+    "exit_ts",
+    "entry_price",
+    "exit_price",
+    "side",
+    "size_usd"
+  ],
+  "title": "TradeRecord",
+  "type": "object"
+}

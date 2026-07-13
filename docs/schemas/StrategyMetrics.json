@@ -1,0 +1,215 @@
+{
+  "description": "compute_strategy_metrics output. None means 'not computable from the\ninputs given' \u2014 a warning names why; nothing is ever silently invented.",
+  "properties": {
+    "n_trades": {
+      "title": "N Trades",
+      "type": "integer"
+    },
+    "win_rate": {
+      "title": "Win Rate",
+      "type": "number"
+    },
+    "avg_win_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Avg Win Usd"
+    },
+    "avg_loss_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Avg Loss Usd"
+    },
+    "expectancy_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Expectancy Usd"
+    },
+    "profit_factor": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Profit Factor"
+    },
+    "sharpe_annual": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Sharpe Annual"
+    },
+    "sortino_annual": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Sortino Annual"
+    },
+    "calmar": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Calmar"
+    },
+    "max_drawdown_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Max Drawdown Usd"
+    },
+    "max_drawdown_pct": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Max Drawdown Pct"
+    },
+    "total_pnl_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Total Pnl Usd"
+    },
+    "total_fees_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Total Fees Usd"
+    },
+    "avg_hold_hours": {
+      "title": "Avg Hold Hours",
+      "type": "number"
+    },
+    "dsr": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Dsr"
+    },
+    "penalized_sharpe_annual": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Penalized Sharpe Annual"
+    },
+    "n_trials": {
+      "title": "N Trials",
+      "type": "integer"
+    },
+    "edge_verdict": {
+      "enum": [
+        "positive",
+        "marginal",
+        "negative",
+        "insufficient"
+      ],
+      "title": "Edge Verdict",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "n_trades",
+    "win_rate",
+    "avg_win_usd",
+    "avg_loss_usd",
+    "expectancy_usd",
+    "profit_factor",
+    "sharpe_annual",
+    "sortino_annual",
+    "calmar",
+    "max_drawdown_usd",
+    "max_drawdown_pct",
+    "total_pnl_usd",
+    "total_fees_usd",
+    "avg_hold_hours",
+    "dsr",
+    "penalized_sharpe_annual",
+    "n_trials",
+    "edge_verdict"
+  ],
+  "title": "StrategyMetrics",
+  "type": "object"
+}

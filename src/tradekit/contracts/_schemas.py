@@ -18,6 +18,7 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import (
     MeasurableInvalidation,
     PriceClose,
@@ -48,9 +49,11 @@ _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
     ProposedAction,
     RuleHit,
     RunManifest,
+    StrategyMetrics,
     StructuralInvalidation,
     ThesisContract,
     TimeExpiry,
+    TradeRecord,
     Verdict,
     VerdictToken,
 )

@@ -56,6 +56,7 @@ ban-relative-imports = "parents"
 "tradekit.contracts._quantize".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
 "tradekit.contracts._schemas".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
 "tradekit.contracts._thesis".msg = "contracts internals are private (DESIGN §1); import from tradekit.contracts"
+"tradekit.mae._metrics".msg = "mae internals are private (DESIGN §1); import from tradekit.mae"
 "tradekit.ledger._db".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
 "tradekit.ledger._hash".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
 "tradekit.ledger._projections".msg = "ledger internals are private (DESIGN §1); import from tradekit.ledger"
@@ -63,6 +64,7 @@ ban-relative-imports = "parents"
 [tool.ruff.lint.per-file-ignores]
 "src/tradekit/contracts/**" = ["TID251"]
 "src/tradekit/ledger/**" = ["TID251"]
+"src/tradekit/mae/**" = ["TID251"]
 
 [tool.mypy]
 python_version = "3.12"
