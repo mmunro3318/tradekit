@@ -46,8 +46,8 @@ Providers (each a module in `_data/`): `kraken.py`, `alpaca_data.py`, `coingecko
 
 ## Stories (in order, one commit-pair each)
 
-1. **contracts: Bar/BarSeries/Friction** + schema export. Tests: aware-datetime enforcement, Decimal fields, ascending-bars validator rejects disorder.
-2. **`tradekit.costs` v1.** Table-driven (constants in the module, WHY comments): equities fee $0 + 1bp half-spread on large-caps; Alpaca crypto 25bp taker fee + 10bp half-spread; slippage 0 under $100 notional (SME §5: liquidity infinite at our size). Tests: golden numbers — $10 Alpaca crypto round-trip ≈ $0.07 total ((25bp+10bp)×2×$10); equities $25 buy = fee 0, half-spread $0.0025-scale. Pin exact Decimals in tests.
+1. ~~**contracts: Bar/BarSeries/Friction**~~ **DONE by Fable 2026-07-12** (`contracts/_marketdata.py` + tests via grading/costs suites). Note the actual Bar model also validates OHLC coherence, and `TIMEFRAME_SECONDS` lives in contracts — use it, don't redefine durations.
+2. ~~**`tradekit.costs` v1**~~ **DONE by Fable 2026-07-12** (`src/tradekit/costs.py` + `tests/unit/test_costs.py`). Tables provisional per ASSUMPTIONS 26.
 3. **Cache** (`data/cache.db`, SEPARATE file from ledger.db — TD-22): key (source, symbol, timeframe, ts_open); closed bars immutable → never invalidated; only the live (most recent, still-open) bar refetches. Tests: second fetch hits cache (respx call-count 1); live bar refetches; cache file deletable without breaking anything.
 4. **Kraken provider** (public REST `/0/public/OHLC`, no key). Normalize: Kraken returns ≤720 bars, ts in seconds, strings for prices → Decimal via `str`, NEVER via float. Tests: respx fixtures with real captured response shapes; symbol mapping BTC/USD→XBTUSD; pagination beyond 720 raises `ProviderRangeError` for now (paginating Kraken OHLC is a known trap — its `since` semantics differ per endpoint; do NOT improvise, flag to Mike if needed).
 5. **Rate limiter + retry**: per-provider token bucket (Kraken ~1 req/s polite; CoinGecko 100/min; Alpaca 200/min) + tenacity backoff on 5xx/timeouts. 4xx NEVER retries (it won't get better). Tests: fake clock, no sleeps.

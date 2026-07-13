@@ -13,6 +13,8 @@ Implement the four remaining MAE verb stubs in `src/tradekit/mae/__init__.py`. S
 ## Stories
 
 ### 1. `size_position` (do first — pure math + one ATR fetch)
+
+> **UPDATE 2026-07-12: the math is DONE** — `mae/_sizing.py` (Kelly with negative-clamp, ATR position) with fraction-exact golden vectors in `tests/unit/mae/test_sizing.py`. Remaining work: fetch ATR(14)+price via the P1A data layer, assemble the canonical output dict, re-point tests through the public verb, add `_sizing` to the TID251 ban list (ASSUMPTIONS 23). The golden vectors below are already encoded in the tests.
 - `kelly_full = W − (1−W)/R`; quarter-Kelly = 0.25×; clamp negative Kelly to 0 (negative edge = no position, warning `negative_kelly`).
 - `atr_size_usd = (equity × risk_pct) / (atr × multiplier) × price` per canonical formula; `recommended = min(atr_size, kelly_size)`.
 - Golden vectors (hand-derived — do NOT trust the canonical doc's example output, its arithmetic is wrong):

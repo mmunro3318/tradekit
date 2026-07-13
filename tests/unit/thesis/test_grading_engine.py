@@ -162,10 +162,9 @@ def test_time_expiry_fires_when_deadline_reached_not_before() -> None:
 
 
 def test_mixed_timeframes_rejected() -> None:
+    hourly = {"kind": "price_touch", "cmp": "gte", "value": "105", "timeframe": "1h", "by": HORIZON}
     with pytest.raises(ValueError, match="timeframe"):
-        run([bar(0, "100", "101", "99", "100")],
-            [{"kind": "price_touch", "cmp": "gte", "value": "105", "timeframe": "1h", "by": HORIZON}],
-            [])
+        run([bar(0, "100", "101", "99", "100")], [hourly], [])
 
 
 def test_unsorted_bars_rejected() -> None:

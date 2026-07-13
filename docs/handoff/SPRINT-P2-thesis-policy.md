@@ -18,6 +18,8 @@
 draft → submitted → reviewed → approved → active → PASS/FAIL (terminal) | rejected | VOID, exactly per DESIGN §10.1. Illegal transitions raise `IllegalTransition` naming current state. `submit` does four things atomically: MarketSnapshotTaken event, `SizingComputed` event (calls `mae.size_position`, records output — R-012 compares against THIS later), predicate resolution (quantize every price via `contracts.quantize` with the asset's tick), EV validation (numeric, complete — F5). Post-submit the contract is immutable (supersede = new thesis linked by event).
 
 ### 2. Grading engine (Opus)
+
+> **UPDATE 2026-07-12: the arithmetic core is DONE** — `thesis/_grading.evaluate_criteria` implements every rule below (same-bar priorities, lookahead guard, predicate deadlines, time_expiry), pinned by 12 tests in `tests/unit/thesis/test_grading_engine.py`. Remaining work in this story: `grade(thesis_id)` fetches bars (P1A) + thesis state (story 1), calls the core, computes pnl from Fills, emits ThesisGraded — then re-point the core's tests through the public verb and ban `_grading` in TID251 (ASSUMPTIONS 23). Do NOT reimplement the rules; if one seems wrong, that's a Mike conversation.
 `grade(thesis_id)` evaluates predicates against bars from activation→now at each predicate's timeframe, in bar order:
 - `price_touch gte v`: bar.high ≥ v (long-target semantics); `lte v`: bar.low ≤ v.
 - `price_close`: compare bar.close only.

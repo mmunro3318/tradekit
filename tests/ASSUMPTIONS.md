@@ -55,3 +55,22 @@ same commit (DESIGN maintenance rule applies here too).
     envelope; the hash preimage additionally length-prefixes every field and
     uses a non-"" NULL marker, so field boundaries are unforgeable even for
     adversarially-authored rows (reviewer D3).
+
+---
+
+## Round-3 additions — Fable final session, 2026-07-12
+
+23. **Internal-test exception (temporary):** tests for `thesis._grading` and
+    `mae._sizing` import those internals directly because their public verbs
+    (`thesis.grade`, `mae.size_position`) lack wiring until P2/P1C. When the
+    verb lands: re-point the tests through the public surface AND add the
+    internal to the TID251 ban list, same commit. These are the only two
+    permitted internal imports in tests/.
+24. One thesis = ONE predicate timeframe (MVP): `evaluate_criteria` raises on
+    mixed timeframes. Lifting this is a DESIGN change, not a bug fix.
+25. Same-bar grading priority is **failure > invalidation > success**, and
+    horizon expiry = FAIL. Every ambiguity resolves AGAINST the agent —
+    anti-gaming, pinned by tests in tests/unit/thesis/.
+26. `tradekit.costs` tables are PROVISIONAL (seeded from SME §5) until P4
+    live fills measure reality; update the table constants + these tests
+    together, never scatter cost numbers elsewhere (TD-8).

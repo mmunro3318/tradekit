@@ -2,6 +2,14 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-12 (Fable bonus hour) — grading engine core, sizing math, cost model
+
+- **Grading engine** (`thesis/_grading.evaluate_criteria`, P2 story-2 core, pre-built): pure arithmetic per DESIGN §10.2 with every ambiguity resolved against the agent — same-bar priority failure > invalidation > success (VOID can't erase a loss), stop-first on stop+target bars, lookahead guard inside the engine, per-predicate `by` deadlines never resurrect, time_expiry fires at deadline (an inverted-logic bug I caught pre-commit and pinned with a test). 12 tests. MVP constraint: one timeframe per thesis (ASSUMPTIONS 24).
+- **Sizing math** (`mae/_sizing.py`, P1C story-1 core): Kelly with negative-edge clamp + ATR position identity (stopped out = lose exactly risk_usd). My own first golden vector was wrong by 3e-5 — re-derived by exact fractions (f* = .574 − 71/262); implementation was right. Canonical doc's 0.2102 example remains wrong.
+- **Cost model** (`tradekit.costs`, P1A story-2): TD-8 shared friction tables (Alpaca equity/crypto, Kraken crypto), slippage-free under $100, unknown venues die loudly. Provisional until P4 live fills (ASSUMPTIONS 26).
+- **Contracts**: Bar (OHLC-coherence validator), BarSeries (strict ascending), Friction, CriteriaOutcome, TIMEFRAME_SECONDS — P1A story-1 done. 28 schemas exported.
+- ASSUMPTIONS 23–26 added (incl. the temporary internal-test exception — re-point + TID251-ban when verbs land). Sprint docs P1A/P1C/P2 updated with DONE markers. **Final: 108 tests green, ruff + mypy clean.**
+
 ## 2026-07-12 (final Fable session) — metrics core + full handoff package
 
 - **Fairy-godmother handoff**: Fable 5 access ending; project handed to Opus/Sonnet/Haiku.

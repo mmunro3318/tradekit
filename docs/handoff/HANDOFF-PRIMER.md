@@ -31,8 +31,14 @@ One sprint doc = one or more sessions. Do NOT parallelize two sprint docs that t
 - P0 complete: `contracts` (all models + predicate DSL + quantize + schema export), `ledger` (hash chain, FTS, projections, rebuild), `tk` CLI (schema/ledger verbs), CI config, replay done-gate.
 - M1.3 pulled forward: `mae.compute_strategy_metrics` FULLY implemented (expectancy/PF/Sharpe/Sortino/Calmar/MDD/DSR/penalized-Sharpe, G1 regime). **The math conventions are documented in `src/tradekit/mae/_metrics.py`'s docstring — they are binding; the golden vectors in `tests/unit/mae/` were hand-derived from them.**
 
+**Pre-built by Fable in the final hour (pure logic, fully tested — WIRE, don't rewrite):**
+- `thesis._grading.evaluate_criteria` — the ENTIRE grading arithmetic (SPRINT-P2 story 2 core): conservative same-bar rules, lookahead guard, per-predicate deadlines, time_expiry. 12 tests pin every rule. P2 wires it into `grade()` + re-points tests (ASSUMPTIONS 23).
+- `mae._sizing` — Kelly (negative-clamp) + ATR position math with fraction-exact golden vectors (P1C story 1 is now: wire the ATR/price fetch).
+- `tradekit.costs` — the TD-8 shared friction model, tables seeded from SME §5 (P1A story 2 done).
+- `contracts`: `Bar`/`BarSeries` (+OHLC sanity & ascending validators), `Friction`, `CriteriaOutcome`, `TIMEFRAME_SECONDS` (P1A story 1 done).
+
 **Scaffolded (pinned signature, `NotImplementedError` body):**
-- `mae`: `scan_markets`, `get_regime`, `get_derivatives_context`, `size_position`, `get_correlation_matrix` — each stub names its sprint doc.
+- `mae`: `scan_markets`, `get_regime`, `get_derivatives_context`, `size_position`, `get_correlation_matrix`; `thesis`: all six verbs — each stub names its sprint doc.
 
 **Not started:** everything else — see sprint docs below.
 
