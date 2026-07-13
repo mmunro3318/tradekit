@@ -2,6 +2,27 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-13 (Fable) — candlerl experiment: vision pattern classifier + PPO trader
+
+- **New isolated sub-project `experiments/candlerl/`** (own uv env, py3.11, torch 2.11
+  cu128 — RTX 5060 Ti/Blackwell works). Two decoupled models per the hierarchical
+  master/slave plan Mike supplied: rendered 32-bar chart (128px) → CNN (11-pattern
+  multi-label + 3-class 5-bar direction heads) → precomputed per-bar vision vectors +
+  25 numeric indicators → SB3 PPO {flat,long,short}, reward = pos·logret − 10 bps·turnover.
+- **Key finding (the expensive lesson)**: TA-Lib-style pattern labels are NOT learnable
+  from images unless computed on **pixel-grid-quantized** prices — sub-pixel thresholds
+  put identical-looking charts in different classes (macro-F1 0.34). After quantization +
+  per-class val-calibrated thresholds: test macro-F1 0.46 — doji 0.87/engulfing 0.76-0.78
+  strong, hammer family ~0.45 (relational judgments vs trailing averages), 3-candle stars
+  weak (val support 9-47). Improvement paths in HANDOFF B8.
+- **RL round 1 churned** (0.76 flips/bar → −38% cost drag, −21.6% mean vs +94.5% B&H on
+  2024→2026 test). Round 2: training cost 25 bps (eval stays 10), ent_coef 0.001, γ 0.99.
+- Rule-based detectors verified against TA-Lib C source (research agent); Stooq keyless
+  daily data (22 tickers, 136.6k bars); leak-safe chrono splits with HORIZON embargo;
+  43 tests green (TDD), review-agent pass fixed truncated-vs-terminated PPO bias + 6 more.
+- CLI: fetch/build/train-vision/bridge/train-rl/evaluate/demo/predict (--ticker/--csv/
+  --image). Paper suggestions only. README + HANDOFF.md (backlog B1–B9) for successors.
+
 ## 2026-07-12 (Fable bonus hour) — grading engine core, sizing math, cost model
 
 - **Grading engine** (`thesis/_grading.evaluate_criteria`, P2 story-2 core, pre-built): pure arithmetic per DESIGN §10.2 with every ambiguity resolved against the agent — same-bar priority failure > invalidation > success (VOID can't erase a loss), stop-first on stop+target bars, lookahead guard inside the engine, per-predicate `by` deadlines never resurrect, time_expiry fires at deadline (an inverted-logic bug I caught pre-commit and pinned with a test). 12 tests. MVP constraint: one timeframe per thesis (ASSUMPTIONS 24).

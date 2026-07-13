@@ -1,0 +1,59 @@
+[project]
+name = "candlerl"
+version = "0.1.0"
+description = "Experiment: vision candlestick-pattern classifier + PPO trading policy (paper only)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "pillow>=10",
+    "torch>=2.7",
+    "torchvision>=0.22",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+    "yfinance>=0.2.40",
+    "typer>=0.12",
+    "tabulate>=0.10.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+candlerl = "candlerl.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/candlerl"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+# E741: o/h/l/c is the domain idiom for OHLC arrays
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E731"]
