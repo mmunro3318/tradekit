@@ -1,0 +1,64 @@
+{
+  "description": "Pure grading-engine result (DESIGN \u00a710.2) \u2014 becomes a Grade in P2.\n\nPENDING = horizon not reached and nothing triggered (grade sweep keeps\nthe thesis active). `evaluated` stays a loose JSON list per the\nASSUMPTIONS-10 pattern until the audit UI needs more.",
+  "properties": {
+    "result": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "VOID",
+        "PENDING"
+      ],
+      "title": "Result",
+      "type": "string"
+    },
+    "triggered": {
+      "anyOf": [
+        {
+          "enum": [
+            "success",
+            "failure",
+            "invalidation",
+            "horizon_expiry"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Triggered"
+    },
+    "trigger_ts": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trigger Ts"
+    },
+    "ambiguous_bar": {
+      "default": false,
+      "title": "Ambiguous Bar",
+      "type": "boolean"
+    },
+    "evaluated": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Evaluated",
+      "type": "array"
+    }
+  },
+  "required": [
+    "result"
+  ],
+  "title": "CriteriaOutcome",
+  "type": "object"
+}

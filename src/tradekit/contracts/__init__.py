@@ -13,6 +13,9 @@ Public surface (implemented in P0 M0.2):
     ProposedAction, Verdict, VerdictToken, RuleHit
     OrderRequest, OrderAck, Fill, Grade, MarketSnapshot, RunManifest
     TradeRecord, StrategyMetrics             # trade-log evaluation (§9.4)
+    Bar, BarSeries, TIMEFRAME_SECONDS        # market data (§9.1)
+    Friction                                 # cost decomposition (TD-8)
+    CriteriaOutcome                          # grading-engine result (§10.2)
     json_schemas() -> dict[str, dict]   # JSON Schema export for non-Python agents
 
 Note on payload models: per the CTO ratification of ASSUMPTIONS 10, the P0
@@ -33,6 +36,13 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._marketdata import (
+    TIMEFRAME_SECONDS,
+    Bar,
+    BarSeries,
+    CriteriaOutcome,
+    Friction,
+)
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
 from tradekit.contracts._quantize import quantize
@@ -40,13 +50,18 @@ from tradekit.contracts._schemas import json_schemas
 from tradekit.contracts._thesis import AssetRef, EntrySpec, EVBlock, ThesisContract
 
 __all__ = [
+    "TIMEFRAME_SECONDS",
     "AssetRef",
+    "Bar",
+    "BarSeries",
     "ChainReport",
+    "CriteriaOutcome",
     "EVBlock",
     "EntrySpec",
     "Event",
     "EventFilter",
     "Fill",
+    "Friction",
     "Grade",
     "InvalidationSpec",
     "MarketSnapshot",

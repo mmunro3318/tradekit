@@ -18,6 +18,7 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._marketdata import Bar, BarSeries, CriteriaOutcome, Friction
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import (
     MeasurableInvalidation,
@@ -33,7 +34,11 @@ from tradekit.contracts._thesis import AssetRef, EntrySpec, EVBlock, ThesisContr
 # agent needs to author one.
 _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
     AssetRef,
+    Bar,
+    BarSeries,
     ChainReport,
+    CriteriaOutcome,
+    Friction,
     EntrySpec,
     EVBlock,
     Event,

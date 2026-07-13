@@ -1,0 +1,61 @@
+{
+  "description": "One-side trading cost decomposition (TD-8).",
+  "properties": {
+    "fee_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Fee Usd"
+    },
+    "half_spread_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Half Spread Usd"
+    },
+    "slippage_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Slippage Usd"
+    },
+    "total_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Total Usd"
+    }
+  },
+  "required": [
+    "fee_usd",
+    "half_spread_usd",
+    "slippage_usd",
+    "total_usd"
+  ],
+  "title": "Friction",
+  "type": "object"
+}
