@@ -66,11 +66,11 @@
 - [ ] structure: S/R levels, QFL bases
 - [ ] golden-vector fixtures cross-checked once against reference impls, then frozen
 
-### M1.3 Metrics & overfit gates (§9.4)
-- [ ] Sharpe/Sortino/Calmar/PF/expectancy (net-of-costs) from trade log
-- [ ] Deflated Sharpe (closed-form, in-house) + n≥30 gate + provisional penalized-Sharpe regime (G1)
-- [ ] Walk-forward evaluator (2× IS/OOS flag)
-- [ ] `compute_strategy_metrics` verb wiring incl. warnings taxonomy
+### M1.3 Metrics & overfit gates (§9.4) — pulled forward, done by Fable 2026-07-12
+- [x] Sharpe/Sortino/Calmar/PF/expectancy (net-of-costs) from trade log — conventions pinned in `mae/_metrics.py` docstring, hand-derived golden vectors
+- [x] Deflated Sharpe (closed-form, in-house) + n≥30 gate + provisional penalized-Sharpe regime (G1)
+- [ ] Walk-forward evaluator (2× IS/OOS flag) — lands with the backtest engine (P1C follow-on; bar-based, not trade-log-based)
+- [x] `compute_strategy_metrics` verb wiring incl. warnings taxonomy
 
 ### M1.4 Sizing & regime
 - [ ] `size_position`: min(ATR-normalized, quarter-Kelly); purity signature (TD-11); `SizingComputed` event

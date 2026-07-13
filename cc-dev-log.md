@@ -2,6 +2,14 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-12 (final Fable session) — metrics core + full handoff package
+
+- **Fairy-godmother handoff**: Fable 5 access ending; project handed to Opus/Sonnet/Haiku.
+- Pulled M1.3 forward and completed it personally (the math most likely to be silently botched): `mae.compute_strategy_metrics` — pnl/win-rate/expectancy/PF, trade-level Sharpe+Sortino with pinned annualization convention (√(trades/yr) over log span), drawdown vs peak equity, Calmar, in-house Bailey–López de Prado PSR/DSR with n_trials selection penalty, G1 regime (DSR n≥30 / penalized 10–29 / descriptive <10), deterministic edge_verdict table. Conventions BINDING via `_metrics.py` docstring + 10 hand-derived golden-vector tests. `TradeRecord`/`StrategyMetrics` contracts added (24 schemas). **83 tests green, ruff+mypy clean.**
+- Wrote **README.md** (setup, usage, current capability) and the **handoff package** in `docs/handoff/`: HANDOFF-PRIMER (ten working rules, model role assignments, state of world, known traps, session bootstrap checklist) + sprint docs P1A (data layer + costs), P1B (indicators + golden vectors), P1C (regime/scanner/sizing — incl. hand-derived Kelly vectors; canonical doc's example arithmetic is WRONG, ours is right), P2 (thesis/policy — Opus-required stories flagged), P3–P4 (paper→live).
+- Remaining Mike's-hands: GitHub remote (URGENT — no offsite backup), CoinGecko key, Kraken read-only key (P3), Alpaca live keys (P4 only).
+- Successor sessions start at HANDOFF-PRIMER §6 bootstrap checklist. Active sprint: **P1A**.
+
 ## 2026-07-12 (evening) — git init; ROADMAP; P0 COMPLETE (done-gate met)
 
 - `git init` on main; baseline commit of doc set. `.gitignore` hardened (.env, data/, *.db never committable); `.gitattributes` normalizes line endings.
