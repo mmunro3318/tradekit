@@ -2,6 +2,29 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-14/15 (Fable) — P1A data layer COMPLETE (stories 3-8 + review round)
+
+- Keys landed: CoinGecko demo + Kraken read-only in `.env` (gitignored; CoinGecko
+  verified live). Kraken key was pasted in chat — consider rotating before P3 live use.
+- **Four-stage workflow, two rounds**: tdd-p1a (Sonnet) → dev-p1a (Sonnet) for stories
+  3-5 (cache/Kraken/ratelimit, commits 7643c29→70121e9); tdd-p1a-2 → dev-p1a-2 (both
+  Sonnet) for 6-8 (Alpaca/CoinGecko/conformance + live smoke, d051db2→e85e083).
+- **Review round (Opus, verdict FIX-FIRST — third round running with HIGH catches):**
+  H1 Alpaca crypto endpoint is multi-symbol (`bars` keyed by symbol) — flat-list mock
+  hid a live-API crash; H2 ratelimit module was an orphan (nothing called it); M3 4xx
+  mistyped as ProviderUnavailable; M4 malformed-200 bodies raised untyped; M5 cache was
+  write-only whenever a live bar was in range (i.e. always, in production). Fix agent
+  (Sonnet, fix-p1a; survived a usage-cap interruption mid-task and was resumed from
+  transcript) landed red 48c5bdd → green 3fae4c9. ASSUMPTIONS 27-38 added across rounds.
+- Ratelimit now wired: providers take injected clock/sleeper, token bucket + retry on
+  every call; 4xx never retries; timeouts retry. Cache serves cached closed prefix and
+  fetches only the uncovered suffix. Smoke re-run live post-wiring: 720x 1h BTC bars OK.
+- **Final: 178 tests green, ruff clean, mypy clean.** M1.1 boxes checked except
+  yfinance macro provider (deferred per sprint doc; revisit at P1C).
+- Next: SPRINT-P1B indicators + golden vectors. Mike's hands: Alpaca PAPER keys
+  (app.alpaca.markets) into .env as ALPACA_API_KEY_ID/ALPACA_API_SECRET when convenient
+  (needed for Alpaca live smoke; tests don't need them).
+
 ## 2026-07-13 (Fable) — candlerl experiment: vision pattern classifier + PPO trader
 
 - **New isolated sub-project `experiments/candlerl/`** (own uv env, py3.11, torch 2.11

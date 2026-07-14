@@ -50,13 +50,13 @@
 **Done-gate:** golden-vector suite green; `tk scan` returns real setups from live free APIs on Mike's machine; `tk regime`/`tk size`/`tk metrics`/`tk correl` operational.
 
 ### M1.1 Data layer (§9.1)
-- [ ] `MarketDataPort` + canonical OHLCV frame + provider rate-limiter/retry scaffold
-- [ ] `cache.db` cache-aside (closed bars immutable; live bar refetch) (TD-22)
-- [ ] Kraken provider (OHLCV/depth/trades, public)
-- [ ] Alpaca data provider (equity + crypto bars; paper keys exist)
-- [ ] CoinGecko provider (global + markets; needs Mike's demo key)
-- [ ] yfinance macro provider (daily batch, stale-flag degradation)
-- [ ] `tradekit.costs` v1: venue fee tables + spread/slippage model seeded from SME §5 (TD-8)
+- [x] `MarketDataPort` + canonical OHLCV frame + provider rate-limiter/retry scaffold — done 2026-07-14, WIRED into providers per review H2
+- [x] `cache.db` cache-aside (closed bars immutable; live bar refetch; cached-closed-prefix serve per review M5) (TD-22)
+- [x] Kraken provider (OHLCV public; depth/trades deferred to first consumer) — live-smoked 2026-07-14
+- [x] Alpaca data provider (equity + crypto bars; crypto response symbol-keyed per review H1; needs paper keys in .env for live use)
+- [x] CoinGecko provider (global + markets; Mike's demo key in .env, verified live)
+- [ ] yfinance macro provider (daily batch, stale-flag degradation) — DEFERRED per sprint doc "defer if fragile"; revisit at P1C regime work
+- [x] `tradekit.costs` v1: venue fee tables + spread/slippage model seeded from SME §5 (TD-8)
 
 ### M1.2 Indicators + golden vectors (§3, TD-18)
 - [ ] volatility: ATR (Wilder), Bollinger, Keltner
