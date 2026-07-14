@@ -18,7 +18,14 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
-from tradekit.contracts._marketdata import Bar, BarSeries, CriteriaOutcome, Friction
+from tradekit.contracts._marketdata import (
+    Bar,
+    BarSeries,
+    CoinMarket,
+    CriteriaOutcome,
+    Friction,
+    GlobalCrypto,
+)
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import (
     MeasurableInvalidation,
@@ -37,6 +44,7 @@ _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
     Bar,
     BarSeries,
     ChainReport,
+    CoinMarket,
     CriteriaOutcome,
     Friction,
     EntrySpec,
@@ -44,6 +52,7 @@ _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
     Event,
     EventFilter,
     Fill,
+    GlobalCrypto,
     Grade,
     MarketSnapshot,
     MeasurableInvalidation,

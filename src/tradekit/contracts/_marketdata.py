@@ -71,6 +71,27 @@ class Friction(FrozenModel):
     total_usd: Decimal
 
 
+class GlobalCrypto(FrozenModel):
+    """CoinGecko `/api/v3/global` snapshot (SPRINT-P1A story 7).
+
+    Supplementary macro context, NOT a MarketDataPort result — CoinGecko is
+    not a bar provider (ASSUMPTIONS 34)."""
+
+    btc_dominance_pct: Decimal
+    total_market_cap_usd: Decimal
+    ts: AwareDatetime
+
+
+class CoinMarket(FrozenModel):
+    """One ranked row of CoinGecko `/api/v3/coins/markets` (SPRINT-P1A story 7)."""
+
+    coingecko_id: str
+    symbol: str
+    price_usd: Decimal
+    market_cap_usd: Decimal
+    rank: int
+
+
 class CriteriaOutcome(FrozenModel):
     """Pure grading-engine result (DESIGN §10.2) — becomes a Grade in P2.
 

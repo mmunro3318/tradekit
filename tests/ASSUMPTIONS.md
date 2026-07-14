@@ -125,3 +125,47 @@ same commit (DESIGN maintenance rule applies here too).
     asserting the respx route's `call_count == 0`. Pagination itself remains
     out of scope (sprint doc trap: Kraken's `since` semantics differ per
     endpoint).
+
+---
+
+## Round-5 additions — P1A stories 6-8 TDD session (red only), 2026-07-14
+
+32. **Alpaca numeric-price Decimal(str()) caveat** (story 6,
+    `src/tradekit/mae/_data/alpaca_data.py`): unlike Kraken, Alpaca's bar
+    endpoints return prices as JSON NUMBERS, not strings. The provider must
+    still convert every price via `Decimal(str(x))`, never `Decimal(x)` on
+    the raw float — `Decimal(189.43)` captures the float's binary
+    representation noise (`Decimal('189.4299999999999997157829...')`) while
+    `Decimal(str(189.43)) == Decimal("189.43")` is exact. Pinned by
+    `test_alpaca.py::test_prices_converted_via_decimal_str_from_json_numbers`,
+    which asserts the two forms are unequal as a sanity check on the trap
+    itself, then asserts the provider's actual output matches the
+    string-routed value.
+33. **Pagination-out-of-scope policy extends to Alpaca** (story 6): a
+    non-null `next_page_token` in an Alpaca bars response must raise
+    `ProviderRangeError`, the same policy as Kraken's >720-bar guard
+    (ASSUMPTIONS 31) — provider-side pagination is out of scope for this
+    sprint for every provider, not just Kraken. Alpaca's timeframe map
+    (`"1m"→"1Min"`, `"1h"→"1Hour"`, `"1d"→"1Day"`) lives in
+    `ALPACA_TIMEFRAME_MAP`, the one place that spelling is defined, mirroring
+    Kraken's `_SYMBOL_TO_KRAKEN_PAIR` pattern.
+34. **CoinGecko is not a MarketDataPort** (story 7,
+    `src/tradekit/mae/_data/coingecko.py`): `CoinGeckoProvider` exposes
+    `get_global() -> GlobalCrypto` and `get_markets() -> list[CoinMarket]`,
+    not `get_bars`, and is therefore excluded from the story-8 conformance
+    suite (`tests/contract/test_marketdata_port.py`). Its failure policy is
+    also narrower than the sprint doc's general "macro degrades to
+    `stale=True`" language: THAT policy belongs to the deferred
+    macro/yfinance provider. CoinGecko itself has no `stale` concept (neither
+    `GlobalCrypto` nor `CoinMarket` carries a `stale` field) and RAISES
+    `ProviderUnavailable` on HTTP failure, same as every primary OHLCV
+    provider. Changing this later (e.g. giving CoinGecko a stale/degrade path)
+    is a DESIGN change, not a bug fix.
+35. **Provider env-var key names are pinned, not configurable**: Alpaca
+    reads `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET` (sent as the
+    `APCA-API-KEY-ID` / `APCA-API-SECRET-KEY` headers); CoinGecko reads
+    `COINGECKO_API_KEY` (sent as the `x_cg_demo_api_key` query param, matching
+    CoinGecko's own demo-tier parameter name). Either provider missing its
+    required env var(s) raises a typed `ProviderRequestError` naming the
+    missing var, with NO network call made — mirrors the Kraken range-guard
+    "fail before the request" pattern (ASSUMPTIONS 31).

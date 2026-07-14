@@ -16,6 +16,7 @@ Public surface (implemented in P0 M0.2):
     Bar, BarSeries, TIMEFRAME_SECONDS        # market data (§9.1)
     Friction                                 # cost decomposition (TD-8)
     CriteriaOutcome                          # grading-engine result (§10.2)
+    GlobalCrypto, CoinMarket                 # CoinGecko macro data (§9.1, not a port)
     json_schemas() -> dict[str, dict]   # JSON Schema export for non-Python agents
 
 Note on payload models: per the CTO ratification of ASSUMPTIONS 10, the P0
@@ -40,8 +41,10 @@ from tradekit.contracts._marketdata import (
     TIMEFRAME_SECONDS,
     Bar,
     BarSeries,
+    CoinMarket,
     CriteriaOutcome,
     Friction,
+    GlobalCrypto,
 )
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
@@ -55,6 +58,7 @@ __all__ = [
     "Bar",
     "BarSeries",
     "ChainReport",
+    "CoinMarket",
     "CriteriaOutcome",
     "EVBlock",
     "EntrySpec",
@@ -62,6 +66,7 @@ __all__ = [
     "EventFilter",
     "Fill",
     "Friction",
+    "GlobalCrypto",
     "Grade",
     "InvalidationSpec",
     "MarketSnapshot",
