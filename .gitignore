@@ -1,6 +1,9 @@
 # local cold storage (pre-existing convention)
 archived/
 
+# mike's notes
+scratch.md
+
 # secrets — never committed, no exceptions
 .env
 .env.*

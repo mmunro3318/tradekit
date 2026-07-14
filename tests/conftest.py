@@ -203,3 +203,27 @@ def read_model_snapshot(ledger_path):
             con.close()
 
     return _snap
+
+
+# ---------------------------------------------------------------------------
+# Zero-network enforcement (P1A DoD, ASSUMPTIONS 27) — guards the WHOLE suite,
+# not just tests/unit/mae_data/. respx's own pytest fixture (`respx_mock`,
+# registered by the respx package's pytest plugin) defaults to
+# assert_all_mocked=True: any httpx request that doesn't match a registered
+# route raises AllMockedAssertionError instead of touching the network.
+# Making it autouse means every test in the suite is guarded even if it never
+# asks for `respx_mock` itself; a provider test that DOES need HTTP responses
+# requests `respx_mock` by name in its own signature and gets this SAME
+# cached instance (pytest fixture caching is per-test-node, not per
+# requester), so it can register routes on it as normal.
+#
+# assert_all_called is left at respx's default (True) at the router level,
+# but that only asserts routes that WERE registered get hit at least once —
+# it does not require every registered route to be called every time within
+# a single test unless the test itself registers routes it never intends to
+# use. See test_cache.py's "closed bars never refetch" test: it registers
+# one route, calls the cache twice, and asserts the route's call count is 1 —
+# that is a stronger, explicit pin, not something this fixture provides.
+@pytest.fixture(autouse=True)
+def _no_unmocked_network(respx_mock):
+    yield respx_mock

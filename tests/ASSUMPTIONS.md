@@ -74,3 +74,54 @@ same commit (DESIGN maintenance rule applies here too).
 26. `tradekit.costs` tables are PROVISIONAL (seeded from SME §5) until P4
     live fills measure reality; update the table constants + these tests
     together, never scatter cost numbers elsewhere (TD-8).
+
+---
+
+## Round-4 additions — P1A stories 3-5 TDD session, 2026-07-14
+
+27. **Zero-network enforcement** (P1A DoD) lives as an autouse fixture in
+    `tests/conftest.py` (`_no_unmocked_network`) that depends on respx's own
+    `respx_mock` pytest fixture. respx's default (`assert_all_mocked=True`)
+    means any httpx call not matched by a registered route raises
+    `AllMockedAssertionError` instead of touching the network. Being autouse,
+    it guards the WHOLE suite, not just `tests/unit/mae_data/`; individual
+    tests that need HTTP responses request `respx_mock` by name (same cached
+    fixture instance) and register routes on it as normal. Pinned by
+    `tests/unit/mae_data/test_network_guard.py`.
+28. **BarCache design** (story 3, `src/tradekit/mae/_data/cache.py`):
+    `get_or_fetch` wraps a provider CALLABLE
+    (`provider_fn(asset, timeframe, start, end) -> BarSeries`), not a
+    `MarketDataPort` object — cache.py has zero import dependency on any
+    specific provider module. A bar is CLOSED (cacheable, immutable) when its
+    close time (`ts_open + TIMEFRAME_SECONDS[timeframe]`) is `<=` the query's
+    own `end`; `end` doubles as the caller's freshness cutoff, so no separate
+    injected clock object is needed for the cache layer (TD-17 "no real
+    clock" satisfied by making time an explicit argument). The most recent
+    bar whose close time is `>` `end` is the still-open "live" bar: never
+    persisted, always refetched.
+29. **TEST-PATH EXCEPTION (extends assumption 23):** `tests/unit/mae_data/*`
+    import `tradekit.mae._data` internals (`cache`, `kraken`, `ratelimit`,
+    `errors`, `port`) directly. No public verb wraps `_data` yet — P1A
+    stories 3-5 (cache, Kraken provider, rate limiter) precede the port
+    conformance suite (story 8) and any public wiring (P1C+), which are out
+    of scope for this handoff. When a public verb lands: re-point these
+    tests through it AND add the internals to the TID251 ban list in
+    `pyproject.toml`, same commit — same discipline as assumption 23.
+30. **Rate limiter clock/sleep injection** (story 5,
+    `src/tradekit/mae/_data/ratelimit.py`): `TokenBucket` is non-blocking
+    (`try_acquire() -> bool`) and takes an injected
+    `clock: Callable[[], float]` (monotonic seconds) rather than sleeping
+    itself — callers/tests advance the fake clock explicitly instead of
+    waiting. `call_with_retry` takes an injected
+    `sleeper: Callable[[float], None]` instead of calling `time.sleep`
+    directly. `tests/unit/mae_data/test_ratelimit.py::
+    test_retry_never_calls_real_time_sleep` monkeypatches `time.sleep` to
+    raise if ever invoked, pinning this as structural, not incidental.
+31. **Kraken range-guard ordering** (story 4,
+    `src/tradekit/mae/_data/kraken.py`): the `ProviderRangeError` check (>720
+    bars implied by the requested range) must happen BEFORE any HTTP call —
+    pinned by `test_kraken.py::
+    test_range_over_720_bars_raises_provider_range_error_no_http_call`
+    asserting the respx route's `call_count == 0`. Pagination itself remains
+    out of scope (sprint doc trap: Kraken's `since` semantics differ per
+    endpoint).
