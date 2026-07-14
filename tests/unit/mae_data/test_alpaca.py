@@ -76,7 +76,7 @@ def _alpaca_bars_fixture(bars: list[dict], next_page_token: str | None = None) -
 def _alpaca_crypto_bars_fixture(
     symbol: str, bars: list[dict], next_page_token: str | None = None
 ) -> dict:
-    """Realistic Alpaca CRYPTO bars success body (H1, ASSUMPTIONS pending):
+    """Realistic Alpaca CRYPTO bars success body (H1, ASSUMPTIONS 36):
     `/v1beta3/crypto/us/bars` is a MULTI-symbol endpoint, so `bars` is an
     object KEYED BY SYMBOL (`{"BTC/USD": [...]}`), not a flat list — the
     equity endpoint above is single-symbol and stays flat. This mismatch
@@ -325,5 +325,5 @@ def test_malformed_200_body_raises_provider_unavailable(provider, respx_mock) ->
         )
     )
 
-    with pytest.raises(ProviderUnavailable, match="(?i)alpaca"):
+    with pytest.raises(ProviderUnavailable, match=r"(?i)alpaca"):
         provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=1))

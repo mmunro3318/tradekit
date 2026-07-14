@@ -5,10 +5,21 @@ this module (sprint doc trap): callers never see venue pair spellings
 (XBTUSD request param vs XXBTZUSD response key), never see Kraken's raw
 string prices, never see epoch seconds. `get_bars` returns a canonical
 BarSeries with source="kraken".
+
+Rate limiting + retry (H2 review fix): the provider owns a per-instance
+TokenBucket (`bucket_for("kraken")`) and routes every HTTP call through
+`acquire_blocking` + `call_with_retry`. `clock` and `sleeper` are injectable
+keyword-only constructor args (defaults: `time.monotonic` / `time.sleep`) so
+tests never touch the real clock or sleep (ASSUMPTIONS 30). Error taxonomy
+(M3/M4): 4xx -> ProviderRequestError (never retried), 5xx/timeout after
+retries -> ProviderUnavailable, structurally malformed 200 body ->
+ProviderUnavailable naming Kraken.
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -16,6 +27,7 @@ import httpx
 
 from tradekit.contracts import TIMEFRAME_SECONDS, AssetRef, Bar, BarSeries
 from tradekit.mae._data.errors import ProviderRangeError, ProviderRequestError, ProviderUnavailable
+from tradekit.mae._data.ratelimit import acquire_blocking, bucket_for, call_with_retry
 
 KRAKEN_OHLC_URL = "https://api.kraken.com/0/public/OHLC"
 
@@ -42,10 +54,18 @@ _REQUEST_TIMEOUT_S = 10.0
 
 class KrakenProvider:
     """Public, keyless Kraken OHLC provider. One instance per process is
-    fine; no auth state to hold."""
+    fine; no auth state to hold (the rate-limit bucket is per instance)."""
 
-    def __init__(self, *, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._client = client
+        self._sleeper = sleeper
+        self._bucket = bucket_for("kraken", clock=clock)
 
     def _get(self, params: dict[str, str | int]) -> httpx.Response:
         if self._client is not None:
@@ -58,9 +78,10 @@ class KrakenProvider:
         """Fetch and normalize OHLC bars for [start, end).
 
         Raises ProviderRangeError if the implied bar count exceeds
-        MAX_BARS_PER_CALL, ProviderRequestError on HTTP 4xx, ProviderUnavailable
-        on HTTP 5xx/timeout/malformed response (never returns stale=True —
-        primary OHLCV never degrades silently, sprint doc trap).
+        MAX_BARS_PER_CALL, ProviderRequestError on HTTP 4xx (never retried),
+        ProviderUnavailable on HTTP 5xx/timeout after retries or a malformed
+        response body (never returns stale=True — primary OHLCV never
+        degrades silently, sprint doc trap).
         """
         tf_seconds = TIMEFRAME_SECONDS[timeframe]
 
@@ -85,34 +106,41 @@ class KrakenProvider:
             "since": int(start.timestamp()),
         }
 
+        acquire_blocking(self._bucket, self._sleeper)
         try:
-            response = self._get(params)
+            response = call_with_retry(
+                lambda: self._get(params), max_attempts=3, sleeper=self._sleeper
+            )
         except httpx.HTTPError as exc:
+            # Non-timeout transport failures (timeouts are retried inside
+            # call_with_retry and surface as ProviderUnavailable there).
             raise ProviderUnavailable(f"Kraken OHLC request failed: {exc}") from exc
 
-        if response.status_code != 200:
+        # M4: any structural failure while parsing a 200 body is a typed,
+        # provider-named ProviderUnavailable — never a bare KeyError etc.
+        # (Kraken's own error-list response is checked inside the same block;
+        # ProviderError subclasses are not caught by the except below.)
+        try:
+            body = response.json()
+            errors = body.get("error") or []
+            if errors:
+                raise ProviderUnavailable(f"Kraken OHLC error response: {errors}")
+            rows = body["result"].get(result_key, [])
+            bars = [
+                Bar(
+                    ts_open=datetime.fromtimestamp(row[0], tz=UTC),
+                    open=Decimal(row[1]),
+                    high=Decimal(row[2]),
+                    low=Decimal(row[3]),
+                    close=Decimal(row[4]),
+                    volume=Decimal(row[6]),
+                )
+                for row in rows
+            ]
+            bars = [b for b in bars if start <= b.ts_open < end]
+            bars.sort(key=lambda b: b.ts_open)
+            return BarSeries(asset=asset, timeframe=timeframe, bars=bars, source="kraken")
+        except (ValueError, KeyError, TypeError, IndexError, ArithmeticError) as exc:
             raise ProviderUnavailable(
-                f"Kraken OHLC returned HTTP {response.status_code}: {response.text}"
-            )
-
-        body = response.json()
-        errors = body.get("error") or []
-        if errors:
-            raise ProviderUnavailable(f"Kraken OHLC error response: {errors}")
-
-        rows = body.get("result", {}).get(result_key, [])
-        bars = [
-            Bar(
-                ts_open=datetime.fromtimestamp(row[0], tz=UTC),
-                open=Decimal(row[1]),
-                high=Decimal(row[2]),
-                low=Decimal(row[3]),
-                close=Decimal(row[4]),
-                volume=Decimal(row[6]),
-            )
-            for row in rows
-        ]
-        bars = [b for b in bars if start <= b.ts_open < end]
-        bars.sort(key=lambda b: b.ts_open)
-
-        return BarSeries(asset=asset, timeframe=timeframe, bars=bars, source="kraken")
+                f"Kraken OHLC returned a malformed response body: {exc!r}"
+            ) from exc

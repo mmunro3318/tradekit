@@ -86,16 +86,9 @@ class BarCache:
         finally:
             con.close()
 
-    def _read_cached(
-        self,
-        source: str,
-        symbol: str,
-        timeframe: str,
-        expected_opens: list[datetime],
-    ) -> list[Bar] | None:
-        """Return the bars for `expected_opens` if EVERY one is cached,
-        else None (a partial hit is treated as a miss — the caller then
-        refetches the whole range from the provider)."""
+    def _read_cached_map(self, source: str, symbol: str, timeframe: str) -> dict[str, Bar]:
+        """All cached bars for (source, symbol, timeframe), keyed by their
+        stored ts_open text."""
 
         def _query(con: sqlite3.Connection) -> dict[str, Bar]:
             rows = con.execute(
@@ -117,11 +110,7 @@ class BarCache:
 
         by_ts = self._with_connection(_query)
         assert isinstance(by_ts, dict)  # narrows for mypy; _query always returns a dict
-
-        keys = [_to_stored_ts(ts) for ts in expected_opens]
-        if not all(k in by_ts for k in keys):
-            return None
-        return [by_ts[k] for k in keys]
+        return by_ts
 
     def _upsert_closed(
         self,
@@ -172,7 +161,15 @@ class BarCache:
         """Return bars for [start, end), serving closed bars from the cache
         and always refetching the still-open live bar (and any bars missing
         from the cache) via ``provider_fn``. Prices/timestamps pass through
-        losslessly (Decimal via str, aware-UTC datetimes)."""
+        losslessly (Decimal via str, aware-UTC datetimes).
+
+        Mixed closed+live ranges (M5 review fix): when ``end`` sits inside a
+        live bar, the cached closed PREFIX is served from cache.db and
+        ``provider_fn`` is called ONLY for the uncovered suffix — from the
+        first uncached expected ts_open, or from the live bar's own open if
+        every closed bar is already cached. Fully-closed ranges keep the
+        original all-or-nothing read (a partial hit refetches the whole
+        range)."""
         tf_seconds = TIMEFRAME_SECONDS[timeframe]
         total_seconds = (end - start).total_seconds()
         full_periods = int(total_seconds // tf_seconds)
@@ -182,9 +179,33 @@ class BarCache:
         expected_opens = [start + timedelta(seconds=i * tf_seconds) for i in range(full_periods)]
 
         if not has_live_bar and expected_opens:
-            cached_bars = self._read_cached(source, asset.symbol, timeframe, expected_opens)
-            if cached_bars is not None:
+            by_ts = self._read_cached_map(source, asset.symbol, timeframe)
+            keys = [_to_stored_ts(ts) for ts in expected_opens]
+            if all(k in by_ts for k in keys):
+                cached_bars = [by_ts[k] for k in keys]
                 return BarSeries(asset=asset, timeframe=timeframe, bars=cached_bars, source=source)
+            # Partial hit on a fully-closed range: refetch the whole range.
+            series = provider_fn(asset, timeframe, start, end)
+            self._upsert_closed(source, asset.symbol, timeframe, tf_seconds, end, series.bars)
+            return series
+
+        if has_live_bar and expected_opens:
+            by_ts = self._read_cached_map(source, asset.symbol, timeframe)
+            # Contiguous cached closed prefix; the fetch starts at the first
+            # gap, or at the live bar's open if the whole prefix is cached.
+            prefix: list[Bar] = []
+            fetch_start = start + timedelta(seconds=full_periods * tf_seconds)  # live bar's open
+            for ts in expected_opens:
+                bar = by_ts.get(_to_stored_ts(ts))
+                if bar is None:
+                    fetch_start = ts
+                    break
+                prefix.append(bar)
+
+            fetched = provider_fn(asset, timeframe, fetch_start, end)
+            self._upsert_closed(source, asset.symbol, timeframe, tf_seconds, end, fetched.bars)
+            merged = prefix + [b for b in fetched.bars if b.ts_open >= fetch_start]
+            return BarSeries(asset=asset, timeframe=timeframe, bars=merged, source=source)
 
         series = provider_fn(asset, timeframe, start, end)
         self._upsert_closed(source, asset.symbol, timeframe, tf_seconds, end, series.bars)

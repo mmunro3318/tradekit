@@ -169,3 +169,42 @@ same commit (DESIGN maintenance rule applies here too).
     required env var(s) raises a typed `ProviderRequestError` naming the
     missing var, with NO network call made — mirrors the Kraken range-guard
     "fail before the request" pattern (ASSUMPTIONS 31).
+
+---
+
+## Round-6 additions — P1A review-round-2 fixes (Opus review, FIX-FIRST), 2026-07-14
+
+36. **Alpaca crypto `bars` is keyed BY SYMBOL** (H1, confirmed against
+    Alpaca's OpenAPI spec — MultiBarsResponse): the multi-symbol
+    `/v1beta3/crypto/us/bars` endpoint returns
+    `{"bars": {"BTC/USD": [...]}, "next_page_token": ...}`, NOT a flat list;
+    only the single-symbol equity endpoint (`/v2/stocks/{symbol}/bars`) is
+    flat. The provider reads `body["bars"][asset.symbol]`; a MISSING symbol
+    key means zero bars in the window (empty series), not an error. Pinned by
+    `test_alpaca.py::test_crypto_route_uses_symbols_query_param_btcusd` and
+    `::test_crypto_response_missing_requested_symbol_key_yields_empty_series`
+    plus the conformance suite's `alpaca-crypto` case. (The original round-5
+    fixtures used the flat shape for both endpoints — a CTO-authorized
+    fixture correction, review round 2.)
+37. **Rate limiting/retry is WIRED into every provider** (H2/M3/M4/L6):
+    each provider constructor takes keyword-only
+    `clock: Callable[[], float] = time.monotonic` and
+    `sleeper: Callable[[float], None] = time.sleep`, owns a per-instance
+    `bucket_for(name, clock=clock)`, and routes every HTTP call through
+    `acquire_blocking(bucket, sleeper)` (wait computed via
+    `TokenBucket.seconds_until_token()`, never spun) then
+    `call_with_retry(fn, max_attempts=3, sleeper=sleeper)`. Taxonomy: HTTP
+    4xx -> `ProviderRequestError` after exactly ONE call (never retried);
+    5xx and `httpx.TimeoutException` (caught INSIDE `call_with_retry`) retry
+    with backoff, exhausted -> `ProviderUnavailable`; a structurally
+    malformed 200 body -> `ProviderUnavailable` naming the provider. Unit
+    tests constructing providers against persistent-5xx mocks MUST inject a
+    no-op sleeper or retries real-sleep the suite.
+38. **BarCache mixed closed+live ranges serve the cached closed prefix**
+    (M5, refines assumption 28): when `end` sits inside a live bar, the
+    cached closed prefix is served from cache.db and `provider_fn` is called
+    ONLY for the uncovered suffix — from the first uncached expected
+    ts_open, or from the live bar's own open if every closed bar is cached;
+    results merge ascending and newly-closed bars upsert. Fully-closed
+    ranges keep the all-or-nothing read. Pinned by `test_cache.py::
+    test_mixed_closed_plus_live_range_serves_cached_prefix_fetches_only_live_suffix`.

@@ -243,7 +243,7 @@ def test_malformed_200_body_raises_provider_unavailable(provider, respx_mock) ->
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(hours=1)
 
-    with pytest.raises(ProviderUnavailable, match="(?i)kraken"):
+    with pytest.raises(ProviderUnavailable, match=r"(?i)kraken"):
         provider.get_bars(BTC_USD, "1h", start, end)
 
 

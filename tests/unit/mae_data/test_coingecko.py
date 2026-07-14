@@ -244,5 +244,5 @@ def test_malformed_200_body_raises_provider_unavailable(provider, respx_mock) ->
         return_value=httpx.Response(200, json={"unexpected": True})
     )
 
-    with pytest.raises(ProviderUnavailable, match="(?i)coingecko"):
+    with pytest.raises(ProviderUnavailable, match=r"(?i)coingecko"):
         provider.get_global()
