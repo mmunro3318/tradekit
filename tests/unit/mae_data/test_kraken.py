@@ -21,12 +21,33 @@ import httpx
 import pytest
 
 from tradekit.contracts import AssetRef
-from tradekit.mae._data.errors import ProviderRangeError, ProviderUnavailable
+from tradekit.mae._data.errors import ProviderRangeError, ProviderRequestError, ProviderUnavailable
 from tradekit.mae._data.kraken import KRAKEN_OHLC_URL, KrakenProvider
 
 BTC_USD = AssetRef(
     symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
 )
+
+
+def _no_op_sleeper(_seconds: float) -> None:
+    """No real sleep in unit tests (ASSUMPTIONS 30) — retries/backoff must
+    never block the suite; provider construction below injects this instead
+    of the real time.sleep default."""
+
+
+class FakeClock:
+    """Monotonic fake clock: advances only when the test tells it to (mirrors
+    test_ratelimit.py's own FakeClock — kept local here since this module
+    tests provider-level bucket WIRING, not TokenBucket itself)."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._t = start
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, seconds: float) -> None:
+        self._t += seconds
 
 
 def _kraken_ohlc_fixture(rows: list[list]) -> dict:
@@ -46,7 +67,10 @@ def _row(ts_sec: int, o: str, h: str, low: str, c: str, vwap: str, vol: str, cou
 
 @pytest.fixture
 def provider() -> KrakenProvider:
-    return KrakenProvider()
+    # sleeper=no-op (ASSUMPTIONS 30 / H2): with retry now wired into every
+    # call, a persistent 5xx mock triggers real backoff sleeps unless the
+    # provider is built with a non-blocking sleeper.
+    return KrakenProvider(sleeper=_no_op_sleeper)
 
 
 def test_symbol_mapping_btcusd_to_xbtusd_request_and_xxbtzusd_response(
@@ -160,3 +184,98 @@ def test_http_failure_raises_provider_unavailable_never_stale(provider, respx_mo
 
     with pytest.raises(ProviderUnavailable):
         provider.get_bars(BTC_USD, "1h", start, end)
+
+
+# ---------------------------------------------------------------------------
+# H2/M3/M4 — ratelimit + retry wiring, 4xx typing, malformed-body handling
+# ---------------------------------------------------------------------------
+
+
+def test_retries_5xx_then_succeeds_exactly_three_calls_no_real_sleep(
+    provider, respx_mock
+) -> None:
+    """H2: every provider call now goes through call_with_retry. Two 500s
+    then a 200 must succeed with exactly 3 HTTP calls, no real sleep (the
+    `provider` fixture already injects a no-op sleeper)."""
+    t0 = int(datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp())
+    rows = [_row(t0, "1", "1", "1", "1", "1", "1", 1)]
+    route = respx_mock.get(KRAKEN_OHLC_URL).mock(
+        side_effect=[
+            httpx.Response(500, text="upstream error"),
+            httpx.Response(500, text="upstream error"),
+            httpx.Response(200, json=_kraken_ohlc_fixture(rows)),
+        ]
+    )
+    start = datetime.fromtimestamp(t0, tz=UTC)
+    end = start + timedelta(hours=1)
+
+    series = provider.get_bars(BTC_USD, "1h", start, end)
+
+    assert len(series.bars) == 1
+    assert route.call_count == 3, (
+        f"expected exactly 3 HTTP calls (2 failures + 1 success), got {route.call_count}"
+    )
+
+
+def test_http_4xx_raises_provider_request_error_one_call(provider, respx_mock) -> None:
+    """M3: a 4xx must never be retried — it is rejected as ProviderRequestError
+    after exactly one HTTP call."""
+    route = respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(404, text="not found")
+    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = start + timedelta(hours=1)
+
+    with pytest.raises(ProviderRequestError):
+        provider.get_bars(BTC_USD, "1h", start, end)
+    assert route.call_count == 1, (
+        f"a 4xx must not be retried — expected exactly 1 HTTP call, got {route.call_count}"
+    )
+
+
+def test_malformed_200_body_raises_provider_unavailable(provider, respx_mock) -> None:
+    """M4: a structurally garbage 200 body (missing the "result" key
+    entirely — not the same as a legitimate empty pair result) must raise
+    ProviderUnavailable naming Kraken, never an untyped KeyError."""
+    respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json={"unexpected": True})
+    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = start + timedelta(hours=1)
+
+    with pytest.raises(ProviderUnavailable, match="(?i)kraken"):
+        provider.get_bars(BTC_USD, "1h", start, end)
+
+
+def test_bucket_wiring_second_call_waits_for_token(respx_mock) -> None:
+    """H2 bucket-wiring pin: Kraken's bucket is capacity=1, rate=1/s. Two
+    sequential get_bars calls with a fake clock that only advances via the
+    injected sleeper must show the SECOND call waiting (sleeper invoked with
+    a positive wait) — the first call spends the initial burst token for
+    free."""
+    clock = FakeClock(start=0.0)
+    waits: list[float] = []
+
+    def _advancing_sleeper(seconds: float) -> None:
+        waits.append(seconds)
+        clock.advance(seconds)
+
+    provider = KrakenProvider(clock=clock, sleeper=_advancing_sleeper)
+
+    t0 = int(datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp())
+    rows = [_row(t0, "1", "1", "1", "1", "1", "1", 1)]
+    respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json=_kraken_ohlc_fixture(rows))
+    )
+    start = datetime.fromtimestamp(t0, tz=UTC)
+    end = start + timedelta(hours=1)
+
+    provider.get_bars(BTC_USD, "1h", start, end)
+    assert waits == [], "the first call must spend the free burst token, no waiting"
+
+    provider.get_bars(BTC_USD, "1h", start, end)
+    assert waits, (
+        "the second call must wait for a token (capacity 1, rate 1/s, no time elapsed "
+        "between calls) — sleeper was never invoked"
+    )
+    assert all(w > 0 for w in waits), f"every wait must be positive, got {waits}"

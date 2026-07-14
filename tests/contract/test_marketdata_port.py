@@ -56,6 +56,12 @@ from tradekit.mae._data.kraken import KRAKEN_OHLC_URL, KrakenProvider
 from tradekit.mae._data.port import MarketDataPort
 
 
+def _no_op_sleeper(_seconds: float) -> None:
+    """No real sleep in tests (ASSUMPTIONS 30) — with retry wired into every
+    provider (H2), the 5xx conformance case would otherwise back off with
+    real time.sleep."""
+
+
 @dataclass(frozen=True)
 class Case:
     """One MarketDataPort-conformant provider's request window + respx
@@ -93,7 +99,7 @@ def _kraken_case(monkeypatch: pytest.MonkeyPatch) -> Case:
     body = {"error": [], "result": {"XXBTZUSD": rows, "last": rows[-1][0]}}
     return Case(
         id="kraken",
-        provider=KrakenProvider(),
+        provider=KrakenProvider(sleeper=_no_op_sleeper),
         asset=asset,
         timeframe="1h",
         start=t0,
@@ -122,7 +128,7 @@ def _alpaca_equity_case(monkeypatch: pytest.MonkeyPatch) -> Case:
     body = {"bars": rows, "next_page_token": None}
     return Case(
         id="alpaca-equity",
-        provider=AlpacaDataProvider(),
+        provider=AlpacaDataProvider(sleeper=_no_op_sleeper),
         asset=asset,
         timeframe="1h",
         start=t0,
@@ -144,10 +150,12 @@ def _alpaca_crypto_case(monkeypatch: pytest.MonkeyPatch) -> Case:
         _alpaca_bar(t0, 68123.4, 68300.0, 68050.0, 68210.5, 12.5),
         _alpaca_bar(t0 + timedelta(hours=1), 68210.5, 68400.0, 68150.0, 68300.0, 9.1),
     ]
-    body = {"bars": rows, "next_page_token": None}
+    # H1: the multi-symbol crypto endpoint keys `bars` BY SYMBOL — never a
+    # flat list (that shape belongs to the single-symbol equity endpoint).
+    body = {"bars": {"BTC/USD": rows}, "next_page_token": None}
     return Case(
         id="alpaca-crypto",
-        provider=AlpacaDataProvider(),
+        provider=AlpacaDataProvider(sleeper=_no_op_sleeper),
         asset=asset,
         timeframe="1h",
         start=t0,
@@ -217,6 +225,10 @@ def test_source_is_the_providers_literal_name(case: Case, respx_mock) -> None:
     series = case.provider.get_bars(case.asset, case.timeframe, case.start, case.end)
     assert series.source == case.expected_source, (
         f"[{case.id}] BarSeries.source must be the literal {case.expected_source!r}"
+    )
+    assert series.stale is False, (
+        f"[{case.id}] a healthy primary-OHLCV response must never be marked stale — "
+        "that flag is reserved for macro/supplementary providers (L7)"
     )
 
 

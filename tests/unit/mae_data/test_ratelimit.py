@@ -114,6 +114,28 @@ def test_bucket_for_unknown_provider_dies_loudly() -> None:
         bucket_for("robinhood", clock=FakeClock())
 
 
+def test_seconds_until_token_computes_wait_never_spins() -> None:
+    """H2: providers wait `seconds_until_token()` via their injected sleeper
+    instead of spinning on try_acquire — the wait must be computed from the
+    bucket's own rate and deficit."""
+    clock = FakeClock(start=0.0)
+    bucket = TokenBucket(rate_per_sec=1.0, capacity=1.0, clock=clock)
+
+    assert bucket.seconds_until_token() == 0.0, "a full bucket needs no wait"
+    assert bucket.try_acquire() is True
+
+    assert bucket.seconds_until_token() == pytest.approx(1.0), (
+        "empty bucket at 1 token/sec: exactly 1s until the next token"
+    )
+    clock.advance(0.25)
+    assert bucket.seconds_until_token() == pytest.approx(0.75), (
+        "0.25s of refill must shrink the computed wait to 0.75s"
+    )
+    clock.advance(0.75)
+    assert bucket.seconds_until_token() == 0.0, "fully refilled — no wait"
+    assert bucket.try_acquire() is True
+
+
 # ---------------------------------------------------------------------------
 # call_with_retry
 # ---------------------------------------------------------------------------
@@ -151,6 +173,42 @@ def test_exhausted_5xx_retries_raise_provider_unavailable() -> None:
 
     with pytest.raises(ProviderUnavailable):
         call_with_retry(fn, max_attempts=3, sleeper=sleeper)
+
+    assert state["n"] == 3, "must attempt exactly max_attempts times before giving up"
+
+
+def test_timeout_is_retried_then_succeeds_exactly_three_calls() -> None:
+    """L6: httpx.TimeoutException must be caught INSIDE call_with_retry and
+    retried with backoff, same as a 5xx — a transient timeout is exactly the
+    failure mode retry exists for."""
+    sleeper, sleeps = _counting_sleeper()
+    state = {"n": 0}
+
+    def _fn() -> httpx.Response:
+        state["n"] += 1
+        if state["n"] < 3:
+            raise httpx.ReadTimeout("simulated read timeout")
+        return httpx.Response(200, json={"ok": True})
+
+    result = call_with_retry(_fn, max_attempts=3, sleeper=sleeper)
+
+    assert result.status_code == 200
+    assert state["n"] == 3, f"expected exactly 3 calls (2 timeouts + 1 success), got {state['n']}"
+    assert len(sleeps) == 2, "must back off between the two timed-out attempts"
+
+
+def test_exhausted_timeouts_raise_provider_unavailable() -> None:
+    """L6: timeouts on every attempt -> ProviderUnavailable, never a bare
+    httpx.TimeoutException leaking to the caller."""
+    sleeper, _sleeps = _counting_sleeper()
+    state = {"n": 0}
+
+    def _fn() -> httpx.Response:
+        state["n"] += 1
+        raise httpx.ConnectTimeout("simulated connect timeout")
+
+    with pytest.raises(ProviderUnavailable):
+        call_with_retry(_fn, max_attempts=3, sleeper=sleeper)
 
     assert state["n"] == 3, "must attempt exactly max_attempts times before giving up"
 

@@ -211,3 +211,64 @@ def test_aware_utc_datetimes_in_and_out(cache, respx_mock) -> None:
     bar = from_cache.bars[0]
     assert bar.ts_open.tzinfo is not None, "ts_open must be tz-aware coming out of the cache"
     assert bar.ts_open == t0, "ts_open value must be preserved exactly across the round trip"
+
+
+def test_mixed_closed_plus_live_range_serves_cached_prefix_fetches_only_live_suffix(
+    cache, respx_mock
+) -> None:
+    """M5 (review round 2): a range with 3 closed bars plus a live tail must,
+    on the second call, serve the 3 cached closed bars from cache.db and call
+    the provider EXACTLY ONCE for ONLY the uncovered suffix — the request's
+    start param must equal the live bar's ts_open, and the merged series must
+    contain all 4 bars ascending with the closed 3 byte-identical to the
+    cached ones. (Round-2 review: the old all-or-nothing read refetched the
+    ENTIRE range every call whenever `end` sat inside a live bar, making the
+    cache write-only in production.)"""
+    t0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    live_open = t0 + timedelta(seconds=3 * TF_SECONDS)
+    end = live_open + timedelta(seconds=TF_SECONDS // 2)  # strictly inside the live bar
+
+    all_bars = {
+        t0: "68000.00",
+        t0 + timedelta(seconds=TF_SECONDS): "68100.00",
+        t0 + timedelta(seconds=2 * TF_SECONDS): "68200.00",
+        live_open: "68300.00",
+    }
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        """Serve exactly the requested [start, end) window, like a real
+        provider would — the second call must therefore ask for ONLY the
+        suffix to receive only the live bar."""
+        req_start = datetime.fromisoformat(request.url.params["start"])
+        rows = [_bar_payload(ts, price) for ts, price in all_bars.items() if ts >= req_start]
+        return httpx.Response(200, json={"bars": rows})
+
+    route = respx_mock.get(FAKE_URL).mock(side_effect=_respond)
+    provider_fn = _make_provider_fn(route)
+
+    first = cache.get_or_fetch(
+        provider_fn, source="fake-provider", asset=ASSET, timeframe=TF, start=t0, end=end
+    )
+    assert len(first.bars) == 4
+    assert route.call_count == 1, "first fetch hits the provider exactly once for the full range"
+
+    second = cache.get_or_fetch(
+        provider_fn, source="fake-provider", asset=ASSET, timeframe=TF, start=t0, end=end
+    )
+    assert route.call_count == 2, (
+        "second call must make EXACTLY ONE provider call (for the live suffix only) — "
+        f"got {route.call_count - 1} additional calls"
+    )
+    sent_start = datetime.fromisoformat(route.calls.last.request.url.params["start"])
+    assert sent_start == live_open, (
+        f"the suffix fetch must start at the live bar's ts_open {live_open.isoformat()}, "
+        f"got {sent_start.isoformat()} — cached closed bars must NOT be refetched"
+    )
+    opens = [b.ts_open for b in second.bars]
+    assert opens == sorted(opens) and len(second.bars) == 4, (
+        "merged series must contain all 4 bars ascending"
+    )
+    assert second.bars[:3] == first.bars[:3], (
+        "the 3 closed bars must be byte-identical to the cached ones"
+    )
+    assert second.bars[3].ts_open == live_open

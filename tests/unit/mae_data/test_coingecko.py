@@ -74,9 +74,16 @@ def _markets_fixture() -> list[dict]:
     ]
 
 
+def _no_op_sleeper(_seconds: float) -> None:
+    """No real sleep in unit tests (ASSUMPTIONS 30) — retries/backoff must
+    never block the suite."""
+
+
 @pytest.fixture
 def provider() -> CoinGeckoProvider:
-    return CoinGeckoProvider()
+    # sleeper=no-op (ASSUMPTIONS 30 / H2): retry is now wired into every
+    # call; a persistent 5xx mock must not trigger real backoff sleeps.
+    return CoinGeckoProvider(sleeper=_no_op_sleeper)
 
 
 @pytest.fixture(autouse=True)
@@ -208,3 +215,34 @@ def test_get_markets_http_failure_raises_provider_unavailable(provider, respx_mo
 
     with pytest.raises(ProviderUnavailable):
         provider.get_markets()
+
+
+# ---------------------------------------------------------------------------
+# M3/M4 — 4xx typing, malformed-body handling (review round 2)
+# ---------------------------------------------------------------------------
+
+
+def test_http_4xx_raises_provider_request_error_one_call(provider, respx_mock) -> None:
+    """M3: a 4xx must be typed ProviderRequestError and never retried —
+    exactly one HTTP call."""
+    route = respx_mock.get(COINGECKO_GLOBAL_URL).mock(
+        return_value=httpx.Response(404, text="not found")
+    )
+
+    with pytest.raises(ProviderRequestError):
+        provider.get_global()
+    assert route.call_count == 1, (
+        f"a 4xx must not be retried — expected exactly 1 HTTP call, got {route.call_count}"
+    )
+
+
+def test_malformed_200_body_raises_provider_unavailable(provider, respx_mock) -> None:
+    """M4: a structurally garbage 200 body (missing the "data" envelope)
+    must raise ProviderUnavailable naming CoinGecko, never an untyped
+    KeyError."""
+    respx_mock.get(COINGECKO_GLOBAL_URL).mock(
+        return_value=httpx.Response(200, json={"unexpected": True})
+    )
+
+    with pytest.raises(ProviderUnavailable, match="(?i)coingecko"):
+        provider.get_global()
