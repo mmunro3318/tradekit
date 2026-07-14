@@ -28,11 +28,14 @@ tests/unit/mae_data/test_alpaca.py for the full behavior pin:
 
 from __future__ import annotations
 
-from datetime import datetime
+import os
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import httpx
 
-from tradekit.contracts import AssetRef, BarSeries
+from tradekit.contracts import AssetRef, Bar, BarSeries
+from tradekit.mae._data.errors import ProviderRangeError, ProviderRequestError, ProviderUnavailable
 
 ALPACA_EQUITY_BARS_URL_TEMPLATE = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 ALPACA_CRYPTO_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
@@ -50,15 +53,33 @@ ALPACA_TIMEFRAME_MAP: dict[str, str] = {
 _REQUEST_TIMEOUT_S = 10.0
 
 
-class AlpacaDataProvider:
-    """Alpaca equity + crypto bars provider. Implements ``MarketDataPort``.
+def _rfc3339(dt: datetime) -> str:
+    """RFC-3339 UTC, "Z" suffix — Alpaca's own start/end query-param spelling."""
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    STUB: real implementation lands in the story-6 green commit — see
-    ``tests/unit/mae_data/test_alpaca.py`` for the pinned behavior.
-    """
+
+def _parse_alpaca_ts(t: str) -> datetime:
+    """Alpaca bar timestamps are ISO-8601 with a trailing "Z" — normalize to
+    aware-UTC via fromisoformat (handles fractional seconds too)."""
+    if t.endswith("Z"):
+        t = t[:-1] + "+00:00"
+    return datetime.fromisoformat(t)
+
+
+class AlpacaDataProvider:
+    """Alpaca equity + crypto bars provider. Implements ``MarketDataPort``."""
 
     def __init__(self, *, client: httpx.Client | None = None) -> None:
         self._client = client
+
+    def _get(
+        self, url: str, params: dict[str, str], headers: dict[str, str]
+    ) -> httpx.Response:
+        if self._client is not None:
+            return self._client.get(
+                url, params=params, headers=headers, timeout=_REQUEST_TIMEOUT_S
+            )
+        return httpx.get(url, params=params, headers=headers, timeout=_REQUEST_TIMEOUT_S)
 
     def get_bars(
         self, asset: AssetRef, timeframe: str, start: datetime, end: datetime
@@ -70,4 +91,60 @@ class AlpacaDataProvider:
         call), ``ProviderRangeError`` if the response's ``next_page_token``
         is non-null, ``ProviderUnavailable`` on HTTP 5xx/timeout.
         """
-        raise NotImplementedError("SPRINT-P1A story 6 — docs/handoff/SPRINT-P1A-data-layer.md")
+        # Pre-HTTP credential guard (ASSUMPTIONS 35): reject BEFORE any network call.
+        api_key_id = os.environ.get(ALPACA_API_KEY_ID_ENV)
+        if not api_key_id:
+            raise ProviderRequestError(f"missing required env var {ALPACA_API_KEY_ID_ENV}")
+        api_secret = os.environ.get(ALPACA_API_SECRET_ENV)
+        if not api_secret:
+            raise ProviderRequestError(f"missing required env var {ALPACA_API_SECRET_ENV}")
+
+        headers = {
+            "APCA-API-KEY-ID": api_key_id,
+            "APCA-API-SECRET-KEY": api_secret,
+        }
+        params: dict[str, str] = {
+            "timeframe": ALPACA_TIMEFRAME_MAP[timeframe],
+            "start": _rfc3339(start),
+            "end": _rfc3339(end),
+        }
+
+        if asset.asset_class == "crypto":
+            url = ALPACA_CRYPTO_BARS_URL
+            params["symbols"] = asset.symbol
+        else:
+            url = ALPACA_EQUITY_BARS_URL_TEMPLATE.format(symbol=asset.symbol)
+
+        try:
+            response = self._get(url, params, headers)
+        except httpx.HTTPError as exc:
+            raise ProviderUnavailable(f"Alpaca bars request failed: {exc}") from exc
+
+        if response.status_code != 200:
+            raise ProviderUnavailable(
+                f"Alpaca bars returned HTTP {response.status_code}: {response.text}"
+            )
+
+        body = response.json()
+        if body.get("next_page_token") is not None:
+            raise ProviderRangeError(
+                "Alpaca bars response carries a non-null next_page_token; "
+                "pagination is out of scope this sprint (ASSUMPTIONS 33)"
+            )
+
+        rows = body.get("bars", [])
+        bars = [
+            Bar(
+                ts_open=_parse_alpaca_ts(row["t"]),
+                open=Decimal(str(row["o"])),
+                high=Decimal(str(row["h"])),
+                low=Decimal(str(row["l"])),
+                close=Decimal(str(row["c"])),
+                volume=Decimal(str(row["v"])),
+            )
+            for row in rows
+        ]
+        bars = [b for b in bars if start <= b.ts_open < end]
+        bars.sort(key=lambda b: b.ts_open)
+
+        return BarSeries(asset=asset, timeframe=timeframe, bars=bars, source="alpaca")

@@ -153,7 +153,6 @@ def run_demo(n: int, seed: int, dataset_dir: Path, vision_path: Path, ppo_path: 
             feats_cache[tk] = make_features(df, bridge)
         img_arr = np.asarray(images[r["row"]], dtype=np.float32) / 255.0
         probs = vision_probs(model, img_arr[None])[0]
-        patterns = {PATTERN_NAMES[i]: float(probs[i]) for i in range(len(PATTERN_NAMES))}
         true = [p for p in PATTERN_NAMES if r[f"p_{p}"] > 0.5]
         obs = np.concatenate([feats_cache[tk][t], [0.0]]).astype(np.float32)
         action = ACTION_NAMES[int(ppo.predict(obs, deterministic=True)[0])]
