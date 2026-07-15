@@ -1,6 +1,5 @@
 """Momentum indicators (SPRINT P1B story 2): rsi, macd, stoch_rsi, roc. Pure
-functions over `Sequence[float]` closes — no numpy here (the dev agent adds
-it when implementing).
+functions over `Sequence[float]` closes.
 
 Contract (uniform, non-negotiable — sprint doc): output is aligned 1:1 with
 input; positions with insufficient lookback are `None`, never zero-filled,
@@ -8,15 +7,38 @@ never a shorter array. `rsi` uses Wilder smoothing (canon recurrence:
 first value = simple average of first `period` gain/loss diffs, then
 `w_t = (w_{t-1}*(period-1) + x_t)/period`); `macd`'s EMAs seed from the SMA
 of their own first `period` — see `trend.ema` for that same convention.
-
-STUBS ONLY: every function body raises `NotImplementedError`. A separate
-dev agent implements the bodies against tests/golden/indicators/*.json.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import NamedTuple
+
+from tradekit.mae._indicators.trend import ema as _ema
+from tradekit.mae._indicators.trend import sma as _sma
+
+
+def _apply_on_suffix(
+    series: list[float | None], fn: Callable[[list[float], int], list[float | None]], period: int
+) -> list[float | None]:
+    """Apply `fn` (an sma/ema-shaped smoother) to the contiguous non-None
+    suffix of `series` and map the result back onto a full-length output
+    aligned with `series`. Assumes `series` has no internal None gaps once
+    its lookback prefix ends (true for every indicator suffix in this
+    module: rsi/macd_line/stoch raw/k are all defined for every index once
+    their own first non-None index is reached).
+    """
+    n = len(series)
+    out: list[float | None] = [None] * n
+    start = next((i for i, v in enumerate(series) if v is not None), None)
+    if start is None:
+        return out
+    suffix: list[float] = [v for v in series[start:] if v is not None]
+    smoothed = fn(suffix, period)
+    for j, sv in enumerate(smoothed):
+        if sv is not None:
+            out[start + j] = sv
+    return out
 
 
 class Macd(NamedTuple):
@@ -59,7 +81,28 @@ def rsi(closes: Sequence[float], period: int = 14) -> list[float | None]:
     period=14 — addendum lookback table; note this is `period`, not
     `period-1`, because RSI needs `period` DIFFS, i.e. `period+1` prices).
     """
-    raise NotImplementedError
+    n = len(closes)
+    out: list[float | None] = [None] * n
+    if n <= period:
+        return out
+
+    gains = [0.0] * n
+    losses = [0.0] * n
+    for i in range(1, n):
+        diff = closes[i] - closes[i - 1]
+        gains[i] = max(diff, 0.0)
+        losses[i] = max(-diff, 0.0)
+
+    avg_gain = sum(gains[1 : period + 1]) / period
+    avg_loss = sum(losses[1 : period + 1]) / period
+    out[period] = 100.0 if avg_loss == 0.0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    for i in range(period + 1, n):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        out[i] = 100.0 if avg_loss == 0.0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    return out
 
 
 def macd(
@@ -76,7 +119,27 @@ def macd(
     (33 for the defaults: the signal EMA needs `signal` non-None macd_line
     values to seed its own SMA — addendum lookback table).
     """
-    raise NotImplementedError
+    n = len(closes)
+    ema_fast = _ema(closes, fast)
+    ema_slow = _ema(closes, slow)
+
+    macd_line: list[float | None] = [None] * n
+    for i in range(n):
+        f = ema_fast[i]
+        s = ema_slow[i]
+        if f is not None and s is not None:
+            macd_line[i] = f - s
+
+    signal_line = _apply_on_suffix(macd_line, _ema, signal)
+    histogram: list[float | None] = [None] * n
+
+    for i in range(n):
+        m = macd_line[i]
+        s = signal_line[i]
+        if m is not None and s is not None:
+            histogram[i] = m - s
+
+    return Macd(macd_line, signal_line, histogram)
 
 
 def stoch_rsi(
@@ -100,7 +163,25 @@ def stoch_rsi(
     non-None, 14, plus stoch_period-1); k first non-None index = 29 (27 +
     k-1); d first non-None index = 31 (29 + d-1).
     """
-    raise NotImplementedError
+    n = len(closes)
+    rsi_vals = rsi(closes, period=rsi_period)
+
+    raw: list[float | None] = [None] * n
+    for i in range(stoch_period - 1, n):
+        window = rsi_vals[i - stoch_period + 1 : i + 1]
+        if any(v is None for v in window):
+            continue
+        wlist = [v for v in window if v is not None]
+        mn = min(wlist)
+        mx = max(wlist)
+        cur = rsi_vals[i]
+        assert cur is not None
+        raw[i] = 0.0 if mx == mn else (cur - mn) / (mx - mn) * 100.0
+
+    k_line = _apply_on_suffix(raw, _sma, k)
+    d_line = _apply_on_suffix(k_line, _sma, d)
+
+    return StochRsi(raw, k_line, d_line)
 
 
 def roc(closes: Sequence[float], period: int = 10) -> list[float | None]:
@@ -109,4 +190,8 @@ def roc(closes: Sequence[float], period: int = 10) -> list[float | None]:
     Lookback: first non-None index = period (10 for the default
     period=10 — addendum lookback table).
     """
-    raise NotImplementedError
+    n = len(closes)
+    out: list[float | None] = [None] * n
+    for i in range(period, n):
+        out[i] = (closes[i] / closes[i - period] - 1.0) * 100.0
+    return out

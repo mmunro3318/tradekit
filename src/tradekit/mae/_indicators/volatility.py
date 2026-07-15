@@ -1,21 +1,20 @@
 """Volatility indicators (SPRINT P1B story 1): true_range, atr, bollinger,
-keltner. Pure functions over `Sequence[float]` closes/highs/lows — no numpy
-here (the dev agent adds it when implementing), no Bar/BarSeries coupling.
+keltner. Pure functions over `Sequence[float]` closes/highs/lows — no
+Bar/BarSeries coupling.
 
 Contract (uniform, non-negotiable — sprint doc): output is aligned 1:1 with
 input; positions with insufficient lookback are `None`, never zero-filled,
 never a shorter array. Wilder smoothing (`atr`) uses the canon recurrence:
 first value = simple average of first `period` inputs, then
 `w_t = (w_{t-1}*(period-1) + x_t)/period` — never EMA smoothing.
-
-STUBS ONLY: every function body raises `NotImplementedError`. A separate
-dev agent implements the bodies against tests/golden/indicators/*.json.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import NamedTuple
+from typing import NamedTuple, cast
+
+import numpy as np
 
 
 class Bollinger(NamedTuple):
@@ -49,7 +48,21 @@ def true_range(
 
     Lookback: first non-None index = 0 (see addendum lookback table).
     """
-    raise NotImplementedError
+    n = len(highs)
+    out: list[float | None] = [None] * n
+    if n == 0:
+        return out
+    out[0] = float(highs[0] - lows[0])
+    for i in range(1, n):
+        prev_close = closes[i - 1]
+        out[i] = float(
+            max(
+                highs[i] - lows[i],
+                abs(highs[i] - prev_close),
+                abs(lows[i] - prev_close),
+            )
+        )
+    return out
 
 
 def atr(
@@ -67,7 +80,17 @@ def atr(
     Lookback: first non-None index = period-1 (13 for the default
     period=14 — addendum lookback table).
     """
-    raise NotImplementedError
+    tr = cast(list[float], true_range(highs, lows, closes))  # TR never None
+    n = len(tr)
+    out: list[float | None] = [None] * n
+    if n < period:
+        return out
+    prev = sum(tr[:period]) / period
+    out[period - 1] = prev
+    for i in range(period, n):
+        prev = (prev * (period - 1) + tr[i]) / period
+        out[i] = prev
+    return out
 
 
 def bollinger(closes: Sequence[float], period: int = 20, k: float = 2.0) -> Bollinger:
@@ -80,7 +103,40 @@ def bollinger(closes: Sequence[float], period: int = 20, k: float = 2.0) -> Boll
     (19 for the default period=20 — addendum lookback table). Before that,
     mid/upper/lower are all None at the same positions (no partial bands).
     """
-    raise NotImplementedError
+    n = len(closes)
+    mid: list[float | None] = [None] * n
+    upper: list[float | None] = [None] * n
+    lower: list[float | None] = [None] * n
+    if n < period:
+        return Bollinger(mid, upper, lower)
+    arr = np.asarray(closes, dtype=np.float64)
+    for i in range(period - 1, n):
+        window = arr[i - period + 1 : i + 1]
+        m = float(window.mean())
+        std = float(window.std(ddof=0))
+        mid[i] = m
+        upper[i] = m + k * std
+        lower[i] = m - k * std
+    return Bollinger(mid, upper, lower)
+
+
+def _ema(values: Sequence[float], period: int) -> list[float | None]:
+    """Private local EMA matching `trend.ema`'s seeding convention exactly
+    (SMA of first `period` values). Duplicated here (rather than imported)
+    to avoid a volatility<->trend import cycle: `trend.supertrend` depends
+    on `volatility.atr`, so `volatility` cannot depend back on `trend`.
+    """
+    n = len(values)
+    out: list[float | None] = [None] * n
+    if n < period:
+        return out
+    prev = sum(values[:period]) / period
+    out[period - 1] = prev
+    k = 2.0 / (period + 1)
+    for i in range(period, n):
+        prev = values[i] * k + prev * (1 - k)
+        out[i] = prev
+    return out
 
 
 def keltner(
@@ -101,4 +157,15 @@ def keltner(
     (19 for the defaults — addendum lookback table), even though ATR(10)
     alone would already be valid from index 9.
     """
-    raise NotImplementedError
+    n = len(closes)
+    mid = _ema(closes, ema_period)
+    atr_vals = atr(highs, lows, closes, period=atr_period)
+    upper: list[float | None] = [None] * n
+    lower: list[float | None] = [None] * n
+    for i in range(n):
+        m = mid[i]
+        a = atr_vals[i]
+        if m is not None and a is not None:
+            upper[i] = m + mult * a
+            lower[i] = m - mult * a
+    return Keltner(mid, upper, lower)
