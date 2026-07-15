@@ -9,18 +9,15 @@ analysis-layer boundary (DESIGN §13): bars carry Decimal prices parsed from
 venue strings (TD-17), but every indicator downstream of this module
 operates on floats. `obv` and `volume_ratio` take plain `Sequence[float]`
 closes/volumes, matching every other indicator's scalar-input contract.
-
-STUB (SPRINT P1B stories 4-5 TDD session, red phase): bodies raise
-NotImplementedError. Signatures, docstrings, and lookback conventions below
-are pinned by docs/handoff/SPRINT-P1B-indicators.md's addendum and are NOT
-to be improvised during implementation.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC
 
 from tradekit.contracts import Bar
+from tradekit.mae._indicators.trend import sma as _sma
 
 
 def vwap(bars: Sequence[Bar]) -> list[float | None]:
@@ -67,7 +64,23 @@ def vwap(bars: Sequence[Bar]) -> list[float | None]:
     case None persists until cumulative volume in that session becomes
     nonzero.
     """
-    raise NotImplementedError
+    n = len(bars)
+    out: list[float | None] = [None] * n
+    cum_tv = 0.0
+    cum_v = 0.0
+    session_day = None
+    for i, bar in enumerate(bars):
+        day = bar.ts_open.astimezone(UTC).date()
+        if day != session_day:
+            session_day = day
+            cum_tv = 0.0
+            cum_v = 0.0
+        tp = (float(bar.high) + float(bar.low) + float(bar.close)) / 3.0
+        vol = float(bar.volume)
+        cum_tv += tp * vol
+        cum_v += vol
+        out[i] = (cum_tv / cum_v) if cum_v != 0.0 else None
+    return out
 
 
 def obv(closes: Sequence[float], volumes: Sequence[float]) -> list[float | None]:
@@ -85,7 +98,16 @@ def obv(closes: Sequence[float], volumes: Sequence[float]) -> list[float | None]
     NEVER None, unlike every lookback-bound indicator elsewhere in this
     package; it is a running total defined from the first bar.
     """
-    raise NotImplementedError
+    n = len(closes)
+    out: list[float | None] = [0.0] * n
+    prev = 0.0
+    for i in range(1, n):
+        if closes[i] > closes[i - 1]:
+            prev = prev + volumes[i]
+        elif closes[i] < closes[i - 1]:
+            prev = prev - volumes[i]
+        out[i] = prev
+    return out
 
 
 def volume_ratio(volumes: Sequence[float], period: int = 20) -> list[float | None]:
@@ -104,4 +126,12 @@ def volume_ratio(volumes: Sequence[float], period: int = 20) -> list[float | Non
     period=20 — addendum lookback table), subject to the zero-SMA
     override above.
     """
-    raise NotImplementedError
+    n = len(volumes)
+    out: list[float | None] = [None] * n
+    sma_vals = _sma(volumes, period)
+    for i in range(n):
+        s = sma_vals[i]
+        if s is None or s == 0.0:
+            continue
+        out[i] = volumes[i] / s
+    return out

@@ -7,10 +7,6 @@ zero-filled, never a shorter array. Both functions here are LAGGING /
 CONFIRMATION-based (fractal pivots need `k` bars on both sides before a
 level can be confirmed) — see each docstring's no-lookahead note.
 
-STUB (SPRINT P1B stories 4-5 TDD session, red phase): bodies raise
-NotImplementedError. Signatures, docstrings, and lookback conventions below
-are pinned by docs/handoff/SPRINT-P1B-indicators.md's addendum and are NOT
-to be improvised during implementation.
 """
 
 from __future__ import annotations
@@ -61,7 +57,21 @@ def swing_points(
     index is within k of one end or the other) and both outputs are all
     None.
     """
-    raise NotImplementedError
+    n = len(highs)
+    swing_highs: list[float | None] = [None] * n
+    swing_lows: list[float | None] = [None] * n
+    for i in range(k, n - k):
+        h = highs[i]
+        if all(h > highs[i - j] for j in range(1, k + 1)) and all(
+            h > highs[i + j] for j in range(1, k + 1)
+        ):
+            swing_highs[i] = h
+        low = lows[i]
+        if all(low < lows[i - j] for j in range(1, k + 1)) and all(
+            low < lows[i + j] for j in range(1, k + 1)
+        ):
+            swing_lows[i] = low
+    return SwingPoints(swing_highs, swing_lows)
 
 
 def qfl_bases(
@@ -98,4 +108,23 @@ def qfl_bases(
     index) -> qfl_bases is None for all of those leading indices, same as
     `swing_points`'s own edge/lookback exclusion.
     """
-    raise NotImplementedError
+    n = len(lows)
+    out: list[float | None] = [None] * n
+
+    def _is_swing_low(p: int) -> bool:
+        if p < k or p > n - 1 - k:
+            return False
+        v = lows[p]
+        return all(v < lows[p - j] for j in range(1, k + 1)) and all(
+            v < lows[p + j] for j in range(1, k + 1)
+        )
+
+    active_level: float | None = None
+    for i in range(n):
+        pivot = i - k
+        if pivot >= 0 and _is_swing_low(pivot):
+            active_level = lows[pivot]
+        if active_level is not None and closes[i] < active_level:
+            active_level = None
+        out[i] = active_level
+    return out
