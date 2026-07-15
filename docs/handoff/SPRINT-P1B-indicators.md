@@ -45,3 +45,83 @@ For EACH indicator, `tests/golden/indicators/<name>.json`: input series + expect
 - Off-by-one in Wilder seeding is THE historical indicator bug. The golden vectors catch it only if they include the first 2×period bars — make sure they do.
 - MACD sign convention: histogram = macd_line − signal_line. Pin it in a test; both conventions exist in the wild.
 - Don't "optimize" with numpy vectorization at the cost of the None-alignment contract. Correct first; these run on ≤720 bars.
+
+## Addendum — CTO signature & convention pins (session P1B, 2026-07-15)
+
+Written by the executing CTO session before dispatch; the reviewer reviews against
+these pins. Internals are the implementer's; signatures and conventions are not.
+
+### Signatures (multi-output = NamedTuple of aligned `list[float | None]`)
+
+```python
+# volatility.py
+def true_range(highs, lows, closes) -> list[float | None]        # TR[0] = high−low (Wilder), never None
+def atr(highs, lows, closes, period=14) -> list[float | None]    # Wilder, seed = SMA of first `period` TRs
+def bollinger(closes, period=20, k=2.0) -> Bollinger             # (mid, upper, lower); POPULATION σ (ddof=0)
+def keltner(highs, lows, closes, ema_period=20, atr_period=10, mult=2.0) -> Keltner
+                                                                 # mid = EMA(close); bands = mid ± mult·ATR(atr_period)
+# momentum.py
+def rsi(closes, period=14) -> list[float | None]                 # Wilder; avg_loss == 0 → 100.0 (incl. constant price; RS→∞)
+def macd(closes, fast=12, slow=26, signal=9) -> Macd             # (macd, signal, histogram); hist = macd − signal
+def stoch_rsi(closes, rsi_period=14, stoch_period=14, k=3, d=3) -> StochRsi
+                                                                 # (raw, k, d); raw ∈ [0,100]; max==min window → 0.0;
+                                                                 # k = SMA(k) of raw, d = SMA(d) of k
+def roc(closes, period=10) -> list[float | None]                 # (c_t/c_{t−period} − 1)·100
+# trend.py
+def sma(values, period) -> list[float | None]
+def ema(values, period) -> list[float | None]                    # seed = SMA of first `period` (everywhere EMA is used)
+def adx(highs, lows, closes, period=14) -> Adx                   # (plus_di, minus_di, adx); Wilder throughout
+def supertrend(highs, lows, closes, period=10, mult=3.0) -> Supertrend
+                                                                 # (line, direction); direction ∈ {1.0, −1.0, None};
+                                                                 # basis (H+L)/2, ratcheting final bands; initial direction
+                                                                 # pinned by golden vector + docstring
+# volume.py
+def vwap(bars: Sequence[Bar]) -> list[float | None]              # Σ(tp·vol)/Σ(vol), tp = (H+L+C)/3, reset at UTC day
+                                                                 # boundary of ts_open. Works for US-equity RTH too: the
+                                                                 # regular session never crosses UTC midnight — document.
+                                                                 # Zero cumulative volume in session-so-far → None.
+def obv(closes, volumes) -> list[float | None]                   # obv[0] = 0.0
+def volume_ratio(volumes, period=20) -> list[float | None]       # vol / SMA(period) of vol
+# structure.py
+def swing_points(highs, lows, k=2) -> SwingPoints                # (swing_highs, swing_lows); level AT pivot index i iff
+                                                                 # strictly greater (resp. lower) than all of i±1..k; edge
+                                                                 # indices (< k from either end) can never be pivots;
+                                                                 # docstring must state confirmation lags k bars (no lookahead
+                                                                 # use before i+k).
+def qfl_bases(lows, closes, k=2) -> list[float | None]           # at each i: most recent CONFIRMED (i.e. pivot idx + k ≤ i)
+                                                                 # swing-low level not yet cracked; crack = close < level;
+                                                                 # cracked base is dropped (None until next base confirms).
+                                                                 # Simplest correct; bounce-magnitude/volume filters = TODO-P5.
+```
+
+Scalar inputs are `Sequence[float]` (floats — analysis layer, §13; Decimal→float
+happens at the P1C caller boundary). Only `vwap` takes `Sequence[Bar]`.
+
+### Lookback pins (first non-None index, default params — property tests assert these)
+
+| fn | first non-None | fn | first non-None |
+|---|---|---|---|
+| true_range | 0 | roc(n) | n |
+| atr(14) | 13 | sma(n)/ema(n) | n−1 |
+| bollinger(20) | 19 | adx(14): DI | 14 |
+| keltner(20,10) | 19 | adx(14): adx | 27 (= 2·period−1) |
+| rsi(14) | 14 | supertrend(10) | 9 |
+| macd: macd line | 25 | vwap / obv | 0 |
+| macd: signal/hist | 33 | volume_ratio(20) | 19 |
+| stoch_rsi: raw/k/d | 27 / 29 / 31 | | |
+
+### Process pins
+
+- Modules live in `src/tradekit/mae/_indicators/`; no re-exports from `mae`'s
+  public surface this sprint (scan_markets wires them in P1C). Tests import the
+  submodules directly — add the temporary-internal-import note to
+  tests/ASSUMPTIONS.md (same pattern as `mae._data`, entry 33-ish).
+- Golden vector JSONs carry provenance: `{"indicator", "params", "source":
+  "<how derived>", "input": ..., "expected": ...}`. Reference-library values
+  (throwaway venv) may be used ONLY after proving the library matches the pinned
+  convention on a fully hand-computed short series; where conventions differ
+  (e.g. EMA seeding), an explicit auditable step-by-step derivation is the
+  reference. Hand cross-checks (≥3/indicator, in test comments) must include at
+  least one value at the Wilder seed boundary (index period−1 … period+1).
+- Numeric comparison: `pytest.approx(rel=1e-9, abs=1e-12)` — golden values are
+  floats derived outside; bit-exactness is not the contract, the formula is.
