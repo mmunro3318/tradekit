@@ -216,6 +216,13 @@ def test_bollinger_short_series_all_none() -> None:
     assert all(v is None for v in lower)
 
 
+def test_bollinger_rejects_degenerate_period() -> None:
+    """P1B review LOW-2: period < 1 would silently produce numpy nan
+    means/stds from empty rolling windows — guard with a loud ValueError."""
+    with pytest.raises(ValueError, match="period must be >= 1"):
+        bollinger([1.0, 2.0, 3.0], period=0, k=2.0)
+
+
 def test_bollinger_constant_price_collapses_to_mid() -> None:
     """Population stdev of a constant window is exactly 0.0, so upper ==
     mid == lower (no band width) once the SMA warms up."""

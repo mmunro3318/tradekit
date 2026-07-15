@@ -57,6 +57,8 @@ def swing_points(
     index is within k of one end or the other) and both outputs are all
     None.
     """
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
     n = len(highs)
     swing_highs: list[float | None] = [None] * n
     swing_lows: list[float | None] = [None] * n
@@ -77,10 +79,10 @@ def swing_points(
 def qfl_bases(
     lows: Sequence[float], closes: Sequence[float], k: int = 2
 ) -> list[float | None]:
-    """QFL ("Quantitative Fundamental/Flag Levels" per the canonical MAE
-    doc) base level, aligned 1:1 with `lows`/`closes`. Simplest correct
-    version — bounce-magnitude and volume filters are explicitly TODO-P5,
-    NOT implemented here.
+    """QFL base level (trading shorthand from "Quickfingers Luc" base-bounce
+    methodology; the canonical MAE doc uses the acronym unexpanded), aligned
+    1:1 with `lows`/`closes`. Simplest correct version — bounce-magnitude
+    and volume filters are explicitly TODO-P5, NOT implemented here.
 
     A "base" is a confirmed swing-low level (see `swing_points` above, same
     `k`, applied to `lows`). At each index i, qfl_bases[i] reports the
@@ -108,6 +110,8 @@ def qfl_bases(
     index) -> qfl_bases is None for all of those leading indices, same as
     `swing_points`'s own edge/lookback exclusion.
     """
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
     n = len(lows)
     out: list[float | None] = [None] * n
 

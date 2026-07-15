@@ -96,6 +96,14 @@ def test_sma_constant_price() -> None:
     assert out[19] == pytest.approx(100.0, abs=1e-9)
 
 
+def test_sma_rejects_degenerate_period() -> None:
+    """P1B review LOW-2: period < 1 would silently produce numpy nan means
+    (empty rolling windows) instead of failing loudly — and volume_ratio
+    reuses this sma, so the guard protects that call site too."""
+    with pytest.raises(ValueError, match="period must be >= 1"):
+        sma([1.0, 2.0, 3.0], period=0)
+
+
 def test_sma_properties_random_walk() -> None:
     _, _, closes = _random_walk()
     out = sma(closes, period=20)

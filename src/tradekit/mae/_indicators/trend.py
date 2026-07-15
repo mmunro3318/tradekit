@@ -45,6 +45,8 @@ def sma(values: Sequence[float], period: int) -> list[float | None]:
 
     Lookback: first non-None index = period-1 (addendum lookback table).
     """
+    if period < 1:
+        raise ValueError(f"period must be >= 1, got {period}")
     n = len(values)
     out: list[float | None] = [None] * n
     if n < period:

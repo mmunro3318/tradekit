@@ -196,6 +196,17 @@ def test_qfl_bases_short_series_all_none() -> None:
     assert out == [None, None, None, None]
 
 
+def test_swing_points_and_qfl_reject_degenerate_k() -> None:
+    """P1B review LOW-2: k < 1 would make the strict-inequality pivot test
+    vacuously true at EVERY index (all() over an empty neighbor range),
+    silently flagging everything as both a swing high and a swing low —
+    guard with a loud ValueError instead."""
+    with pytest.raises(ValueError, match="k must be >= 1"):
+        swing_points([1.0, 2.0, 3.0], [0.5, 1.5, 2.5], k=0)
+    with pytest.raises(ValueError, match="k must be >= 1"):
+        qfl_bases([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], k=0)
+
+
 def test_qfl_bases_properties_random_walk() -> None:
     """Every reported qfl level equals some EARLIER low value (a level
     can only come from a confirmed swing-low pivot strictly before the

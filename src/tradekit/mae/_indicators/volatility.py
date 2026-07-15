@@ -103,6 +103,8 @@ def bollinger(closes: Sequence[float], period: int = 20, k: float = 2.0) -> Boll
     (19 for the default period=20 — addendum lookback table). Before that,
     mid/upper/lower are all None at the same positions (no partial bands).
     """
+    if period < 1:
+        raise ValueError(f"period must be >= 1, got {period}")
     n = len(closes)
     mid: list[float | None] = [None] * n
     upper: list[float | None] = [None] * n
