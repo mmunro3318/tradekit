@@ -44,3 +44,33 @@ tdd-p1a-2's fixture shape hid it); D-ratelimit-orphan (HIGH — dev-p1a left the
 module uncalled, tdd-p1a pinned it only in isolation); D-taxonomy /
 D-malformed (MED — cross-provider, seeded by the story-4 Kraken pattern and
 copied into Alpaca/CoinGecko).
+
+## Round 3 — 2026-07-15 — P1B indicators + golden vectors (commits 31efe59..e519719)
+
+Reviewer: code-reviewer agent (Opus). Verification: `uv run pytest` (255
+passed at review time), ruff clean, mypy clean. Reviewer wrote its own
+independent from-spec reference and recomputed 11 indicators against the
+golden JSONs (all matched to rel 1e-9); confirmed by commit order that no
+golden value could have been code-generated (goldens landed in red commits
+while stubs raised NotImplementedError). Verdict: **PASS — first clean round
+(zero HIGH) in three sprints.**
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tdd-p1b (Sonnet) | stories 1-3 tests + goldens + stubs (12 indicators) | 0 | 0 | 0 | A | Golden derivation via independent from-spec script (correctly rejected pandas_ta whose adjust=False seeding contradicts the pinned SMA-seed convention); hand cross-checks at every Wilder seed boundary; correct STOP on the two convention gaps it couldn't derive (supertrend initial direction, ADX seed window) — pinned them in ASSUMPTIONS instead of improvising. |
+| dev-p1b (Sonnet) | stories 1-3 src | 0* | 0 | 0 | B+ | One pre-commit defect, caught by the frozen goldens exactly as designed: seeded ADX's Wilder smoothers with the SUM while using the average-form recurrence — invisible at the seed index (ratio of sums == ratio of averages), divergent after. On CTO push-back with exact arithmetic, verified and fixed cleanly. Its instinct to STOP rather than edit the test was correct procedure (diagnosis was wrong; commandment 4's track record holds). *Never reached review as a defect. |
+| tdd-p1b-2 (Sonnet) | stories 4-5 tests + goldens + stubs | 0 | 0 | 0 | A | vwap golden spans UTC midnight with both zero-volume-bar cases; qfl vector exercises confirm-lag/active/crack/replace; extended ASSUMPTIONS 39 in place per instruction instead of duplicating. |
+| dev-p1b-2 (Sonnet) | stories 4-5 src | 0 | 0 | 0 | A- | Clean first pass, 255 green; reused trend.sma for volume_ratio; documented its one judgment call (confirm-then-crack ordering) honestly. |
+
+Review findings (all LOW, fixed same-day in e519719): LOW-1 invented QFL
+acronym expansion in a docstring; LOW-2 silent misbehavior on degenerate
+params (sma/bollinger period<1 -> numpy nan; swing/qfl k<1 -> vacuously-true
+pivots) — guarded with ValueError + pinning tests; LOW-3 close-out items
+(this file, dev-log, ROADMAP boxes).
+
+Process note (what changed vs rounds 1-2): the CTO freeze gate — dual
+independent derivation + external TA-Lib cross-check BEFORE the red commit
+(ASSUMPTIONS 42/43) — converted the classic Wilder-seeding bug class from a
+reviewer catch into an implementation-time catch. The one real defect this
+sprint (dev-p1b's ADX seed scale) was caught by a frozen golden vector within
+minutes, not by a review round days later.

@@ -2,6 +2,36 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-15 (Fable) — P1B indicators + golden vectors COMPLETE (M1.2)
+
+- **17 indicators** in `mae/_indicators/{volatility,momentum,trend,volume,structure}.py`,
+  pure functions, uniform None-alignment contract, signatures/lookbacks pinned by a
+  CTO addendum in the sprint doc (31efe59) BEFORE dispatch. numpy added (stays in mae/).
+- **Golden-vector freeze gate (the sprint's point, new process):** TDD agents derived
+  vectors via independent from-spec scripts (pandas_ta rejected — its adjust=False
+  seeding contradicts the pinned SMA-seed Wilder/EMA convention); CTO then verified
+  every value with a SECOND independent implementation + TA-Lib 0.7.0 external
+  cross-check (throwaway venv) before committing red. Exact TA-Lib matches: sma, ema,
+  rsi, roc, bollinger, TR[1:], macd-line-via-EMAs, obv (modulo pinned obv[0]=0), DI/ADX
+  divergences hand-reproduced as TA-Lib's 1..13-seed quirk. ASSUMPTIONS 39-43; vectors
+  now FROZEN (regeneration requires redoing the gate).
+- **Four-stage workflow, two batches:** tdd-p1b → dev-p1b (stories 1-3, c5e101a →
+  08fcf70); tdd-p1b-2 → dev-p1b-2 (stories 4-5, 08cc8f7 → 61fb78a). All Sonnet.
+  One dev defect, caught by the frozen goldens pre-commit: ADX Wilder smoother seeded
+  with the SUM under the average-form recurrence (invisible at seed index — ratio of
+  sums == ratio of averages — divergent after); dev-p1b initially blamed the golden,
+  STOPped correctly, fixed on CTO push-back with exact arithmetic. Commandment 4's
+  record intact. (Agent also died at a usage cap mid-fix; fix had already landed.)
+- **Review round (Opus): verdict PASS — first zero-HIGH round in three sprints.**
+  Reviewer independently recomputed 11 indicators against the goldens. 3 LOW fixed
+  same-day (e519719): QFL gloss, degenerate-param guards (period<1/k<1 now ValueError),
+  close-out items. Details in docs/reviews/agent-metrics.md round 3.
+- CVD deferred to P3 (tick trades); CTO pins of record: supertrend initial direction
+  (ASSUMPTIONS 41), ADX seed window (40), vwap UTC-day anchor + qfl same-bar crack (43).
+- **Final: 258 tests green, ruff clean, mypy clean.** ROADMAP M1.2 all boxes checked.
+- Next: SPRINT-P1C (regime/scanner/sizing — needs hmmlearn + the deferred yfinance
+  macro provider decision). Mike's hands: still only the optional Alpaca paper keys.
+
 ## 2026-07-14/15 (Fable) — P1A data layer COMPLETE (stories 3-8 + review round)
 
 - Keys landed: CoinGecko demo + Kraken read-only in `.env` (gitignored; CoinGecko
