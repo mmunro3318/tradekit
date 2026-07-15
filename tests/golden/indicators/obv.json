@@ -1,0 +1,33 @@
+{
+  "indicator": "obv",
+  "params": {},
+  "source": "Hand-listed 6-bar close/volume series exercising up/down/unchanged transitions. Expected values computed by an independent, from-spec reference implementation (scratchpad/gen_golden_p1b45.py, ref_obv): obv[0]=0.0; obv[i]=obv[i-1]+vol[i] if close rises, -vol[i] if it falls, unchanged if flat -- per SPRINT-P1B-indicators.md addendum, NOT by running tradekit's stub.",
+  "input": {
+    "closes": [
+      100.0,
+      102.0,
+      101.0,
+      101.0,
+      105.0,
+      103.0
+    ],
+    "volumes": [
+      10.0,
+      20.0,
+      15.0,
+      12.0,
+      30.0,
+      25.0
+    ]
+  },
+  "expected": {
+    "obv": [
+      0.0,
+      20.0,
+      5.0,
+      5.0,
+      35.0,
+      10.0
+    ]
+  }
+}

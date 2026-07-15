@@ -1,0 +1,79 @@
+{
+  "indicator": "swing_points",
+  "params": {
+    "k": 2
+  },
+  "source": "Hand-listed 15-bar high/low series with pivots placed at known indices (highs peak at 2,7,12; lows trough at 2,7,12), and edge bars (indices 0,1,13,14) that can never be pivots under k=2. Expected values computed by an independent, from-spec reference implementation (scratchpad/gen_golden_p1b45.py, ref_swing_points): strict greater/less-than against all 2k neighbors, per SPRINT-P1B-indicators.md addendum, NOT by running tradekit's stub.",
+  "input": {
+    "highs": [
+      10.0,
+      12.0,
+      15.0,
+      12.0,
+      10.0,
+      9.0,
+      11.0,
+      14.0,
+      11.0,
+      9.0,
+      8.0,
+      10.0,
+      13.0,
+      11.0,
+      9.0
+    ],
+    "lows": [
+      5.0,
+      4.0,
+      2.0,
+      4.0,
+      6.0,
+      7.0,
+      5.0,
+      3.0,
+      5.0,
+      7.0,
+      8.0,
+      6.0,
+      3.0,
+      5.0,
+      6.0
+    ]
+  },
+  "expected": {
+    "swing_highs": [
+      null,
+      null,
+      15.0,
+      null,
+      null,
+      null,
+      null,
+      14.0,
+      null,
+      null,
+      null,
+      null,
+      13.0,
+      null,
+      null
+    ],
+    "swing_lows": [
+      null,
+      null,
+      2.0,
+      null,
+      null,
+      null,
+      null,
+      3.0,
+      null,
+      null,
+      null,
+      null,
+      3.0,
+      null,
+      null
+    ]
+  }
+}

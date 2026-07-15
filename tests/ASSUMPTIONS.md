@@ -215,15 +215,13 @@ same commit (DESIGN maintenance rule applies here too).
 
 39. **TEST-PATH EXCEPTION (extends assumptions 23/29):**
     `tests/unit/mae_indicators/*` import `tradekit.mae._indicators`
-    submodules (`volatility`, `momentum`, `trend`) directly — no public verb
-    wires `_indicators` into `scan_markets` yet (P1C+), same shape as the
-    `mae._data` exception (assumption 29). When a public verb lands:
-    re-point these tests through it AND add
-    `tradekit.mae._indicators.volatility` / `.momentum` / `.trend` to the
-    `TID251` ban list in `pyproject.toml`, same commit — same discipline as
-    assumptions 23/29. (Story 4-5 modules, `volume.py`/`structure.py`, are a
-    later batch and are NOT covered by this exception yet — add them to
-    this same entry when their tests land, don't create a new one.)
+    submodules (`volatility`, `momentum`, `trend`, `volume`, `structure`)
+    directly — no public verb wires `_indicators` into `scan_markets` yet
+    (P1C+), same shape as the `mae._data` exception (assumption 29). When a
+    public verb lands: re-point these tests through it AND add
+    `tradekit.mae._indicators.volatility` / `.momentum` / `.trend` /
+    `.volume` / `.structure` to the `TID251` ban list in `pyproject.toml`,
+    same commit — same discipline as assumptions 23/29.
 40. **ADX's internal Wilder-smoothing seed window starts at index 1, not
     index 0** (story 3, `trend.adx`): unlike a standalone `atr()` call
     (which seeds its 14-value Wilder average over TR[0:14]), `adx`'s +DM/
@@ -289,3 +287,49 @@ same commit (DESIGN maintenance rule applies here too).
     by hand as 100*(9.70*13/14+0.95)/(32.29*13/14+2.01); ours is Wilder's
     book worksheet: plain average of indices 1..14, recurrence from 15).
     The vectors are frozen; regenerating them requires redoing this gate.
+
+---
+
+## Round-8 additions — P1B stories 4-5 TDD session (red only), 2026-07-15
+
+43. **`vwap` session anchor is the UTC calendar day of `ts_open`, and the
+    crack-bar boundary for `qfl_bases` reports `None` on the SAME bar the
+    crack happens** (stories 4/5, `volume.vwap` / `structure.qfl_bases`):
+    (a) `vwap`'s cumulative sums reset whenever `ts_open.astimezone(UTC).
+    date()` changes from the previous bar — this is deliberately a pure
+    UTC-calendar-day rule, not an exchange-session-table lookup. It
+    happens to also serve US-equity RTH (13:30-21:00 UTC depending on
+    DST) because that window never straddles UTC midnight (documented in
+    `volume.vwap`'s docstring); a market whose regular session DOES cross
+    UTC midnight would need a different anchor, out of scope this sprint.
+    Zero cumulative volume so far in the current session (not just a
+    single zero-volume bar) is the ONLY case that yields `None` — a
+    zero-volume bar with nonzero prior accumulation in the same session
+    still produces a value (pinned by
+    `test_volume.py::test_vwap_zero_volume_bar_mid_session_does_not_crash`).
+    (b) `qfl_bases`'s crack check is evaluated for index i BEFORE
+    reporting index i's value: on the bar where `close[i]` first drops
+    below the active base's level, `qfl_bases[i]` is ALREADY `None`, not
+    the about-to-be-cracked level — there is no one-bar reporting lag on
+    the crack side, unlike the k-bar CONFIRMATION lag on the base-
+    formation side (a new swing-low pivot at index p cannot be reported
+    until index p+k). Pinned by
+    `test_structure.py::test_qfl_bases_golden_vector` (hand check 3,
+    index 7) and `::test_qfl_bases_later_base_replaces_cracked_one`.
+    Golden vectors `tests/golden/indicators/vwap.json` and
+    `qfl_bases.json` were computed by an independent, from-spec reference
+    implementation (`gen_golden_p1b45.py`, scratchpad, never committed)
+    written directly against `docs/handoff/SPRINT-P1B-indicators.md`'s
+    addendum — same provenance discipline as assumption 42.
+
+    **Cross-checked once, then FROZEN (CTO gate, 2026-07-15):** a second
+    from-spec implementation written independently by the CTO session
+    reproduced every value in all five story-4/5 JSONs (vwap, obv,
+    volume_ratio, swing_points, qfl_bases) to rel 1e-9; obv additionally
+    matched TA-Lib 0.7.0 exactly modulo the documented seed convention
+    (ours pins obv[0]=0.0, TA-Lib seeds obv[0]=volume[0] — a constant
+    offset of volume[0] thereafter, verified). vwap/swing_points/
+    qfl_bases have no third-party reference for these pinned conventions
+    (UTC-day anchor, strict-fractal, slate-wipe crack); the dual
+    independent implementation is the gate there. Same freeze rule as
+    assumption 42.

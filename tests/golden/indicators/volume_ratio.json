@@ -1,0 +1,37 @@
+{
+  "indicator": "volume_ratio",
+  "params": {
+    "period": 5
+  },
+  "source": "Hand-listed 11-bar volume series with a 5-bar all-zero run (indices 5-9) to pin the zero-SMA -> None rule (index 9's trailing 5-window is entirely zero). Expected values computed by an independent, from-spec reference implementation (scratchpad/gen_golden_p1b45.py, ref_volume_ratio): vol[i]/SMA(period)(vol)[i], None when the SMA itself is 0.0, per SPRINT-P1B-indicators.md addendum, NOT by running tradekit's stub.",
+  "input": {
+    "volumes": [
+      10.0,
+      20.0,
+      15.0,
+      25.0,
+      30.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      40.0
+    ]
+  },
+  "expected": {
+    "volume_ratio": [
+      null,
+      null,
+      null,
+      null,
+      1.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      null,
+      5.0
+    ]
+  }
+}
