@@ -1,0 +1,79 @@
+{
+  "indicator": "short_series",
+  "params": {},
+  "source": "5 hand-listed bars, shorter than every default lookback period (14/20) -- every default-period indicator output must be all-None, length 5, except true_range (never None) and roc(10)/single-bar cases which are also fully None here since 5<10.",
+  "input": {
+    "highs": [
+      102.0,
+      103.0,
+      101.5,
+      100.0,
+      104.0
+    ],
+    "lows": [
+      100.5,
+      101.0,
+      99.5,
+      98.0,
+      102.0
+    ],
+    "closes": [
+      101.5,
+      102.25,
+      100.75,
+      99.0,
+      103.1
+    ]
+  },
+  "expected": {
+    "true_range": [
+      1.5,
+      2.0,
+      2.75,
+      2.75,
+      5.0
+    ],
+    "atr14": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "sma20": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "ema20": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "rsi14": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "roc10": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "bollinger_mid20": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  }
+}

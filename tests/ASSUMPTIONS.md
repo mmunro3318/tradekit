@@ -208,3 +208,84 @@ same commit (DESIGN maintenance rule applies here too).
     results merge ascending and newly-closed bars upsert. Fully-closed
     ranges keep the all-or-nothing read. Pinned by `test_cache.py::
     test_mixed_closed_plus_live_range_serves_cached_prefix_fetches_only_live_suffix`.
+
+---
+
+## Round-7 additions — P1B stories 1-3 TDD session (red only), 2026-07-15
+
+39. **TEST-PATH EXCEPTION (extends assumptions 23/29):**
+    `tests/unit/mae_indicators/*` import `tradekit.mae._indicators`
+    submodules (`volatility`, `momentum`, `trend`) directly — no public verb
+    wires `_indicators` into `scan_markets` yet (P1C+), same shape as the
+    `mae._data` exception (assumption 29). When a public verb lands:
+    re-point these tests through it AND add
+    `tradekit.mae._indicators.volatility` / `.momentum` / `.trend` to the
+    `TID251` ban list in `pyproject.toml`, same commit — same discipline as
+    assumptions 23/29. (Story 4-5 modules, `volume.py`/`structure.py`, are a
+    later batch and are NOT covered by this exception yet — add them to
+    this same entry when their tests land, don't create a new one.)
+40. **ADX's internal Wilder-smoothing seed window starts at index 1, not
+    index 0** (story 3, `trend.adx`): unlike a standalone `atr()` call
+    (which seeds its 14-value Wilder average over TR[0:14]), `adx`'s +DM/
+    -DM series structurally cannot exist at index 0 (no prior bar), so its
+    paired internal TR-for-ADX series is *also* smoothed starting at index
+    1 (14 values at indices 1..14) to keep +DI/-DI aligned with +DM/-DM.
+    This one-bar shift is what makes the addendum's pinned lookback
+    (+DI/-DI first non-None = 14, one bar later than `atr(14)`'s 13) land
+    exactly on 2×period-1=27 for the ADX line itself (DX starts at 14, its
+    own Wilder seed needs another 14 values). Golden vector
+    `tests/golden/indicators/adx.json` covers this seed boundary
+    explicitly; hand cross-checks in `test_trend.py::test_adx_golden_vector`
+    show the raw +DM/-DM/TR sums.
+41. **Supertrend's initial-direction convention is a CTO pin, not a
+    derived fact** (story 3, `trend.supertrend`): the addendum explicitly
+    defers this to "golden vector + docstring". Pinned here: at the first
+    valid index (period-1), direction = +1.0 (uptrend, line=lower band) if
+    `close >= basis` (basis = (H+L)/2), else -1.0; a tie resolves to
+    uptrend. This has no external canonical source — it is this session's
+    choice, documented in `trend.supertrend`'s docstring and exercised by
+    `tests/golden/indicators/supertrend.json` (index 9, `direction=-1.0`
+    since close9=93.52 < basis9=93.815) and
+    `test_trend.py::test_supertrend_initial_direction_pinned_convention`.
+    Changing it later is a DESIGN change (breaks the golden vector), not a
+    bug fix.
+42. **Golden vector provenance (stories 1-3): independent from-spec
+    script, not a third-party TA library.** Every value in
+    `tests/golden/indicators/*.json` was computed by a standalone
+    reference implementation (`gen_golden.py`, run from the session
+    scratchpad, never committed to the repo) written directly against the
+    formulas pinned in `docs/handoff/SPRINT-P1B-indicators.md` — NOT by
+    running `tradekit.mae._indicators` (those are stubs that raise
+    `NotImplementedError`) and NOT via `pandas_ta`/`ta` in a throwaway
+    venv. This path was chosen over a reference library specifically
+    because the addendum's pinned Wilder/EMA seeding convention (SMA of
+    the first `period` values) is exactly what `pandas`/`pandas_ta`'s
+    `adjust=False` gets wrong (it seeds from the first raw value instead).
+    SERIES_A (the shared 45-bar OHLC fixture across `true_range.json`,
+    `atr.json`, `bollinger.json`, `keltner.json`, `sma.json`, `ema.json`,
+    `rsi.json`, `macd.json`, `stoch_rsi.json`, `roc.json`, `adx.json`,
+    `supertrend.json`) is a seeded random walk
+    (`random.Random(20260715)`, values rounded to 2 decimals) chosen so
+    the hand-arithmetic cross-checks in `test_volatility.py`/
+    `test_momentum.py`/`test_trend.py` are exact, pencil-verifiable sums,
+    not binary-float noise. Edge vectors (`constant_price.json`,
+    `short_series.json`, `single_bar.json`, `true_range_gap.json`) are
+    hand-listed or trivially derived (see each JSON's own `"source"`
+    field).
+
+    **Cross-checked once, then FROZEN (CTO gate, 2026-07-15):** (a) a
+    second from-spec implementation written independently by the CTO
+    session reproduced every value in every JSON to rel 1e-9; (b) external
+    reference TA-Lib 0.7.0 (throwaway venv, never a project dep) matched
+    EXACTLY: sma, ema, rsi, roc, bollinger (all three bands),
+    true_range[1:], and the macd line via `EMA(12)-EMA(26)`; (c) known,
+    hand-reproduced convention divergences (NOT defects): true_range[0]
+    (TA-Lib nan, ours H-L per Wilder), atr (TA-Lib seeds over TR[1..14],
+    ours TR[0..13]; verified |diff| decays by exactly 13/14 per bar —
+    identical recurrence, seed-only difference), TA-Lib's packaged MACD
+    (co-seeds both EMAs at the slow warm-up; converges to ours),
+    +DI/-DI/adx (TA-Lib seeds sums over indices 1..13 and applies the
+    decay step already at index 14 — its +DI[14]=31.1223 was reproduced
+    by hand as 100*(9.70*13/14+0.95)/(32.29*13/14+2.01); ours is Wilder's
+    book worksheet: plain average of indices 1..14, recurrence from 15).
+    The vectors are frozen; regenerating them requires redoing this gate.

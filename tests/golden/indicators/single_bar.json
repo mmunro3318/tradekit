@@ -1,0 +1,30 @@
+{
+  "indicator": "single_bar",
+  "params": {},
+  "source": "1 hand-listed bar. true_range[0]=high-low (never None, per contract); every other default-period indicator is [None] (length 1).",
+  "input": {
+    "highs": [
+      105.25
+    ],
+    "lows": [
+      102.75
+    ],
+    "closes": [
+      104.0
+    ]
+  },
+  "expected": {
+    "true_range": [
+      2.5
+    ],
+    "atr14": [
+      null
+    ],
+    "sma20": [
+      null
+    ],
+    "rsi14": [
+      null
+    ]
+  }
+}
