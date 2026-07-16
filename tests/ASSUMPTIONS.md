@@ -576,3 +576,140 @@ same commit (DESIGN maintenance rule applies here too).
     documented in _regime.py's module docstring. Flag to the Opus review
     gate: this is the load-bearing override-logic call the sprint doc
     routes to Opus.
+
+## Round-7 additions — P1C batch C TDD session (scan_markets), 2026-07-16
+
+55. **TEST-PATH EXCEPTION (extends assumptions 23/29/39/44/48):**
+    `tests/unit/mae/test_scan_markets_verb.py` imports `tradekit.mae._scanner`
+    (and `tradekit.mae._regime`, already covered by entry 48) directly.
+    `_scanner` has no dedicated public verb of its own THIS batch —
+    `tradekit.mae.scan_markets` stays an unconditional `NotImplementedError`
+    stub in `mae/__init__.py` (red-only; the dev pass wires the body to
+    `return _scanner.scan(asset_class, timeframes, filters, symbols,
+    regime_gate)`), same shape as batch B's `get_regime`/`_regime.
+    compute_regime` split. Bars are still faked via
+    `monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", ...)` by
+    dotted STRING path (no import, no exception needed) and regime via
+    `monkeypatch.setattr(_regime, "compute_regime", ...)` (module-attribute
+    patch, per the CTO pin that the scanner calls `_regime.compute_regime`
+    via module attribute specifically so this is possible).
+
+56. **`get_closed_bars` generalization (`mae._runtime`, SPRINT-P1C batch C
+    "`_runtime` extension"):** `get_closed_bars(symbol, timeframe,
+    lookback_days) -> BarSeries` generalizes `get_daily_bars`'s cache/
+    provider/live-bar-strip contract to any timeframe via
+    `TIMEFRAME_SECONDS[timeframe]`; `get_daily_bars(symbol, lookback)` is
+    PINNED to behave identically to `get_closed_bars(symbol, "1d",
+    lookback)`, but this batch (TDD red phase) deliberately leaves
+    `get_daily_bars`'s own body untouched — refactoring it into a one-line
+    delegate is the dev pass's job. `get_closed_bars` itself is an
+    unconditional-raise stub this batch. Consequently:
+    `test_get_closed_bars_strips_live_unclosed_bar_1h` (the genuinely NEW
+    "1h" behavior) is RED with `NotImplementedError`;
+    `test_get_closed_bars_1d_stub_and_get_daily_bars_still_behaves` is
+    GREEN — it reasserts `get_daily_bars`'s own unchanged behavior (still
+    passing) AND separately pins, via `pytest.raises(NotImplementedError)`,
+    that `get_closed_bars(symbol, "1d", ...)` is currently a raising stub —
+    both halves pass, so the test as a whole is green, deliberately
+    documenting the current seam state rather than being an accidentally-
+    green placeholder.
+
+57. **Scanner filter-semantics, output-schema, and regime-drop ambiguities
+    FLAGGED NOT RESOLVED this batch (CTO ratification needed before the dev
+    pass treats any of these as load-bearing) — pinned provisionally per
+    the batch dispatch's "align names with canonical, flag if it
+    contradicts; do NOT improvise" instruction:**
+
+    (a) **`macd_signal` value-string contradiction between the sprint doc
+    addendum and canonical §3.** The addendum's filter-semantics list says
+    `macd_signal ∈ {"bullish", "bearish"}`; canonical §3's OWN input schema
+    says `"bullish_cross" | "bearish_cross" | None`. This batch's tests/
+    stub docstring pin canonical's value strings (`"bullish_cross"` /
+    `"bearish_cross"`, canonical wins per "align names with canonical, flag
+    if it contradicts") but PIN THE SIMPLE SEMANTICS the addendum's
+    fallback instructs (histogram sign only: `histogram > 0` /
+    `histogram < 0`) rather than an actual crossover-event check — canonical's
+    own `"_cross"` naming textually implies a real crossing event (macd
+    line crossing signal within some lookback), which NEITHER document ever
+    defines algorithmically (no "N bars ago" window pinned anywhere). Not
+    improvised past this flag.
+
+    (b) **`bb_position: "inside"`** is an ADDITIVE value beyond canonical
+    §3's two enumerated strings (`"below_lower" | "above_upper" | None`) —
+    flagged as a minor, semantically-unambiguous extension (close strictly
+    between the bands), following the floor-not-ceiling precedent
+    (assumption 47), not a contradiction requiring ratification of meaning,
+    only of whether it's permitted as a THIRD filter value at all.
+
+    (c) **`scan_ts` vs. `as_of`:** the batch dispatch note suggested
+    surfacing the scan timestamp as `as_of` (matching
+    `get_correlation_matrix`'s own house-additive field name); canonical §3
+    `scan_markets`'s OWN example output names this field `scan_ts`. This
+    batch's tests pin `scan_ts` (canonical wins over the dispatch note's
+    suggestion — not a contradiction within canonical itself, just a
+    correction against an informal naming suggestion made before this
+    session reread canonical §3 directly).
+
+    (d) **`regime_context` shape for multi-symbol scans.** Canonical §3's
+    example output shows a single flat `regime_context: {"state":...,
+    "confidence":...}` — but that example scans a single implied symbol;
+    it never actually specifies what a MULTI-symbol scan's `regime_context`
+    looks like, and `scan_markets` explicitly supports scanning many
+    symbols each with (potentially) a different regime. This batch's tests/
+    docstring pin `regime_context` as `dict[symbol, {"state", "confidence"}]`
+    — a per-symbol keyed dict. This is flagged as riskier than a pure
+    additive-keys extension (assumption 47's precedent only covers ADDING
+    new top-level keys, not changing an EXISTING key's value type from a
+    flat object to a keyed dict), so it needs explicit CTO ratification,
+    not silent improvisation.
+
+    (e) **Regime-gate drop scope: tags vs. whole matches.** The addendum
+    says regime-incompatible "strategy tags" get dropped, and (ASSUMPTIONS
+    53) that a `"neutral"`/empty-`recommended_strategies` state "drops ALL
+    strategy-tagged signals for that symbol." This batch pins tag-level
+    pruning only: a match whose `signal_tags` end up empty after the gate
+    STAYS in `matches` (with `signal_tags: []`), rather than being removed
+    from the list entirely — filter AND-composition alone controls list
+    membership; the regime gate only prunes tags. No precedent settles
+    this either way; flagged for CTO ratification.
+
+    (f) **Signal-tag <-> strategy-family mapping** (`_scanner._TAG_STRATEGY`):
+    canonical §3's example only shows three tags (`"oversold"`,
+    `"volume_spike"`, `"at_support"`), none of which are strategy-family
+    names (`"momentum"`/`"breakout"`/`"mean_reversion"`, from `get_regime`'s
+    `recommended_strategies`) — so implementing the regime gate at all
+    requires SOME mapping between filter-derived tags and strategy
+    families, which neither document supplies. This session's mapping
+    (module docstring, `_scanner._TAG_STRATEGY`) is a session choice,
+    explicitly NOT CTO-ratified, same disclaimer precedent as
+    `_regime._STRATEGY_TAGS`.
+
+    None of (a)-(f) are silently baked into the dev pass without this flag;
+    ratify or correct each line before treating it as load-bearing, same
+    discipline as assumptions 47/51-54.
+
+    **CTO ratification (2026-07-16) — entry 57's six flags:**
+    (a) RATIFIED with canonical value strings "bullish_cross"/
+    "bearish_cross" and SIMPLE histogram-sign semantics (bullish: last
+    closed histogram > 0; bearish: < 0). True crossing-window semantics is
+    a flagged TODO-P5 refinement — the value-string/semantics tension is
+    documented in _scanner's docstring, not hidden.
+    (b) RATIFIED — "inside" is an additive enum value (floor-not-ceiling,
+    assumption 47).
+    (c) RATIFIED — canonical's `scan_ts` key name wins over the dispatch
+    note's `as_of` suggestion; canonical key names always win where they
+    exist.
+    (d) RATIFIED — `regime_context` keyed per-symbol for multi-symbol
+    scans; canonical's flat example is read as the single-symbol special
+    case. Divergence documented (this changes an existing key's value
+    type — the reviewer should confirm no canonical consumer assumes the
+    flat shape; none exists yet inside tradekit).
+    (e) RATIFIED as pinned — a regime-pruned match STAYS in `matches` with
+    `signal_tags: []` and per-symbol regime context visible. The scanner
+    is ADVISORY; enforcement is P2's policy engine (R-012/R-013), which
+    must never treat a scan match as permission. An explicit empty-tags
+    match is more honest than a silent absence and carries the "why".
+    (f) RATIFIED PROVISIONALLY — `_scanner._TAG_STRATEGY` (and
+    `_regime._STRATEGY_TAGS`) are session-invented mappings; they get
+    re-derived from the real strategy-tag registry when P2 introduces it
+    (revisit marker: SPRINT-P2 thesis strategy_tag work).

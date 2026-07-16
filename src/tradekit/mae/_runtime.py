@@ -137,3 +137,44 @@ def get_daily_bars(symbol: str, lookback_days: int) -> BarSeries:
     return BarSeries(
         asset=series.asset, timeframe=series.timeframe, bars=closed_bars, source=series.source
     )
+
+
+def get_closed_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSeries:
+    """CLOSED bars only for `symbol` at `timeframe`, over the trailing
+    `lookback_days`, ending at `clock()` (SPRINT-P1C batch C, `scan_markets`
+    story — the addendum's "`_runtime` extension").
+
+    Generalizes `get_daily_bars`'s cache/provider/live-bar-strip contract to
+    ANY timeframe present in `TIMEFRAME_SECONDS`: routes
+    `provider_for(symbol).get_bars` through the same `BarCache`
+    (`_cache_path`), then strips any trailing bar whose close time
+    (`ts_open + TIMEFRAME_SECONDS[timeframe]` seconds) is strictly after
+    `clock()`'s "now" — the SAME lookahead trap `get_daily_bars` already
+    guards for `"1d"` (ASSUMPTIONS 45), generalized via
+    `TIMEFRAME_SECONDS[timeframe]` instead of a hardcoded 86400s.
+
+    Equivalence pin (addendum, binding): `get_daily_bars(symbol,
+    lookback_days)` is defined to behave IDENTICALLY to
+    `get_closed_bars(symbol, "1d", lookback_days)`. The dev pass wiring this
+    stub's real body should refactor `get_daily_bars` into a one-line
+    delegate once `get_closed_bars` is implemented. This TDD session (test
+    author, red phase) deliberately leaves `get_daily_bars`'s OWN body
+    untouched so its existing tests (baseline, ASSUMPTIONS 45) stay green
+    while this function is red — see `tests/unit/mae/test_runtime.py`'s
+    `test_get_closed_bars_1d_stub_and_get_daily_bars_still_behaves` (pins
+    the equivalence claim at the seam, staying green on the get_daily_bars
+    half) and `test_get_closed_bars_strips_live_unclosed_bar_1h` (red — the
+    genuinely new "1h" behavior).
+
+    `scan_markets` (`_scanner.scan`) is this function's first caller for a
+    non-`"1d"` timeframe — the scanner MUST source bars only from here,
+    never from `provider_for` directly (same lookahead discipline as every
+    other verb; ASSUMPTIONS 45's rationale extends unchanged).
+
+    STUB (P1C batch C, red phase): raises NotImplementedError
+    unconditionally; the dev pass implements the generalized body.
+    """
+    raise NotImplementedError(
+        "P1C batch C — docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4 "
+        "(get_closed_bars generalization)"
+    )
