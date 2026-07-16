@@ -109,34 +109,7 @@ def get_daily_bars(symbol: str, lookback_days: int) -> BarSeries:
     see module docstring). `lookback_days` maps to `start = end -
     timedelta(days=lookback_days)`.
     """
-    is_crypto = "/" in symbol
-    asset = AssetRef(
-        symbol=symbol,
-        venue="kraken" if is_crypto else "alpaca",
-        asset_class="crypto" if is_crypto else "equity",
-        tick_size=_DEFAULT_TICK_SIZE,
-    )
-    source = asset.venue
-
-    now = clock()
-    start = now - timedelta(days=lookback_days)
-
-    provider = provider_for(symbol)
-    cache = BarCache(_cache_path)
-    series = cache.get_or_fetch(
-        provider.get_bars,
-        source=source,
-        asset=asset,
-        timeframe="1d",
-        start=start,
-        end=now,
-    )
-
-    tf_seconds = TIMEFRAME_SECONDS["1d"]
-    closed_bars = [b for b in series.bars if (b.ts_open + timedelta(seconds=tf_seconds)) <= now]
-    return BarSeries(
-        asset=series.asset, timeframe=series.timeframe, bars=closed_bars, source=series.source
-    )
+    return get_closed_bars(symbol, "1d", lookback_days)
 
 
 def get_closed_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSeries:
@@ -174,7 +147,31 @@ def get_closed_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSerie
     STUB (P1C batch C, red phase): raises NotImplementedError
     unconditionally; the dev pass implements the generalized body.
     """
-    raise NotImplementedError(
-        "P1C batch C — docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4 "
-        "(get_closed_bars generalization)"
+    is_crypto = "/" in symbol
+    asset = AssetRef(
+        symbol=symbol,
+        venue="kraken" if is_crypto else "alpaca",
+        asset_class="crypto" if is_crypto else "equity",
+        tick_size=_DEFAULT_TICK_SIZE,
+    )
+    source = asset.venue
+
+    now = clock()
+    start = now - timedelta(days=lookback_days)
+
+    provider = provider_for(symbol)
+    cache = BarCache(_cache_path)
+    series = cache.get_or_fetch(
+        provider.get_bars,
+        source=source,
+        asset=asset,
+        timeframe=timeframe,
+        start=start,
+        end=now,
+    )
+
+    tf_seconds = TIMEFRAME_SECONDS[timeframe]
+    closed_bars = [b for b in series.bars if (b.ts_open + timedelta(seconds=tf_seconds)) <= now]
+    return BarSeries(
+        asset=series.asset, timeframe=series.timeframe, bars=closed_bars, source=series.source
     )

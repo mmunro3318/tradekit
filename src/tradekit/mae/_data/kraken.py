@@ -38,10 +38,24 @@ KRAKEN_OHLC_URL = "https://api.kraken.com/0/public/OHLC"
 _SYMBOL_TO_KRAKEN_PAIR: dict[str, str] = {
     "BTC/USD": "XBTUSD",
     "ETH/USD": "ETHUSD",
+    # Mike's universe (P1C smoke catch): modern Kraken listings echo the
+    # request pair name back as the response result key — only the legacy
+    # BTC/ETH pairs carry the X/Z spelling. Each mapping below was verified
+    # against the LIVE /0/public/OHLC endpoint on 2026-07-17.
+    "SOL/USD": "SOLUSD",
+    "LINK/USD": "LINKUSD",
+    "NEAR/USD": "NEARUSD",
+    "TAO/USD": "TAOUSD",
+    "EIGEN/USD": "EIGENUSD",
 }
 _KRAKEN_RESULT_KEY: dict[str, str] = {
     "XBTUSD": "XXBTZUSD",
     "ETHUSD": "XETHZUSD",
+    "SOLUSD": "SOLUSD",
+    "LINKUSD": "LINKUSD",
+    "NEARUSD": "NEARUSD",
+    "TAOUSD": "TAOUSD",
+    "EIGENUSD": "EIGENUSD",
 }
 
 # Kraken OHLC returns at most this many bars per call; beyond it callers must

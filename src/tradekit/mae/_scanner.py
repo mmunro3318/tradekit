@@ -151,6 +151,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from tradekit.mae import _regime, _runtime
+from tradekit.mae._indicators import momentum, volatility, volume
+
 # Scanner-internal constants (not agent-facing inputs).
 _SCAN_LOOKBACK_DAYS = 90
 """Bars fetched per symbol/timeframe via `_runtime.get_closed_bars` — chosen
@@ -179,6 +182,148 @@ strategy-family mapping" section) — a session-chosen extrapolation of
 canonical §3's example tags, NOT itself CTO-ratified. `None` means the tag
 carries no strategy affiliation and always survives the regime gate."""
 
+_BB_POSITION_TAGS: dict[str, str] = {
+    "below_lower": "at_support",
+    "above_upper": "at_resistance",
+    "inside": "bb_inside",
+}
+"""`bb_position` value -> signal tag, per the module docstring's "Signal tag
+/ strategy-family mapping" section."""
+
+
+class _InsufficientBars(Exception):
+    """Raised internally when a present filter's required indicator has no
+    non-None value in the fetched window — caught by `scan`, which converts
+    it into a `warnings` entry and skips the symbol/timeframe combo (never
+    an exception that escapes to the caller)."""
+
+
+def _last_non_none(values: list[float | None]) -> float | None:
+    for v in reversed(values):
+        if v is not None:
+            return v
+    return None
+
+
+def _evaluate_symbol_timeframe(
+    symbol: str, timeframe: str, bars: list[Any], filters: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Compute only the indicators `filters` needs, apply the AND-composed
+    filter checks, and return a fully-populated match dict, or `None` if the
+    symbol/timeframe combo fails at least one filter. Raises
+    `_InsufficientBars` if a present filter's indicator has no non-None
+    value in the fetched window (caller converts this to a warning + skip)."""
+    closes = [float(b.close) for b in bars]
+    highs = [float(b.high) for b in bars]
+    lows = [float(b.low) for b in bars]
+    volumes = [float(b.volume) for b in bars]
+
+    candidate: dict[str, Any] = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "price": closes[-1] if closes else None,
+        "rsi": None,
+        "macd_hist": None,
+        "atr": None,
+        "atr_pct_of_price": None,
+        "volume_ratio": None,
+        "signal_tags": [],
+    }
+    tags: list[str] = []
+
+    if "rsi_max" in filters or "rsi_min" in filters:
+        rsi_vals = momentum.rsi(closes, 14)
+        last_rsi = _last_non_none(rsi_vals)
+        if last_rsi is None:
+            name = "rsi_max" if "rsi_max" in filters else "rsi_min"
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for {name}")
+        candidate["rsi"] = last_rsi
+        if "rsi_max" in filters and last_rsi > filters["rsi_max"]:
+            return None
+        if "rsi_max" in filters:
+            tags.append("oversold")
+        if "rsi_min" in filters and last_rsi < filters["rsi_min"]:
+            return None
+        if "rsi_min" in filters:
+            tags.append("overbought")
+
+    if "macd_signal" in filters:
+        macd_result = momentum.macd(closes)
+        last_hist = _last_non_none(macd_result.histogram)
+        if last_hist is None:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for macd_signal")
+        candidate["macd_hist"] = last_hist
+        want = filters["macd_signal"]
+        if want == "bullish_cross":
+            if not (last_hist > 0.0):
+                return None
+            tags.append("macd_bullish")
+        elif want == "bearish_cross":
+            if not (last_hist < 0.0):
+                return None
+            tags.append("macd_bearish")
+        else:
+            return None
+
+    if "bb_position" in filters:
+        bb_result = volatility.bollinger(closes, 20, 2.0)
+        last_upper = _last_non_none(bb_result.upper)
+        last_lower = _last_non_none(bb_result.lower)
+        if last_upper is None or last_lower is None or not closes:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for bb_position")
+        last_close = closes[-1]
+        if last_close < last_lower:
+            position = "below_lower"
+        elif last_close > last_upper:
+            position = "above_upper"
+        else:
+            position = "inside"
+        if position != filters["bb_position"]:
+            return None
+        tags.append(_BB_POSITION_TAGS[position])
+
+    if "volume_spike" in filters:
+        vr_vals = volume.volume_ratio(volumes, 20)
+        last_vr = _last_non_none(vr_vals)
+        if last_vr is None:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for volume_spike")
+        candidate["volume_ratio"] = last_vr
+        if last_vr < filters["volume_spike"]:
+            return None
+        tags.append("volume_spike")
+
+    if "atr_percentile_min" in filters:
+        atr_vals = volatility.atr(highs, lows, closes, 14)
+        non_none_atr = [v for v in atr_vals if v is not None]
+        if not non_none_atr:
+            raise _InsufficientBars(
+                f"{symbol} {timeframe}: insufficient bars for atr_percentile_min"
+            )
+        last_atr = non_none_atr[-1]
+        pctile = sum(1 for v in non_none_atr if v <= last_atr) / len(non_none_atr) * 100.0
+        if pctile < filters["atr_percentile_min"]:
+            return None
+        candidate["atr"] = last_atr
+        if candidate["price"] is not None:
+            candidate["atr_pct_of_price"] = last_atr / candidate["price"] * 100.0
+        tags.append("high_volatility")
+
+    candidate["signal_tags"] = tags
+    return candidate
+
+
+def _apply_regime_gate(tags: list[str], regime: dict[str, Any]) -> list[str]:
+    """Drop each tag whose mapped `_TAG_STRATEGY` family is not in
+    `regime`'s `recommended_strategies` — a tag with no mapped family (e.g.
+    `"bb_inside"`) always survives."""
+    recommended = set(regime.get("recommended_strategies") or [])
+    kept: list[str] = []
+    for tag in tags:
+        family = _TAG_STRATEGY.get(tag)
+        if family is None or family in recommended:
+            kept.append(tag)
+    return kept
+
 
 def scan(
     asset_class: str,
@@ -192,10 +337,12 @@ def scan(
     pipeline, filter semantics, regime-gate caching/drop rule, and output
     shape pins.
 
-    STUB (P1C batch C, red phase): the `symbols is None` universe-deferral
-    check is real, implemented validation (see module docstring); every
-    other code path raises `NotImplementedError` — the dev pass implements
-    the fetch -> indicator -> filter -> regime-gate pipeline next.
+    `symbols is None` ("full universe" scan) is deferred past this sprint
+    and raises `ValueError` before any bar fetch. Otherwise: for every
+    symbol/timeframe pair, bars come ONLY from `_runtime.get_closed_bars`;
+    filters AND-compose; `regime_gate=True` calls `_regime.compute_regime`
+    at most once per symbol (cached), pruning each match's `signal_tags`
+    against that symbol's `recommended_strategies` (see module docstring).
     """
     if symbols is None:
         raise ValueError(
@@ -203,6 +350,40 @@ def scan(
             "SPRINT-P1C — pass an explicit symbols list "
             "(docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4)"
         )
-    raise NotImplementedError(
-        "P1C batch C — docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4 (scan_markets)"
-    )
+
+    matches: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    regime_context: dict[str, Any] = {}
+    regime_cache: dict[str, dict[str, Any]] = {}
+
+    for symbol in symbols:
+        for timeframe in timeframes:
+            series = _runtime.get_closed_bars(symbol, timeframe, _SCAN_LOOKBACK_DAYS)
+            try:
+                match = _evaluate_symbol_timeframe(symbol, timeframe, series.bars, filters)
+            except _InsufficientBars as exc:
+                warnings.append(str(exc))
+                continue
+            if match is None:
+                continue
+
+            if regime_gate:
+                if symbol not in regime_cache:
+                    regime_cache[symbol] = _regime.compute_regime(
+                        symbol, _SCAN_REGIME_LOOKBACK_DAYS, _SCAN_REGIME_N_STATES
+                    )
+                regime = regime_cache[symbol]
+                regime_context[symbol] = {
+                    "state": regime.get("current_state"),
+                    "confidence": regime.get("confidence"),
+                }
+                match["signal_tags"] = _apply_regime_gate(match["signal_tags"], regime)
+
+            matches.append(match)
+
+    return {
+        "scan_ts": _runtime.clock().isoformat(),
+        "regime_context": regime_context,
+        "matches": matches,
+        "warnings": warnings,
+    }

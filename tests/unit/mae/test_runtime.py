@@ -19,8 +19,6 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import pytest
-
 from tradekit.contracts import AssetRef, Bar, BarSeries
 from tradekit.mae import _runtime
 from tradekit.mae._data.alpaca_data import AlpacaDataProvider
@@ -194,7 +192,12 @@ def test_get_closed_bars_1d_stub_and_get_daily_bars_still_behaves(monkeypatch, t
     assert [b.ts_open for b in daily_result.bars] == closed_opens
 
     # get_closed_bars("1d", ...) is the addendum's pinned equivalent call
-    # shape — currently an unconditional-raise stub (dev pass implements it
-    # as a delegate that get_daily_bars itself will later call).
-    with pytest.raises(NotImplementedError):
-        _runtime.get_closed_bars("BTC/USD", "1d", lookback_days=10)
+    # shape. Red phase pinned this stanza as pytest.raises(NotImplementedError)
+    # per its own planned-obsolescence note; the dev pass (this edit) replaces
+    # it with the REAL equivalence assertion: identical output to
+    # get_daily_bars for the same inputs.
+    generalized_result = _runtime.get_closed_bars("BTC/USD", "1d", lookback_days=10)
+    assert [b.ts_open for b in generalized_result.bars] == closed_opens
+    assert generalized_result == daily_result, (
+        "addendum equivalence pin: get_daily_bars(s, n) == get_closed_bars(s, '1d', n)"
+    )

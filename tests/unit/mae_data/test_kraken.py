@@ -279,3 +279,22 @@ def test_bucket_wiring_second_call_waits_for_token(respx_mock) -> None:
         "between calls) — sleeper was never invoked"
     )
     assert all(w > 0 for w in waits), f"every wait must be positive, got {waits}"
+
+
+def test_pair_mapping_tables_are_consistent_and_cover_mikes_universe() -> None:
+    """P1C smoke catch: scan_markets against SOL/USD died on a missing pair
+    mapping — the P1A tables only covered BTC/ETH. Pins (a) every request
+    pair has a response result key, and (b) Mike's crypto universe is
+    mapped. Result keys for the five modern pairs were verified against the
+    LIVE Kraken OHLC endpoint 2026-07-17 (they echo the request name; only
+    legacy BTC/ETH use the X/Z spelling)."""
+    from tradekit.mae._data.kraken import _KRAKEN_RESULT_KEY, _SYMBOL_TO_KRAKEN_PAIR
+
+    for symbol, pair in _SYMBOL_TO_KRAKEN_PAIR.items():
+        assert pair in _KRAKEN_RESULT_KEY, f"{symbol} maps to {pair} with no result key"
+
+    for symbol in ("ETH/USD", "SOL/USD", "LINK/USD", "NEAR/USD", "TAO/USD", "EIGEN/USD"):
+        assert symbol in _SYMBOL_TO_KRAKEN_PAIR, f"universe symbol {symbol} unmapped"
+
+    for modern in ("SOLUSD", "LINKUSD", "NEARUSD", "TAOUSD", "EIGENUSD"):
+        assert _KRAKEN_RESULT_KEY[modern] == modern
