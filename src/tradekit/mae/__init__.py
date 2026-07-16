@@ -32,7 +32,34 @@ def scan_markets(
 
 
 def get_regime(symbol: str, lookback_days: int = 90, n_states: int = 3) -> dict[str, Any]:
-    """HMM regime classification + EWMA 3-sigma override (TD-13, G3)."""
+    """HMM regime classification + EWMA 3-sigma override (TD-13, G3).
+
+    P1C batch B design pins (dev pass wires this body to
+    `tradekit.mae._regime.compute_regime(symbol, lookback_days, n_states)` —
+    see that module's docstring for the full fit/persist/staleness/override/
+    rules-fallback contract; internals never re-exported here per DESIGN §1):
+
+    - Output carries canonical §3's `get_regime` keys — `symbol`,
+      `current_state` (`"low_vol_trend" | "high_vol_chop" | "breakdown"`),
+      `state_index`, `confidence`, `state_metrics` (`annualized_vol`,
+      `mean_return_daily`, `avg_state_duration_days`),
+      `recommended_strategies`, `avoid_strategies` — PLUS `method`
+      (`"hmm" | "ewma_override" | "rules"`) and a `warnings` list, which the
+      addendum requires (`refit`/`insufficient_history`/
+      `hmm_non_convergence` notes) but canonical §3's example output does
+      not show at all — flagged, not resolved, this batch (see
+      `tests/ASSUMPTIONS.md`'s new P1C-batch-B entry; same shape as
+      assumption 47's size_position/get_correlation_matrix precedent).
+    - Bars come ONLY from `_runtime.get_daily_bars(symbol, lookback_days)`
+      (closed daily bars — the live bar is never visible here, batch A's
+      lookahead trap); `get_regime` never calls a provider directly.
+    - EWMA override (G3): `method="ewma_override"` forces
+      `current_state="high_vol_chop"` and `recommended_strategies=[]`,
+      computed as pure arithmetic on the LOADED artifact — never triggers a
+      refit.
+    - Rules fallback (`method="rules"`) fires on < 60 daily bars or HMM
+      non-convergence; never returns a half-fit model's states (Traps).
+    """
     raise NotImplementedError("P1 — docs/handoff/SPRINT-P1C-regime-scanner-sizing.md")
 
 

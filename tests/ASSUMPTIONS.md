@@ -450,3 +450,110 @@ same commit (DESIGN maintenance rule applies here too).
     canonical doc's schemas are a floor, not a ceiling: additive keys that
     carry gate-relevant information are permitted; renaming or removing
     canonical keys is not.
+
+## Round-6 additions — P1C batch B TDD session (get_regime), 2026-07-16
+
+48. **TEST-PATH EXCEPTION (extends assumptions 23/29/39/44):**
+    `tests/unit/mae/test_regime.py` AND `tests/unit/mae/
+    test_get_regime_verb.py` both import `tradekit.mae._regime` directly.
+    `_regime` has no dedicated public verb of its own THIS batch —
+    `tradekit.mae.get_regime` stays an unconditional `NotImplementedError`
+    stub in batch B (red-only; the dev pass wires it to
+    `_regime.compute_regime`), so unlike `size_position`/
+    `get_correlation_matrix` (already-wired verbs by the time their
+    "_verb" test files were written in batch A), there is no way to
+    exercise `compute_regime`'s fit/persist/staleness/override/rules-
+    fallback logic through `tradekit.mae.get_regime` yet. Both regime test
+    files therefore import `_regime` directly and treat `compute_regime`
+    itself as the object under test — `test_get_regime_verb.py`'s
+    docstring explains this in full. Runtime bars are still faked via
+    `monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", ...)` by
+    dotted STRING path (no import, no exception needed) and the clock via
+    `"tradekit.mae._runtime._clock"`, matching the batch-A house style.
+    `_regime` is NOT added to pyproject's TID251 `banned-api` list this
+    batch (only `tradekit.mae._metrics` is banned so far) — same
+    unbanned-but-exception-documented state as `_correlation`/`_runtime`.
+
+49. **HMM artifact models-dir path seam (`mae._regime._models_dir`,
+    SPRINT-P1C batch B, extends assumption 45's `_cache_path` lesson):**
+    any module that writes files needs a path seam, and any test that
+    triggers `_regime.compute_regime`'s fit/persist path MUST monkeypatch
+    `_regime._models_dir` to `tmp_path` — a test that writes into the real
+    `data/models/` is a defect, same rationale as batch A's `_runtime.
+    _cache_path` catch. Every persistence/staleness/path-validation/EWMA-
+    override/rules-fallback/non-convergence/lookahead test in
+    `test_get_regime_verb.py` does this.
+
+50. **Pickle-trap path validation (`_regime._artifact_paths`) — the escape
+    vector is a WINDOWS backslash, not a forward slash:** `_symbol_slug`
+    only replaces `"/"` with `"-"`; a symbol containing `"\\.."` segments
+    (e.g. `"..\\..\\secrets"`) is NOT sanitized by that rule alone and,
+    left unvalidated, resolves outside `_models_dir` on Windows (this
+    sprint's dev/CTO environment — backslash is a real path separator
+    there). `_artifact_paths`/`compute_regime` must independently validate
+    the RESOLVED path lands inside `_models_dir` (`Path.resolve()`
+    containment check) rather than trusting the slug — pinned by
+    `test_regime.py::test_artifact_paths_backslash_escape_symbol_raises_value_error`
+    and `test_get_regime_verb.py::test_compute_regime_rejects_path_escaping_symbol`,
+    both expecting `ValueError`. A forward-slash-only symbol (e.g.
+    `"../evil"`) would NOT actually demonstrate the trap, since the slug
+    step neutralizes every `"/"` before any path is built — the tests
+    deliberately avoid that non-reproducing case.
+
+51. **State-labeling ambiguity, n_states=3, FLAGGED NOT RESOLVED (CTO
+    ratification needed before the dev pass treats this as load-bearing):**
+    canonical §3's `get_regime` output lists exactly three
+    `current_state` strings (`"low_vol_trend" | "high_vol_chop" |
+    "breakdown"`) but never states which is the vol-variance MIDDLE state
+    when `n_states=3`. This batch's tests pin lowest-variance ->
+    `low_vol_trend`, highest-variance -> `breakdown`, middle-variance ->
+    `high_vol_chop` (`_regime._N_STATES_3_MIDDLE_LABEL`) — a SESSION CALL,
+    not derived from any pinned source, referenced via the module constant
+    in tests (never a hardcoded string) so a later ratification needs no
+    test-body edits. n_states=2's mapping (lowest -> low_vol_trend,
+    highest -> high_vol_chop) IS unambiguous and directly pinned by the
+    addendum + canonical §3, and is the ONLY n_states value this batch's
+    enumerated test list actually exercises end-to-end via
+    `compute_regime` (the n_states=3 constant is exercised only at the
+    `_label_states` unit level in `test_regime.py`).
+
+52. **`get_regime` output schema — `method`/`warnings` keys ADDED to
+    canonical §3, same shape as assumption 47's precedent:** canonical
+    §3's `get_regime` example output has NO `method` or `warnings`/notes
+    key at all, but the addendum explicitly requires `method` (`"hmm" |
+    "ewma_override" | "rules"`) to distinguish the override/fallback paths
+    the reviewer is specifically gating on, plus warnings entries
+    (`refit`, `insufficient_history`, `hmm_non_convergence`). This batch's
+    tests assert both keys exist and carry the addendum's values — NOT
+    confirmed against canonical §3, which is silent on them; flagged for
+    the same CTO ratification pass as assumption 47, not silently
+    improvised past that flag.
+
+53. **Rules-fallback neutral-bucket name, FLAGGED NOT RESOLVED:** the
+    rules grid's third outcome (neither `vol_pctile > 0.8` nor
+    `ADX(14) >= 25`) has no canonical §3 name at all — the addendum says
+    only "the middle/neutral state." This batch's tests pin the string
+    `"neutral"` via `_regime._RULES_NEUTRAL_STATE` (tests reference the
+    constant, never the literal), explicitly NOT one of canonical §3's
+    three enumerated `current_state` values. CTO ratification needed:
+    either add `"neutral"` as a fourth legitimate `current_state` value,
+    or pick one of the three canonical strings (most likely
+    `low_vol_trend`, as the least alarming default) for this bucket.
+
+    **CTO ratification (2026-07-16) — entries 51/52/53:**
+    (51) RATIFIED as the tests pin it: n_states=3 maps lowest-variance ->
+    low_vol_trend, middle -> high_vol_chop, highest -> breakdown.
+    Rationale: canonical §3 orders its three states from calmest to most
+    violent, and "breakdown" is unambiguously the extreme; chop sits
+    between trend and breakdown on the vol axis.
+    (52) RATIFIED — `method` and `warnings` are additive keys under the
+    assumption-47 floor-not-ceiling rule; `method` is load-bearing for the
+    Opus review gate on override/fallback wiring, and downstream policy
+    rules (R-012/R-013 context) may key on it.
+    (53) RATIFIED as `"neutral"`, a FOURTH legitimate `current_state`
+    value emitted ONLY by `method="rules"`. Forcing the bucket into
+    `low_vol_trend` would let a thin-history symbol masquerade as a
+    trending regime and pass a regime gate it never earned — every
+    ambiguity resolves AGAINST permissiveness (assumption 25's spirit).
+    Consumers (scan_markets regime gate, P2 policy) MUST treat "neutral"
+    as no-recommendation: `recommended_strategies=[]`.
