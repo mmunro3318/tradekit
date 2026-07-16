@@ -66,6 +66,32 @@ same commit (DESIGN maintenance rule applies here too).
     verb lands: re-point the tests through the public surface AND add the
     internal to the TID251 ban list, same commit. These are the only two
     permitted internal imports in tests/.
+
+    **UPDATE (P1C batch A, 2026-07-16) — the sizing-test split, CTO call
+    per the SPRINT-P1C addendum:** `size_position` now has a wired stub
+    (`mae/__init__.py`, body still `NotImplementedError` pending the dev
+    pass) and a matching verb-level test file,
+    `tests/unit/mae/test_size_position_verb.py`, which fakes runtime bars
+    (monkeypatching `"tradekit.mae._runtime.get_daily_bars"` by dotted
+    string path, not a direct import) and exercises the verb's output
+    dict, kelly-both-None/-one-None branches, and the three existing
+    golden scenarios RE-EXPRESSED through the verb. `tests/unit/mae/
+    test_sizing.py` itself is **unchanged, zero tests moved**: every
+    existing test there (`test_kelly_golden_vector`,
+    `test_negative_kelly_clamps_to_zero`, `test_kelly_rejects_nonsense_
+    inputs`, `test_atr_position_golden_vector`, `test_atr_rejects_zero_
+    atr`) asserts pure fraction-exact math on `kelly_fractions`/
+    `atr_position` directly — none of them are "verb-shaped" (none touch
+    bar fetching, ATR-from-OHLCV, or output-dict assembly), so re-pointing
+    them through the verb would need network-shaped bar fakes for **no
+    behavioral gain** (the addendum's explicit escape hatch: "keep the
+    fraction-exact math golden tests where they are"). Consequently
+    `tradekit.mae._sizing` is **NOT yet added to the TID251 ban list** —
+    `test_sizing.py` still imports it directly, same as before. This
+    exception now covers three modules: `thesis._grading`, `mae._sizing`
+    (both unchanged), and, new this batch, `mae._correlation` (see entry
+    44) — `mae._runtime` and `mae._data.macro` get their own exception
+    below (entry 44) since no public verb wires them either.
 24. One thesis = ONE predicate timeframe (MVP): `evaluate_criteria` raises on
     mixed timeframes. Lifting this is a DESIGN change, not a bug fix.
 25. Same-bar grading priority is **failure > invalidation > success**, and
@@ -333,3 +359,94 @@ same commit (DESIGN maintenance rule applies here too).
     (UTC-day anchor, strict-fractal, slate-wipe crack); the dual
     independent implementation is the gate there. Same freeze rule as
     assumption 42.
+
+## Round-5 additions — P1C batch A TDD session, 2026-07-16
+
+44. **TEST-PATH EXCEPTION (extends assumptions 23/29/39):**
+    `tests/unit/mae/test_runtime.py` imports `tradekit.mae._runtime`
+    directly, `tests/unit/mae_data/test_macro.py` imports
+    `tradekit.mae._data.macro` directly, and the `compute_correlation`
+    golden-vector tests in `tests/unit/mae/test_correlation_verb.py`
+    import `tradekit.mae._correlation` directly — none of the three have
+    (or, per the addendum, ever will have) a dedicated public verb of
+    their own; `_runtime` is a private ambient seam consumed BY verbs,
+    `_data.macro` is non-gating supplementary-data plumbing (may be
+    re-deferred without blocking the sprint), and `_correlation` is the
+    pure-math core wired only through `get_correlation_matrix`. Verb-level
+    tests (`test_size_position_verb.py`, `test_correlation_verb.py`'s
+    verb-level half) fake runtime bars by monkeypatching
+    `"tradekit.mae._runtime.get_daily_bars"` by dotted STRING path —
+    string-path `monkeypatch.setattr` is not a Python `import` statement
+    and needs no exception; only files that write `from tradekit.mae
+    import _runtime` (or `_data.macro` / `_correlation`) need to be listed
+    here. When/if a public verb someday re-exports `_runtime` or
+    `_data.macro` wholesale (neither is planned), re-point and ban per the
+    entry-23/29/39 pattern.
+
+45. **Live-bar-stripping rule (`mae._runtime.get_daily_bars`, SPRINT-P1C
+    addendum "the runtime data seam"):** `get_daily_bars` returns CLOSED
+    daily bars only — the still-open "live" bar (the one whose close time,
+    `ts_open + 86400s`, is strictly after `clock()`'s "now") is stripped
+    inside this ONE function, so no verb downstream can ever see it. This
+    is the sprint's pinned lookahead trap. Pinned by
+    `test_runtime.py::test_get_daily_bars_strips_live_unclosed_bar`: a
+    fake provider returns N closed dailies plus one bar whose close time
+    exceeds a monkeypatched fixed `_clock()`, and the returned series must
+    end exactly at the last closed bar, never including the live one.
+
+46. **Macro never-raise degradation contract (`mae._data.macro.
+    get_macro_bars`, SPRINT-P1C story 0, Mike-approved 2026-07-16):**
+    supplementary/macro data (yfinance) NEVER raises out of
+    `get_macro_bars`, unlike primary OHLCV providers (assumption 27's
+    `errors.py` doc: `ProviderUnavailable` etc. are for Kraken/Alpaca
+    only). On any fetch failure: return the cached bars already on disk
+    for that ticker with `stale=True`, or `BarSeries(bars=[], stale=True,
+    source="yfinance")` when nothing is cached yet. `MacroProvider` itself
+    (the `MarketDataPort`-shaped class inside macro.py) DOES raise on
+    failure, same contract as Kraken/Alpaca — the never-raise wrapper is
+    one layer up, in `get_macro_bars`, and is what distinguishes
+    supplementary data's degrade-with-visibility rule from primary OHLCV's
+    raise-don't-degrade rule. Pinned by three tests in `test_macro.py`:
+    happy path (stale=False), fetch failure with a warm cache (stale=True
+    + cached bars, no raise), fetch failure with a cold cache (stale=True
+    + empty bars, no raise). yfinance does not go through `httpx`, so the
+    suite's autouse `respx_mock` zero-network guard does not see it either
+    way; the sanctioned zero-network seam is monkeypatching
+    `tradekit.mae._data.macro._fetch_rows` directly (addendum: do NOT
+    respx-mock Yahoo's internals).
+
+47. **Schema ambiguities flagged, NOT resolved, this batch (canonical §3
+    vs. the SPRINT-P1C addendum) — CTO ratification needed before the dev
+    pass implements bodies:**
+    (a) canonical §3's `size_position` example output has no `warnings`
+    key, but the addendum explicitly requires a `negative_kelly` warning
+    and a `kelly_inputs_missing` warning to be surfaced somewhere. This
+    batch's tests assert a `"warnings"` list key (same shape as
+    `compute_strategy_metrics`'s existing `warnings` field) — NOT
+    confirmed against canonical §3, which is silent on it.
+    (b) canonical §3's `get_correlation_matrix` example output has no
+    `insufficient_overlap`-flavored key at all (only
+    `high_correlation_warnings`), but the addendum explicitly requires
+    "< 20 overlapping points -> pair entry null +
+    `insufficient_overlap` in a warnings list". This batch's tests assert
+    an `"insufficient_overlap_warnings"` list key (parallel naming to
+    `high_correlation_warnings`, each entry a dict with `"pair"` — a
+    2-tuple/list of symbols — and an overlap-count field) — this exact
+    key name and shape is this session's invention, not derived from any
+    pinned source.
+    Both are CTO calls to make explicit (not silently improvised into the
+    dev pass) per the batch dispatch instruction: "If a canonical §3
+    schema detail conflicts with a pinned signature or an addendum rule,
+    do NOT improvise — flag it."
+
+    **CTO ratification (2026-07-16): BOTH RATIFIED as the tests pin them.**
+    (a) `size_position` output carries a `warnings: list[str]` key —
+    canonical §3's example omitting it is an omission, not a prohibition;
+    the sprint doc itself mandates a `negative_kelly` warning, and the
+    `warnings` list is the house convention (StrategyMetrics). (b)
+    `insufficient_overlap_warnings` (entries `{"pair": [a, b], "overlap":
+    n}`) is ratified as the canonical-shape EXTENSION for R-013's
+    unmeasured-pair rule, parallel to `high_correlation_warnings`. The
+    canonical doc's schemas are a floor, not a ceiling: additive keys that
+    carry gate-relevant information are permitted; renaming or removing
+    canonical keys is not.
