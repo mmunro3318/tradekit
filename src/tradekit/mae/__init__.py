@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from tradekit.contracts import StrategyMetrics, TradeRecord
-from tradekit.mae import _correlation, _metrics, _runtime, _sizing
+from tradekit.mae import _correlation, _metrics, _regime, _runtime, _sizing
 from tradekit.mae._indicators import volatility
 
 
@@ -60,7 +60,7 @@ def get_regime(symbol: str, lookback_days: int = 90, n_states: int = 3) -> dict[
     - Rules fallback (`method="rules"`) fires on < 60 daily bars or HMM
       non-convergence; never returns a half-fit model's states (Traps).
     """
-    raise NotImplementedError("P1 — docs/handoff/SPRINT-P1C-regime-scanner-sizing.md")
+    return _regime.compute_regime(symbol, lookback_days, n_states)
 
 
 def get_derivatives_context(symbol: str, lookback_periods: int = 48) -> dict[str, Any]:

@@ -557,3 +557,22 @@ same commit (DESIGN maintenance rule applies here too).
     ambiguity resolves AGAINST permissiveness (assumption 25's spirit).
     Consumers (scan_markets regime gate, P2 policy) MUST treat "neutral"
     as no-recommendation: `recommended_strategies=[]`.
+
+54. **EWMA-override baseline = the CALMEST fitted state's emission params
+    (CTO adjudication, 2026-07-16, dev-flagged):** the sprint doc's G3
+    line ("state_mean_vol + 3*state_vol_std from the fitted state's
+    emission params") is ambiguous about WHICH state. Pinned: the
+    lowest-vol-variance fitted state, NOT the currently-decoded state.
+    Rationale: with short windows the HMM routinely allocates a vol spike
+    its own high-variance state — under a current-state baseline the
+    override could then never fire during the exact explosions it exists
+    to catch (the threshold inflates with the spike). The calmest-state
+    band is the stable definition of "normal"; exceeding it by 3 sigma is
+    anomalous regardless of how the HMM chose to file the spike. Costs
+    are asymmetric (false positive = missed trades; false negative =
+    trading into a vol explosion), and every ambiguity resolves AGAINST
+    permissiveness (assumption 25's spirit). Pinned by
+    test_get_regime_verb.py::test_ewma_override_planted_spike_triggers;
+    documented in _regime.py's module docstring. Flag to the Opus review
+    gate: this is the load-bearing override-logic call the sprint doc
+    routes to Opus.
