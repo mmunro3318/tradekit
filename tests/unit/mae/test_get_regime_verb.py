@@ -62,7 +62,9 @@ ALSO always present in warnings alongside the grid-selected state.
 
 from __future__ import annotations
 
+import json
 import math
+import pickle
 import random
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -277,6 +279,126 @@ def test_ewma_override_planted_spike_triggers(monkeypatch, tmp_path) -> None:
     assert result["method"] == "ewma_override"
     assert result["current_state"] == "high_vol_chop"
     assert result["recommended_strategies"] == []
+
+
+# ---------------------------------------------------------------------------
+# HIGH-1 (review round 4): the EWMA-override threshold's `state_mean_vol`
+# must be the CALMEST fitted state's own emission mean (ASSUMPTIONS 54), not
+# the pooled feature-matrix mean over ALL bars. The 0.25-spike test above
+# clears EITHER threshold (pooled mean >= calm-state mean always, so the
+# pooled-mean bug only ever makes the override UNDER-fire, never over-fire)
+# and cannot discriminate the two implementations. This test constructs a
+# MARGINAL ewma_vol that sits strictly between the two candidate thresholds:
+# it must fail (method stays "hmm") under the pooled-mean bug and pass
+# (method="ewma_override") once state_mean_vol is the calm state's own
+# emission mean.
+# ---------------------------------------------------------------------------
+
+
+def test_ewma_override_marginal_spike_discriminates_calm_state_mean_from_pooled_mean(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(_regime, "_models_dir", tmp_path)
+    fixed_now = datetime(2026, 7, 16, tzinfo=UTC)
+    _install_fixed_clock(monkeypatch, fixed_now)
+
+    # Fit call: same seed/sigmas as
+    # test_two_state_synthetic_series_labels_wild_segment_high_vol_chop
+    # above, a well-separated (non-degenerate) 2-state fit.
+    random.seed(4242)
+    calm_returns = [random.gauss(0.0, 0.005) for _ in range(60)]
+    wild_returns = [random.gauss(0.0, 0.04) for _ in range(60)]
+    fit_closes = _closes_from_returns(calm_returns + wild_returns)
+    fit_series = _bar_series_from_closes(fit_closes)
+    _install_bars(monkeypatch, fit_series)
+
+    _regime.compute_regime("BTC/USD", lookback_days=120, n_states=2)
+
+    # Read the persisted artifact directly (pickle + sidecar JSON) so the
+    # test derives its threshold geometry from the ACTUAL fitted params,
+    # never a hardcoded float.
+    pkl_path, json_path = _regime._artifact_paths("BTC/USD", 120)
+    model = pickle.loads(pkl_path.read_bytes())
+    sidecar = json.loads(json_path.read_text())
+
+    variances = [float(model.covars_[s][1][1]) for s in range(2)]
+    calm_idx = min(range(2), key=lambda s: variances[s])
+    calm_mean = float(model.means_[calm_idx][1])
+    calm_std = math.sqrt(variances[calm_idx])
+    pooled_mean = float(sidecar["feature_means"][1])
+
+    threshold_calm_state = calm_mean + 3 * calm_std
+    threshold_pooled = pooled_mean + 3 * calm_std
+    assert threshold_calm_state < threshold_pooled, (
+        "fixture must produce a discriminating gap between the calm-state "
+        "and pooled-mean thresholds — pooled mean >= calm-state mean always, "
+        "so this should hold for any well-separated 2-state fit"
+    )
+
+    # A CONSTANT trailing-30 return of magnitude r makes the EWMA arithmetic
+    # trivial: seeded ewma_var = r**2, and every subsequent step keeps
+    # ewma_var == r**2 (both recursion terms already equal r**2), so
+    # ewma_vol == r exactly — no float-precision hunting required to land
+    # in the marginal zone.
+    marginal_r = (threshold_calm_state + threshold_pooled) / 2.0
+
+    random.seed(6060)
+    lead_returns = [random.gauss(0.0, 0.003) for _ in range(31)]
+    spike_returns = [marginal_r] * 30
+    second_closes = _closes_from_returns(lead_returns + spike_returns)
+    second_series = _bar_series_from_closes(second_closes)
+    _install_bars(monkeypatch, second_series)
+
+    result = _regime.compute_regime("BTC/USD", lookback_days=120, n_states=2)
+
+    assert result["method"] == "ewma_override", (
+        f"marginal ewma_vol={marginal_r} sits strictly between the "
+        f"calm-state threshold ({threshold_calm_state}) and the inflated "
+        f"pooled-mean threshold ({threshold_pooled}) — only the "
+        "calm-state-emission-mean implementation (ASSUMPTIONS 54) fires the "
+        f"override here; the pooled-mean bug under-fires. Got "
+        f"method={result['method']!r}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# LOW-2: a monitor-less fitted model (no `.monitor_` attribute at all) must
+# default to NON-convergence, not convergence — unknown convergence state
+# routes to the rules fallback (anti-permissive, ASSUMPTIONS 25's spirit).
+# ---------------------------------------------------------------------------
+
+
+class _MonitorlessModel:
+    """A fitted-model stand-in with no `monitor_` attribute whatsoever —
+    simulates whatever `_fit_hmm` seam a caller might return that doesn't
+    expose hmmlearn's usual convergence signal."""
+
+
+def test_monitor_less_fitted_model_defaults_to_non_convergence(monkeypatch, tmp_path) -> None:
+    random.seed(7070)
+    returns = [random.gauss(0.0, 0.01) for _ in range(90)]
+    closes = _closes_from_returns(returns)
+    series = _bar_series_from_closes(closes)
+
+    monkeypatch.setattr(_regime, "_models_dir", tmp_path)
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+    _install_bars(monkeypatch, series)
+
+    def _fit_returns_monitorless(
+        features: list[tuple[float, float]], n_states: int
+    ) -> _MonitorlessModel:
+        return _MonitorlessModel()
+
+    monkeypatch.setattr(_regime, "_fit_hmm", _fit_returns_monitorless)
+
+    result = _regime.compute_regime("BTC/USD", lookback_days=90, n_states=2)
+
+    assert result["method"] == "rules", (
+        "a fitted model with no `.monitor_` attribute must be treated as "
+        "NON-converged (unknown convergence != convergence), not silently "
+        "trusted as converged"
+    )
+    assert "hmm_non_convergence" in result["warnings"]
 
 
 # ---------------------------------------------------------------------------

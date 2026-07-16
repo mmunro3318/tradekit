@@ -112,6 +112,67 @@ _VOLUME_SPIKE_CLOSES = [100.0] * 25  # flat price, volume carries the signal
 random.seed(20260716)
 _BB_BELOW_LOWER_CLOSES = [100.0 + random.uniform(-0.5, 0.5) for _ in range(24)] + [80.0]
 
+# MEDIUM-1 review-fix fixtures (session-derived directly against
+# `tradekit.mae._indicators`, same discipline as the fixtures above).
+
+# rsi_min-overbought fixture: 20 daily closes, steadily RISING 100.0/day
+# (pure-gain run, mirror image of the RSI-oversold fixture) ->
+# momentum.rsi(closes, period=14)[-1] == 100.0 (avg_loss stays 0.0, the
+# rsi() docstring's avg_loss==0 zero-guard -> RSI=100.0).
+_RSI_OVERBOUGHT_CLOSES = [100.0 + i for i in range(20)]
+
+# macd_signal fixtures: flat base then an accelerating move (a straight
+# linear ramp settles the MACD histogram back toward 0 in steady state — an
+# ACCELERATING move is needed to pin a nonzero-sign last histogram).
+# Derived directly against `_indicators.momentum.macd`:
+#   bullish: [100.0]*40 + [100.0 + i**1.3 for i in 1..20]
+#     -> macd(closes).histogram[-1] == 2.632866287861548  (> 0)
+#   bearish: [100.0]*40 + [100.0 - i**1.3 for i in 1..20]
+#     -> macd(closes).histogram[-1] == -2.6328662878615496  (< 0)
+_MACD_BULLISH_CLOSES = [100.0] * 40 + [100.0 + i**1.3 for i in range(1, 21)]
+_MACD_BEARISH_CLOSES = [100.0] * 40 + [100.0 - i**1.3 for i in range(1, 21)]
+
+# atr_percentile_min fixture: 40 bars with a MONOTONICALLY EXPANDING
+# high-low range (rng = 0.5 + i*0.3) around a slowly-rising close, so the
+# LAST bar's ATR(14) is also the window's own maximum. Derived directly
+# against `_indicators.volatility.atr`:
+#   highs[i] = price + rng/2, lows[i] = price - rng/2, price += 0.1 each bar
+#   -> atr(highs, lows, closes, 14) has 27 non-None values (40 - 14 + 1),
+#      last ATR == 8.58394409652438, and since ranges expand monotonically
+#      the last ATR is the max of the window -> every other value is <=
+#      it, so the <=-rank percentile is 27/27 * 100.0 == 100.0.
+_ATR_EXPANDING_N = 40
+
+
+def _atr_expanding_fixture() -> tuple[list[float], list[float], list[float]]:
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    price = 100.0
+    for i in range(_ATR_EXPANDING_N):
+        rng = 0.5 + i * 0.3
+        highs.append(price + rng / 2)
+        lows.append(price - rng / 2)
+        closes.append(price)
+        price += 0.1
+    return highs, lows, closes
+
+
+# bb_position above_upper fixture: same 24-bar seeded base as the
+# below_lower fixture, but the 25th bar SPIKES UP to 130.0 instead of down.
+# Derived directly against `_indicators.volatility.bollinger`:
+#   upper = 114.58830165255151, lower = 88.4164905698764, close = 130.0
+#   -> 130.0 > upper -> "above_upper".
+random.seed(20260716)
+_BB_ABOVE_UPPER_CLOSES = [100.0 + random.uniform(-0.5, 0.5) for _ in range(24)] + [130.0]
+
+# bb_position inside fixture: 25 bars of small seeded noise, no spike at
+# all. Derived directly against `_indicators.volatility.bollinger`:
+#   upper = 100.66558544841018, lower = 99.44639883535416,
+#   close = 100.4748162133211 -> strictly between the bands -> "inside".
+random.seed(20260717)
+_BB_INSIDE_CLOSES = [100.0 + random.uniform(-0.5, 0.5) for _ in range(25)]
+
 
 def _install_bars_by_symbol(
     monkeypatch, series_by_symbol: dict[str, BarSeries]
@@ -358,6 +419,164 @@ def test_insufficient_bars_symbol_skipped_with_warning(monkeypatch) -> None:
     assert any("BTC/USD" in w for w in result["warnings"]), (
         f"expected a warnings entry naming the symbol, got {result['warnings']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# MEDIUM-1 review fixes: pinning tests for the three scanner filter branches
+# that had zero coverage (rsi_min, macd_signal, atr_percentile_min) plus the
+# uncovered bb_position "above_upper"/"inside" branches. These are PINNING
+# tests against a real (non-stub) src — they should PASS as-is; a failure
+# here means the src itself has a defect, not the test.
+# ---------------------------------------------------------------------------
+
+
+def test_overbought_rsi_symbol_appears_in_matches(monkeypatch) -> None:
+    series = _series(_RSI_OVERBOUGHT_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"rsi_min": 80},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["rsi"] == pytest.approx(100.0)
+    assert "overbought" in matches[0]["signal_tags"]
+
+
+def test_macd_signal_bullish_cross_symbol_appears_in_matches(monkeypatch) -> None:
+    series = _series(_MACD_BULLISH_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"macd_signal": "bullish_cross"},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["macd_hist"] == pytest.approx(2.632866287861548)
+    assert "macd_bullish" in matches[0]["signal_tags"]
+
+
+def test_macd_signal_bearish_cross_symbol_appears_in_matches(monkeypatch) -> None:
+    series = _series(_MACD_BEARISH_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"macd_signal": "bearish_cross"},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["macd_hist"] == pytest.approx(-2.6328662878615496)
+    assert "macd_bearish" in matches[0]["signal_tags"]
+
+
+def test_macd_signal_unknown_value_matches_nothing(monkeypatch) -> None:
+    """`macd_signal` values other than "bullish_cross"/"bearish_cross" must
+    hit the unknown-value guard -> no match (not a crash, not a pass)."""
+    series = _series(_MACD_BULLISH_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"macd_signal": "sideways"},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    assert result["matches"] == []
+
+
+def test_atr_percentile_min_symbol_appears_in_matches(monkeypatch) -> None:
+    highs, lows, closes = _atr_expanding_fixture()
+    # The shared `_series` helper always derives high/low as close +/- 0.3,
+    # which can't produce an expanding-range fixture, so build bars
+    # directly here with the derived expanding highs/lows.
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    bars = [
+        Bar(
+            ts_open=start + timedelta(days=i),
+            open=Decimal(str(c)),
+            high=Decimal(str(h)),
+            low=Decimal(str(low_)),
+            close=Decimal(str(c)),
+            volume=Decimal("100.0"),
+        )
+        for i, (c, h, low_) in enumerate(zip(closes, highs, lows, strict=True))
+    ]
+    asset = AssetRef(
+        symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
+    )
+    series = BarSeries(asset=asset, timeframe="1d", bars=bars, source="fake-kraken")
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"atr_percentile_min": 90},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["atr"] == pytest.approx(8.58394409652438)
+    assert "high_volatility" in matches[0]["signal_tags"]
+
+
+def test_bb_above_upper_symbol_appears_in_matches(monkeypatch) -> None:
+    series = _series(_BB_ABOVE_UPPER_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"bb_position": "above_upper"},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert "at_resistance" in matches[0]["signal_tags"]
+
+
+def test_bb_inside_symbol_appears_in_matches(monkeypatch) -> None:
+    series = _series(_BB_INSIDE_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"bb_position": "inside"},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert "bb_inside" in matches[0]["signal_tags"]
 
 
 def test_symbols_none_message_names_deferral_not_notimplementederror() -> None:

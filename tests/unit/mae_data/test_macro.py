@@ -110,3 +110,33 @@ def test_fetch_failure_with_cold_cache_returns_empty_stale_series_never_raises(
 
 def test_macro_tickers_constant_matches_addendum() -> None:
     assert macro.MACRO_TICKERS == ("^GSPC", "^VIX", "DX-Y.NYB", "GLD", "TLT")
+
+
+def test_degraded_read_cached_map_failure_returns_empty_stale_never_raises(
+    tmp_path, monkeypatch
+) -> None:
+    """LOW-1 review fix: the degraded path's own fallback read
+    (`resolved_cache._read_cached_map(...)`) must be wrapped in its own
+    guard — a sqlite error THERE (not just in the primary fetch) must still
+    degrade to an empty stale series, never escape `get_macro_bars`
+    (ASSUMPTIONS 46's never-raise pin)."""
+    cache = BarCache(tmp_path / "cache.db")
+
+    def _boom_fetch(ticker: str, start: datetime, end: datetime) -> list[_Row]:
+        raise RuntimeError("simulated yfinance failure")
+
+    monkeypatch.setattr(macro, "_fetch_rows", _boom_fetch)
+
+    def _boom_read_cached_map(self, source: str, symbol: str, timeframe: str) -> dict:
+        raise RuntimeError("simulated sqlite error reading the fallback cache")
+
+    monkeypatch.setattr(BarCache, "_read_cached_map", _boom_read_cached_map)
+
+    result = macro.get_macro_bars("^GSPC", lookback_days=5, cache=cache)
+
+    assert result.stale is True
+    assert result.source == "yfinance"
+    assert result.bars == [], (
+        "a sqlite error in the degraded path's OWN fallback read must still "
+        "degrade to an empty stale BarSeries, never raise"
+    )
