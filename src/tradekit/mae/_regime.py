@@ -87,16 +87,20 @@ log-returns (recomputed directly from closes, to avoid depending on
 `ewma_var` seeded as `r_0**2` (the OLDEST of the 30, i.e. index 0 of the
 30-slice) then `ewma_var_t = (1 - alpha) * ewma_var_{t-1} + alpha *
 r_t**2` walking forward to the newest; `ewma_vol = sqrt(final ewma_var)`.
-`state_mean_vol` is `feature_means[1]` (the OVERALL fitted feature matrix's
-realized-vol column mean, from the persisted sidecar or the live fit —
-NOT specific to any one state) and `state_vol_std` is `sqrt` of the
-LOW-VOL state's diag variance on the realized-vol feature (column index 1)
-— the calmest fitted state, used as a stable baseline reference REGARDLESS
-of which raw state the latest bar itself decoded into (an extreme
-single-bar spike can decode into its own high-variance state, which would
-otherwise inflate the threshold band past the very anomaly this override
-exists to catch — "blows past any sane fitted low-vol state's mean+3*std
-band" per the fixture-freeze commentary). Trigger:
+`state_mean_vol` is `model.means_[low_vol_state_index][1]` — the CALMEST
+fitted state's OWN emission mean on the realized-vol feature (column index
+1), NOT the overall fitted feature matrix's pooled mean over all bars
+(review-caught defect, round 4: the pooled mean is always >= the calm
+state's mean, so using it inflates the threshold and makes the override
+systematically UNDER-fire — the dangerous direction). `state_vol_std` is
+`sqrt` of that SAME low-vol state's diag variance on the realized-vol
+feature — both terms pinned to the calmest fitted state's emission params
+(ASSUMPTIONS 54), used as a stable baseline reference REGARDLESS of which
+raw state the latest bar itself decoded into (an extreme single-bar spike
+can decode into its own high-variance state, which would otherwise inflate
+the threshold band past the very anomaly this override exists to catch —
+"blows past any sane fitted low-vol state's mean+3*std band" per the
+fixture-freeze commentary). Trigger:
 `ewma_vol > state_mean_vol + 3 * state_vol_std` ->
 `compute_regime` returns `method="ewma_override"`,
 `current_state="high_vol_chop"`, `recommended_strategies=[]`. This check
@@ -531,7 +535,11 @@ def compute_regime(symbol: str, lookback_days: int, n_states: int) -> dict[str, 
     if need_refit:
         try:
             fitted = _fit_hmm(features, n_states)
-            converged = bool(getattr(getattr(fitted, "monitor_", None), "converged", True))
+            # Unknown convergence != convergence: a monitor-less fitted
+            # model defaults to NON-convergence (anti-permissive,
+            # ASSUMPTIONS 25's spirit) -> routes to the rules fallback
+            # rather than silently trusting an unverifiable fit.
+            converged = bool(getattr(getattr(fitted, "monitor_", None), "converged", False))
         except Exception:
             fitted = None
             converged = False
@@ -577,7 +585,8 @@ def compute_regime(symbol: str, lookback_days: int, n_states: int) -> dict[str, 
         # mean+3*std band").
         low_vol_state_index = min(range(n_states), key=lambda s: state_vol_variances[s])
         state_vol_std = math.sqrt(state_vol_variances[low_vol_state_index])
-        if _check_ewma_override(ewma_vol, feature_means[1], state_vol_std):
+        state_mean_vol = float(model.means_[low_vol_state_index][1])
+        if _check_ewma_override(ewma_vol, state_mean_vol, state_vol_std):
             return {
                 "symbol": symbol,
                 "current_state": "high_vol_chop",

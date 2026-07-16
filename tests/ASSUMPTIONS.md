@@ -576,6 +576,13 @@ same commit (DESIGN maintenance rule applies here too).
     documented in _regime.py's module docstring. Flag to the Opus review
     gate: this is the load-bearing override-logic call the sprint doc
     routes to Opus.
+    Round-4 review update: the ORIGINAL implementation used the pooled
+    feature-matrix mean (`feature_means[1]`, mean over ALL bars) for the
+    mean term instead of the calmest state's own emission mean — a defect
+    caught by Opus review round 4 (HIGH-1) that the planted-spike test
+    above could not detect (it clears either threshold); the fix is pinned
+    by the new discriminating test
+    `test_get_regime_verb.py::test_ewma_override_marginal_spike_discriminates_calm_state_mean_from_pooled_mean`.
 
 ## Round-7 additions — P1C batch C TDD session (scan_markets), 2026-07-16
 

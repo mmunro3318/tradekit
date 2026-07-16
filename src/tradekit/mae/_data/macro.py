@@ -165,8 +165,20 @@ def get_macro_bars(
             end=now,
         )
     except Exception:
-        cached_map = resolved_cache._read_cached_map("yfinance", ticker, "1d")
-        cached_bars = sorted(cached_map.values(), key=lambda b: b.ts_open)
+        # The fallback read itself must never escape either — a sqlite
+        # error reading the degraded-path cache (corrupt db, locked file,
+        # etc.) is still a "we have nothing reliable to return" case, not a
+        # license to raise (ASSUMPTIONS 46's never-raise pin covers this
+        # WHOLE function, not just the primary fetch). `except Exception`
+        # here is deliberately broad — it can mask a programming error in
+        # `_read_cached_map` itself, but the never-raise contract on this
+        # entrypoint is a ratified, higher-priority pin than narrow
+        # exception hygiene for this one function.
+        try:
+            cached_map = resolved_cache._read_cached_map("yfinance", ticker, "1d")
+            cached_bars = sorted(cached_map.values(), key=lambda b: b.ts_open)
+        except Exception:
+            cached_bars = []
         return BarSeries(
             asset=asset, timeframe="1d", bars=cached_bars, source="yfinance", stale=True
         )
