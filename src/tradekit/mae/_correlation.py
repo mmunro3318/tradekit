@@ -80,7 +80,44 @@ def compute_correlation(
     `abs(r) > high_corr_threshold`, `(a, b, r)` (a < b) is appended to
     `high_correlation_warnings`. Every `matrix[s][s]` is exactly `1.0`.
     """
-    raise NotImplementedError("P1C batch A stub — see mae/_correlation.py module docstring")
+    symbols = sorted(series_by_symbol)
+    matrix: dict[str, dict[str, float | None]] = {s: {s: 1.0} for s in symbols}
+    insufficient: list[tuple[str, str, int]] = []
+    high_corr: list[tuple[str, str, float]] = []
+
+    for i, a in enumerate(symbols):
+        for b in symbols[i + 1 :]:
+            by_date_a = dict(series_by_symbol[a])
+            by_date_b = dict(series_by_symbol[b])
+            shared_dates = sorted(set(by_date_a) & set(by_date_b))
+            overlap = len(shared_dates)
+
+            if overlap < min_overlap:
+                matrix[a][b] = None
+                matrix[b][a] = None
+                insufficient.append((a, b, overlap))
+                continue
+
+            xs = [by_date_a[d] for d in shared_dates]
+            ys = [by_date_b[d] for d in shared_dates]
+            mean_x = sum(xs) / overlap
+            mean_y = sum(ys) / overlap
+            dx = [x - mean_x for x in xs]
+            dy = [y - mean_y for y in ys]
+            numerator = sum(px * py for px, py in zip(dx, dy, strict=True))
+            denom = (sum(px * px for px in dx) * sum(py * py for py in dy)) ** 0.5
+            r = numerator / denom if denom != 0 else 0.0
+
+            matrix[a][b] = r
+            matrix[b][a] = r
+            if abs(r) > high_corr_threshold:
+                high_corr.append((a, b, r))
+
+    return CorrelationResult(
+        matrix=matrix,
+        insufficient_overlap_warnings=insufficient,
+        high_correlation_warnings=high_corr,
+    )
 
 
 __all__ = ["CorrelationResult", "compute_correlation"]

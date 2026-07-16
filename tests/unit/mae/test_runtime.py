@@ -78,12 +78,17 @@ def test_clock_seam_is_monkeypatchable(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_daily_bars_strips_live_unclosed_bar(monkeypatch) -> None:
+def test_get_daily_bars_strips_live_unclosed_bar(monkeypatch, tmp_path) -> None:
     # "Now" sits mid-day on 2026-07-16: the daily bar opening at
     # 2026-07-16T00:00Z closes at 2026-07-17T00:00Z, which is AFTER this
     # fixed "now" — that bar is still open ("live") and must be stripped.
     fixed_now = datetime(2026, 7, 16, 15, 0, 0, tzinfo=UTC)
     monkeypatch.setattr(_runtime, "_clock", lambda: fixed_now)
+    # Cache-path seam: NEVER let a test write through the real data/cache.db
+    # — closed bars are never invalidated, so fake fixture bars persisted
+    # there under source="kraken" would be served to REAL scans forever
+    # (CTO-caught defect, P1C batch A).
+    monkeypatch.setattr(_runtime, "_cache_path", tmp_path / "cache.db")
 
     closed_opens = [
         datetime(2026, 7, 10, 0, 0, 0, tzinfo=UTC) + timedelta(days=i) for i in range(6)

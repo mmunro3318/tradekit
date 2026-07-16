@@ -40,10 +40,11 @@ blocking the sprint's done-gate if it proves fragile).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
-from tradekit.contracts import AssetRef, BarSeries
+from tradekit.contracts import AssetRef, Bar, BarSeries
 from tradekit.mae._data.cache import BarCache
 
 MACRO_TICKERS: tuple[str, ...] = ("^GSPC", "^VIX", "DX-Y.NYB", "GLD", "TLT")
@@ -66,7 +67,27 @@ def _fetch_rows(
     `get_macro_bars`'s job, one layer up (P1A supplementary-data rule: a
     *provider* raises, only the supplementary-data WRAPPER degrades).
     """
-    raise NotImplementedError("P1C batch A stub — see mae/_data/macro.py module docstring")
+    import yfinance as yf  # lazy import — the ONLY module that touches yfinance/pandas
+
+    frame = yf.Ticker(ticker).history(start=start, end=end, interval="1d", auto_adjust=False)
+    if frame is None or frame.empty:
+        raise ValueError(f"yfinance returned no rows for ticker {ticker!r} in [{start}, {end})")
+
+    rows: list[tuple[date, str, str, str, str, str]] = []
+    for ts, row in frame.iterrows():
+        row_date = ts.date() if hasattr(ts, "date") else ts
+        rows.append(
+            (
+                row_date,
+                str(row["Open"]),
+                str(row["High"]),
+                str(row["Low"]),
+                str(row["Close"]),
+                str(row["Volume"]),
+            )
+        )
+    rows.sort(key=lambda r: r[0])
+    return rows
 
 
 class MacroProvider:
@@ -79,7 +100,26 @@ class MacroProvider:
     def get_bars(
         self, asset: AssetRef, timeframe: str, start: datetime, end: datetime
     ) -> BarSeries:
-        raise NotImplementedError("P1C batch A stub — see mae/_data/macro.py module docstring")
+        if timeframe != "1d":
+            raise ValueError(
+                f"MacroProvider only supports timeframe '1d' (yfinance macro batching is "
+                f"daily-only, addendum); got {timeframe!r}"
+            )
+        rows = _fetch_rows(asset.symbol, start, end)
+        bars = [
+            Bar(
+                ts_open=datetime(d.year, d.month, d.day, tzinfo=UTC),
+                open=Decimal(str(o)),
+                high=Decimal(str(h)),
+                low=Decimal(str(low)),
+                close=Decimal(str(c)),
+                volume=Decimal(str(v)),
+            )
+            for d, o, h, low, c, v in rows
+            if start <= datetime(d.year, d.month, d.day, tzinfo=UTC) < end
+        ]
+        bars.sort(key=lambda b: b.ts_open)
+        return BarSeries(asset=asset, timeframe=timeframe, bars=bars, source="yfinance")
 
 
 def get_macro_bars(
@@ -106,7 +146,30 @@ def get_macro_bars(
     explicit `tmp_path`-backed instance (isolation + the suite's zero-
     network guarantee — no test may touch the real `data/cache.db`).
     """
-    raise NotImplementedError("P1C batch A stub — see mae/_data/macro.py module docstring")
+    from tradekit.mae import _runtime  # "now" stays behind the one sanctioned clock seam
+
+    asset = AssetRef(
+        symbol=ticker, venue="yfinance", asset_class="macro", tick_size=Decimal("0.01")
+    )
+    resolved_cache = cache if cache is not None else BarCache(DEFAULT_CACHE_PATH)
+    now = _runtime.clock()
+    start = now - timedelta(days=lookback_days)
+
+    try:
+        return resolved_cache.get_or_fetch(
+            MacroProvider().get_bars,
+            source="yfinance",
+            asset=asset,
+            timeframe="1d",
+            start=start,
+            end=now,
+        )
+    except Exception:
+        cached_map = resolved_cache._read_cached_map("yfinance", ticker, "1d")
+        cached_bars = sorted(cached_map.values(), key=lambda b: b.ts_open)
+        return BarSeries(
+            asset=asset, timeframe="1d", bars=cached_bars, source="yfinance", stale=True
+        )
 
 
 __all__ = ["DEFAULT_CACHE_PATH", "MACRO_TICKERS", "MacroProvider", "get_macro_bars"]

@@ -46,10 +46,18 @@ monkeypatching is not a Python import statement and stays outside
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
 
-from tradekit.contracts import BarSeries
+from tradekit.contracts import TIMEFRAME_SECONDS, AssetRef, BarSeries
+from tradekit.mae._data.alpaca_data import AlpacaDataProvider
+from tradekit.mae._data.cache import BarCache
+from tradekit.mae._data.kraken import KrakenProvider
 from tradekit.mae._data.port import MarketDataPort
+
+_DEFAULT_CACHE_PATH = Path("data/cache.db")
+_DEFAULT_TICK_SIZE = Decimal("0.01")
 
 
 def _default_clock() -> datetime:
@@ -62,24 +70,31 @@ def _default_provider_factory(symbol: str) -> MarketDataPort:
     One provider instance per call is acceptable here (providers hold only a
     rate-limit bucket, no per-request state); a future optimization may
     cache instances per symbol/venue, not pinned this batch."""
-    raise NotImplementedError("P1C batch A stub — see mae/_runtime.py module docstring")
+    if "/" in symbol:
+        return KrakenProvider()
+    return AlpacaDataProvider()
 
 
 # Test seams (P1C addendum). Tests monkeypatch these two names directly —
 # never the private helpers above, which exist only as their default values.
 _clock: Callable[[], datetime] = _default_clock
 _provider_factory: Callable[[str], MarketDataPort] = _default_provider_factory
+# Cache-path seam: tests MUST monkeypatch this to a tmp_path — a test that
+# writes through the real data/cache.db poisons production state (closed
+# bars are never invalidated, so fake fixture bars would be served to real
+# scans forever). Caught by the CTO gate in P1C batch A.
+_cache_path: Path = _DEFAULT_CACHE_PATH
 
 
 def clock() -> datetime:
     """Aware-UTC "now" via the `_clock` seam."""
-    raise NotImplementedError("P1C batch A stub — see mae/_runtime.py module docstring")
+    return _clock()
 
 
 def provider_for(symbol: str) -> MarketDataPort:
     """Resolve the `MarketDataPort` for `symbol` via the `_provider_factory`
     seam. See module docstring for the "/" routing rule."""
-    raise NotImplementedError("P1C batch A stub — see mae/_runtime.py module docstring")
+    return _provider_factory(symbol)
 
 
 def get_daily_bars(symbol: str, lookback_days: int) -> BarSeries:
@@ -94,4 +109,31 @@ def get_daily_bars(symbol: str, lookback_days: int) -> BarSeries:
     see module docstring). `lookback_days` maps to `start = end -
     timedelta(days=lookback_days)`.
     """
-    raise NotImplementedError("P1C batch A stub — see mae/_runtime.py module docstring")
+    is_crypto = "/" in symbol
+    asset = AssetRef(
+        symbol=symbol,
+        venue="kraken" if is_crypto else "alpaca",
+        asset_class="crypto" if is_crypto else "equity",
+        tick_size=_DEFAULT_TICK_SIZE,
+    )
+    source = asset.venue
+
+    now = clock()
+    start = now - timedelta(days=lookback_days)
+
+    provider = provider_for(symbol)
+    cache = BarCache(_cache_path)
+    series = cache.get_or_fetch(
+        provider.get_bars,
+        source=source,
+        asset=asset,
+        timeframe="1d",
+        start=start,
+        end=now,
+    )
+
+    tf_seconds = TIMEFRAME_SECONDS["1d"]
+    closed_bars = [b for b in series.bars if (b.ts_open + timedelta(seconds=tf_seconds)) <= now]
+    return BarSeries(
+        asset=series.asset, timeframe=series.timeframe, bars=closed_bars, source=series.source
+    )
