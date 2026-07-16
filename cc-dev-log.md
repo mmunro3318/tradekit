@@ -2,6 +2,46 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-16/17 (Fable) — P1C regime/scanner/sizing/correlation COMPLETE (M1.4, M1.5, P1 done)
+
+- **All four remaining MAE verbs live**: size_position (wired over frozen _sizing),
+  get_correlation_matrix, get_regime (HMM + EWMA override + rules fallback),
+  scan_markets. Plus story 0 (Mike-approved): yfinance macro provider (never-raise
+  degradation, ASSUMPTIONS 46) — closes M1.1's last box. Deps: yfinance 1.5.1,
+  pandas 3.0.3, hmmlearn 0.3.3, scipy 1.18.0 — all mae/-internal.
+- **The sprint's one new design**: `mae/_runtime.py` ambient data seam (verb
+  signatures are pinned portless) — clock/provider-factory/cache-path indirections,
+  "/" routing (Kraken vs Alpaca), and THE lookahead chokepoint: get_closed_bars
+  strips the live bar so no verb can ever leak an unclosed candle downstream.
+- **Three batches, four-stage each** (addendum 6e8b8a9): A = macro+runtime+sizing+
+  correlation (030a520→faaa151); B = regime (a41f352→3974493); C = scanner+
+  get_closed_bars+smoke (a9ea52d→5711bac). Schema ambiguities escalated by TDD
+  agents and CTO-ratified in ASSUMPTIONS 47/51-54/57 (incl. "neutral" as a
+  rules-only fourth regime state = anti-permissive default).
+- **CTO-gate catches (pre-review)**: batch-A runtime test wrote fixture bars through
+  the REAL data/cache.db (closed bars never invalidate → poisoned real scans; six
+  fake rows purged, _cache_path seam added — standing rule: every file-writer gets
+  a path seam); live smoke_scan crashed on Kraken pair-map gaps → Mike's universe
+  (SOL/LINK/NEAR/TAO/EIGEN) mapped, result keys verified against the live endpoint.
+- **Review round (Opus, verdict FIX-FIRST — the pre-registered override gate paid
+  off)**: HIGH — EWMA override used the POOLED vol mean instead of the calmest
+  state's emission mean (threshold ~4.8x inflated → under-fires exactly when vol
+  explodes); invisible to the 0.25-spike test which cleared either threshold; fixed
+  with a discriminating marginal-spike test (fails on pooled, passes on emission
+  mean, proved both directions). MED: 3 uncovered scanner filter branches (now 7 new
+  pinning tests). LOWs: macro degraded-path could still raise; monitor-less HMM
+  defaulted to converged. Fixes e988c01→b4885a1. Round details agent-metrics #4.
+- Composio spike (D17): verdict NO for data/broker core, MAYBE for P3+ reporting
+  side-channels — docs/research/composio-spike.md.
+- Alpaca PAPER keys landed in .env (account PA3YTZDZ9SXE, verified vs live data API,
+  IEX feed). Two dev agents died at usage caps mid-task; both recovered cleanly
+  (work was already on disk — check git status + pytest before assuming loss).
+- **Final: 338 tests green, ruff clean, mypy clean. P1 (MAE core) COMPLETE.**
+  Live: smoke_scan returns 3 real matches (ETH/SOL/LINK dailies via Kraken).
+- Next: SPRINT-P2 (thesis lifecycle + policy engine). Note for P2: walk-forward
+  evaluator (M1.3 leftover) lands with the backtest engine; strategy-tag registry
+  should re-derive _scanner._TAG_STRATEGY/_regime._STRATEGY_TAGS (ASSUMPTIONS 57f).
+
 ## 2026-07-15 (Fable) — P1B indicators + golden vectors COMPLETE (M1.2)
 
 - **17 indicators** in `mae/_indicators/{volatility,momentum,trend,volume,structure}.py`,

@@ -63,7 +63,7 @@
 - [X] Kraken provider (OHLCV public; depth/trades deferred to first consumer) — live-smoked 2026-07-14
 - [X] Alpaca data provider (equity + crypto bars; crypto response symbol-keyed per review H1; needs paper keys in .env for live use)
 - [X] CoinGecko provider (global + markets; Mike's demo key in .env, verified live)
-- [ ] yfinance macro provider (daily batch, stale-flag degradation) — DEFERRED per sprint doc "defer if fragile"; revisit at P1C regime work
+- [X] yfinance macro provider (daily batch, stale-flag degradation) — built P1C batch A per Mike's 2026-07-16 call (yfinance 1.5.1, mae/-internal); never-raise degradation pinned (ASSUMPTIONS 46). First production consumer lands with P2 regime/report narratives — documented non-gating
 - [X] `tradekit.costs` v1: venue fee tables + spread/slippage model seeded from SME §5 (TD-8)
 
 ### M1.2 Indicators + golden vectors (§3, TD-18) — done 2026-07-15 (P1B)
@@ -82,17 +82,17 @@
 - [ ] Walk-forward evaluator (2× IS/OOS flag) — lands with the backtest engine (P1C follow-on; bar-based, not trade-log-based)
 - [X] `compute_strategy_metrics` verb wiring incl. warnings taxonomy
 
-### M1.4 Sizing & regime
+### M1.4 Sizing & regime — done 2026-07-17 (P1C)
 
-- [ ] `size_position`: min(ATR-normalized, quarter-Kelly); purity signature (TD-11); `SizingComputed` event
-- [ ] HMM regime: pinned seed, persisted artifacts, weekly refit schedule (TD-13)
-- [ ] Rules fallback classifier + EWMA 3σ override (G3)
-- [ ] `get_correlation_matrix` + methodology per §9.1 (inner-join, `insufficient_overlap`)
+- [X] `size_position`: min(ATR-normalized, quarter-Kelly); purity signature (TD-11) — verb wired over frozen `_sizing` math; `SizingComputed` event emission lands with thesis.submit (P2), per the sprint doc
+- [X] HMM regime: pinned seed (1337), persisted artifacts + sidecar, 7-day staleness refit (TD-13); pickle path-validated incl. Windows-backslash vector
+- [X] Rules fallback classifier + EWMA 3σ override (G3) — override baseline = calmest state's emission params (ASSUMPTIONS 54; review round 4 caught a pooled-mean defect, now pinned by a discriminating test)
+- [X] `get_correlation_matrix` + methodology per §9.1 (inner-join, `insufficient_overlap` null+warning, |r|>0.75 flags)
 
-### M1.5 Scanner & spikes
+### M1.5 Scanner & spikes — done 2026-07-17 (P1C)
 
-- [ ] `scan_markets`: multi-symbol/multi-TF filter pipeline, regime gate
-- [ ] Composio connector spike (D17 — connectors only; timeboxed, outcome logged to wiki)
+- [X] `scan_markets`: multi-symbol/multi-TF filter pipeline, regime gate (one regime call per symbol per scan; neutral = no-recommendation per ASSUMPTIONS 53) — live-smoked vs Kraken (scripts/smoke_scan.py, 3 real matches)
+- [X] Composio connector spike (D17 — connectors only; timeboxed) — verdict NO for data/broker core, MAYBE for P3+ reporting side-channels; docs/research/composio-spike.md
 
 ---
 

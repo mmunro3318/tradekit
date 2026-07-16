@@ -74,3 +74,34 @@ independent derivation + external TA-Lib cross-check BEFORE the red commit
 reviewer catch into an implementation-time catch. The one real defect this
 sprint (dev-p1b's ADX seed scale) was caught by a frozen golden vector within
 minutes, not by a review round days later.
+
+## Round 4 — 2026-07-17 — P1C regime/scanner/sizing/correlation (commits 6e8b8a9..b4885a1)
+
+Reviewer: code-reviewer agent (Opus). Verification: pytest 328 (at review
+time), ruff/mypy clean, state-hygiene probes (cache.db row-count held,
+data/models never created), pickle path-validation bypass attempts failed,
+hand-recomputed Pearson/weekend-join/Kelly-ATR/EWMA arithmetic. Verdict:
+**FIX-FIRST** (1 HIGH, 1 MED, 2 LOW) — fixed same-day, e988c01→b4885a1,
+338 tests green after.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tdd-p1c (Sonnet) | batch A tests+stubs (macro, runtime seam, sizing verb, correlation) | 0 | 0 | 1* | A- | Exemplary flag discipline (schema ambiguities 47a/b escalated, not improvised). *Shared: its runtime test wrote through the REAL data/cache.db (caught by CTO gate pre-green-commit, not by review) — the seam-for-every-writer lesson now standing. |
+| dev-p1c (Sonnet) | batch A src | 0 | 0 | 1* | A- | Clean first pass, 283 green; honestly reported the real-cache test design rather than papering over it. *Shared with tdd-p1c. |
+| tdd-p1c-b (Sonnet) | batch B tests+stubs (regime) | 0 | 0 | 0 | A | Flagged 3 ambiguities (51-53) incl. inventing the Windows-backslash pickle vector test; EWMA/grid fixtures fully derivation-scripted. |
+| dev-p1c-b (Sonnet) | batch B src (_regime) | 1 | 0 | 1 | B- | The HIGH: implemented the EWMA override with the POOLED feature mean as state_mean_vol while citing ASSUMPTIONS 54 (calmest-state pin) — threshold inflated ~4.8x, override under-fires (the dangerous direction). Its underlying calmest-state-vs-current-state adjudication request was legitimate and CTO-ratified; the defect is the silent mean-term substitution the docstring rationalized. Also LOW-2 (monitor-less model defaulted to converged). Caught by review because the planted spike (0.25/day) cleared either threshold — the discriminating marginal-spike test now exists. |
+| tdd-p1c-c (Sonnet) | batch C tests+stubs (scanner) | 0 | 1 | 0 | B+ | Flag discipline again excellent (57a-f); the MED: three filter branches (rsi_min, macd_signal, atr_percentile_min) shipped with zero coverage — enumerated-fixture lists need a completeness check against the filter schema. |
+| dev-p1c-c (Sonnet) | batch C src | 0 | 0 | 0 | A- | Died at usage cap ~95% done; landed work was defect-free. CTO finished (equivalence-test swap per its planned-obsolescence note + smoke_scan.py). |
+| fix-p1c (Sonnet) | review-fix round | — | — | — | A | Discriminating-test geometry (constant trailing-30 return makes ewma_vol==r exactly, midpoint between the two candidate thresholds) proved the defect both directions before fixing. |
+
+CTO-gate catches this sprint (pre-review): real-cache test pollution (batch
+A, six fake BTC bars purged); Kraken pair-map gap for Mike's universe (live
+smoke_scan crash → SOL/LINK/NEAR/TAO/EIGEN mapped, result keys verified
+against the live endpoint).
+
+Process notes: (1) the freeze-gate discipline held — every hand-derived
+fixture re-derived independently before red commits; zero fixture defects
+all sprint. (2) The one HIGH lived in exactly the code the sprint doc
+pre-registered as Opus-gated (override logic) — the routing rule works.
+(3) New standing rule from batch A: ANY module that writes files gets a
+path seam and tests must tmp-path it.
