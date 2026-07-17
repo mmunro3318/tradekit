@@ -216,6 +216,46 @@ def test_thesis_graded_outcome_restricted_to_enum() -> None:
         )
 
 
+def test_thesis_graded_pnl_usd_accepts_none() -> None:
+    """CTO adjudication (P2 batch B, ASSUMPTIONS 71): pnl_usd is NULLABLE —
+    a graded thesis with zero FillRecorded events has NO realized pnl, and
+    Decimal("0") would fabricate a break-even datapoint into batch D's
+    series-expectancy math. None means "no fills to account"."""
+    payload = ThesisGradedPayload(
+        thesis_id="th-1", outcome="FAIL", pnl_usd=None, graded_ts=T0
+    )
+    assert payload.pnl_usd is None
+    # And it survives the ASSUMPTIONS-10 producer round trip as None, not 0.
+    reconstructed = ThesisGradedPayload.model_validate(payload.model_dump(mode="json"))
+    assert reconstructed.pnl_usd is None
+
+
+def test_thesis_graded_pnl_usd_still_required_even_though_nullable() -> None:
+    # None must be said EXPLICITLY — a producer that forgets the field
+    # entirely dies at construction (nullable != optional).
+    with pytest.raises(ValidationError):
+        ThesisGradedPayload(thesis_id="th-1", outcome="FAIL", graded_ts=T0)
+
+
+def test_review_completed_kind_defaults_to_thesis_review() -> None:
+    """CTO adjudication (P2 batch B, ASSUMPTIONS 73): `kind` is ADDITIVE and
+    DEFAULTED — every pre-existing ReviewCompleted payload (no kind key)
+    keeps validating as an ordinary pre-approval thesis review."""
+    payload = ReviewCompletedPayload(**_VALID_KWARGS[ReviewCompletedPayload])
+    assert payload.kind == "thesis_review"
+
+
+def test_review_completed_kind_accepts_void_signoff_and_rejects_junk() -> None:
+    signoff = ReviewCompletedPayload(
+        thesis_id="th-1", review_artifact_id="voidrev-1", passed=True, kind="void_signoff"
+    )
+    assert signoff.kind == "void_signoff"
+    with pytest.raises(ValidationError):
+        ReviewCompletedPayload(
+            thesis_id="th-1", review_artifact_id="rev-1", passed=True, kind="vibes"
+        )
+
+
 def test_invalidation_attested_kind_restricted_to_enum() -> None:
     with pytest.raises(ValidationError):
         InvalidationAttestedPayload(thesis_id="th-1", kind="vibes", attestation="nope")

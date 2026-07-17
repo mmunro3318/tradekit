@@ -100,11 +100,22 @@ class ThesisSubmittedPayload(StrictFrozenModel):
 
 class ReviewCompletedPayload(StrictFrozenModel):
     """Producer: `tradekit.review` (P3) — P2 has no review verb; tests append
-    this as a harness action to reach the `reviewed` state (CTO addendum)."""
+    this as a harness action to reach the `reviewed` state (CTO addendum).
+
+    `kind` (CTO adjudication, P2 batch B — ASSUMPTIONS 73): one event type,
+    two review artifacts. `"thesis_review"` (the default — additive, so every
+    pre-existing payload keeps validating) is the pre-approval adversarial
+    review that drives the draft->submitted->REVIEWED state transition.
+    `"void_signoff"` is the reviewer sign-off artifact `thesis.void`'s second
+    guard requires (§10.4) — it is NOT a lifecycle edge and must NEVER cause
+    a state transition (state derivation is a GUARDED (state, event)->state
+    table, not an unguarded event->state map — the batch-A unguarded map was
+    a flagged defect, see ASSUMPTIONS 73)."""
 
     thesis_id: str
     review_artifact_id: str
     passed: bool
+    kind: Literal["thesis_review", "void_signoff"] = "thesis_review"
 
 
 class ThesisApprovedPayload(StrictFrozenModel):
@@ -149,13 +160,21 @@ class ThesisGradedPayload(StrictFrozenModel):
     """Producer: `thesis.grade` (batch B). Shape lands now so later batches
     never reshape an already-ledgered event type; `outcome`/`measured`/
     `ambiguous_bar`/`pnl_usd` semantics are batch B's job (§10.2/§10.3),
-    mirroring `contracts.CriteriaOutcome` + `Grade`'s existing fields."""
+    mirroring `contracts.CriteriaOutcome` + `Grade`'s existing fields.
+
+    `pnl_usd` is NULLABLE (CTO adjudication, P2 batch B — ASSUMPTIONS 71): a
+    graded thesis with zero `FillRecorded` events has NO realized pnl, and
+    `Decimal("0")` would fabricate a break-even datapoint that batch D's
+    series-expectancy math would silently ingest. `None` means "no fills to
+    account" (anti-fabrication); batch D must EXCLUDE None-pnl theses from
+    expectancy, never coerce them to zero. Still a required field — a
+    producer must say None explicitly, not forget the field."""
 
     thesis_id: str
     outcome: Literal["PASS", "FAIL", "VOID"]
     measured: list[dict[str, Any]] = Field(default_factory=list)
     ambiguous_bar: bool = False
-    pnl_usd: Decimal
+    pnl_usd: Decimal | None
     graded_ts: AwareDatetime
 
 

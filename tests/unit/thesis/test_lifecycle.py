@@ -313,6 +313,95 @@ def test_no_verb_mutates_the_drafted_contract_across_the_full_lifecycle(
     )
 
 
+def test_review_completed_events_do_not_clobber_state_guarded_transitions(
+    thesis_kwargs, make_event, raw_sql
+) -> None:
+    """CTO adjudication, P2 batch B (ASSUMPTIONS 73) — state derivation must
+    be a GUARDED (state, event) -> state table, not an unguarded
+    event -> state map. Two pins, both against an ACTIVE thesis:
+
+    1. A `ReviewCompleted(kind="thesis_review")` event appended while the
+       thesis is active does NOT change the derived state (the
+       submitted -> reviewed edge only exists FROM `submitted`; an
+       out-of-order lifecycle event must leave state unchanged, never
+       corrupt it — projections must be total over any event history).
+    2. A `ReviewCompleted(kind="void_signoff")` NEVER causes a transition at
+       all, from any state — it is `thesis.void`'s reviewer sign-off
+       ARTIFACT (§10.4 guard 2), not a lifecycle edge.
+
+    EXPECTED RED against batch-A src: `_machine._STATE_BY_EVENT_TYPE` (and
+    the `theses` projection's `_THESIS_STATE_BY_EVENT_TYPE`) map ANY
+    ReviewCompleted to "reviewed" unconditionally — that unguarded map is
+    the latent batch-A defect this test exposes; the batch-B dev pass fixes
+    `_machine` + `_projections` together."""
+    thesis_id = thesis.draft(thesis_kwargs)
+    _append(
+        make_event,
+        "ThesisSubmitted",
+        {
+            "thesis_id": thesis_id,
+            "market_snapshot_id": "snap-1",
+            "resolved_target_price": "66000.00",
+            "resolved_stop_price": "57000.00",
+            "resolved_success_criteria": [],
+            "resolved_failure_criteria": [],
+            "ev_stated_usd": "0.81",
+            "ev_recomputed_usd": "0.8125",
+        },
+    )
+    _append(
+        make_event,
+        "ReviewCompleted",
+        {"thesis_id": thesis_id, "review_artifact_id": "rev-1", "passed": True},
+    )
+    thesis.approve(thesis_id)
+    _append(
+        make_event,
+        "ThesisActivated",
+        {"thesis_id": thesis_id, "order_id": "ord-1", "ts_utc": "2026-01-05T00:00:00Z"},
+    )
+
+    # Pin 1: an out-of-order thesis_review while ACTIVE must not move state.
+    _append(
+        make_event,
+        "ReviewCompleted",
+        {
+            "thesis_id": thesis_id,
+            "review_artifact_id": "rev-2",
+            "passed": True,
+            "kind": "thesis_review",
+        },
+    )
+    # Pin 2: a void_signoff is a sign-off artifact, never a lifecycle edge.
+    _append(
+        make_event,
+        "ReviewCompleted",
+        {
+            "thesis_id": thesis_id,
+            "review_artifact_id": "voidrev-1",
+            "passed": True,
+            "kind": "void_signoff",
+        },
+    )
+
+    # Live path: approve() must still see ACTIVE (and therefore refuse) —
+    # under the unguarded batch-A map it would wrongly see "reviewed" and
+    # SUCCEED, appending a bogus second ThesisApproved.
+    with pytest.raises(thesis.IllegalTransition) as exc:
+        thesis.approve(thesis_id)
+    assert exc.value.current_state == "active", (
+        "derived state must still be 'active' after out-of-order/sign-off "
+        "ReviewCompleted events — an unguarded event->state map lets ANY stray "
+        "lifecycle event clobber state (the batch-A defect, ASSUMPTIONS 73)"
+    )
+
+    # Projection path: the theses read model must agree (D15/TD-4).
+    default_ledger().rebuild()
+    rows = raw_sql("SELECT state FROM theses WHERE thesis_id = ?", thesis_id)
+    assert len(rows) == 1
+    assert rows[0][0] == "active"
+
+
 def test_state_derived_via_projection_matches_the_live_illegal_transition_path(
     thesis_kwargs, make_event, raw_sql
 ) -> None:

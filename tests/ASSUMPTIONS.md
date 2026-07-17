@@ -879,3 +879,181 @@ event payloads + projections), 2026-07-17
     sprint. Reject-from-approved being illegal is confirmed per §10.1's
     diagram (reject branches from reviewed only). pnl_daily population
     deferral to batch B/D confirmed.
+
+---
+
+## Round-9 additions — P2 batch B TDD session (thesis.grade wiring + the
+VOID path), 2026-07-17
+
+**Entry 23 UPDATE — grading-core re-point assessment (sprint doc's own
+instruction: "assess which of the 12 test_grading_engine.py tests are
+verb-shaped vs fraction-exact-core; the P1C escape hatch applies — likely
+ALL stay"):** assessed all twelve tests in
+`tests/unit/thesis/test_grading_engine.py`
+(`test_target_touch_passes_at_first_trigger_bar` ...
+`test_unsorted_bars_rejected`). Every one calls `evaluate_criteria` directly
+with hand-built `Bar`/predicate-dict arguments and asserts on the returned
+`CriteriaOutcome` alone — none of them touch bar FETCHING, thesis STATE, the
+ledger, or the runtime clock/bar seam (`get_closed_bars`/`_clock`). Re-
+pointing any of them through `thesis.grade(thesis_id)` would require
+building a full draft->submit->...->active lifecycle plus a fake bar seam for
+EVERY ONE, for zero additional behavioral coverage — exactly the P1C
+escape hatch's condition ("keep the fraction-exact math golden tests where
+they are", precedent: entry 23's own `mae._sizing` carve-out). Verdict:
+**ALL TWELVE stay as direct `_grading.evaluate_criteria` imports, unchanged,
+zero tests moved.** Consequently `tradekit.thesis._grading` is **NOT added
+to the TID251 ban list** this batch (`pyproject.toml` untouched) — same
+disposition as `mae._sizing`, for the same reason. The NEW verb-shaped
+coverage (state gate, event-payload wiring, pnl, the bar seam, quantize-at-
+the-verb-boundary) lives entirely in `tests/unit/thesis/test_grade_verb.py`
+(13 tests) and `tests/unit/thesis/test_void_verb.py` (9 tests), added this
+batch — these do NOT replace or duplicate the core's own fraction-exact
+tests; they test the WIRING around it (bar seam calls, pnl, event shape,
+state machine).
+
+67. **`grade()`'s return-value convention (FLAGGED, not derivable from the
+    CTO addendum, which only pins the return TYPE `dict[str, Any]`):**
+    pinned by this batch's tests as "the `ThesisGradedPayload` it just
+    appended, `model_dump`'d" — i.e. `thesis.grade(thesis_id)["outcome"]`
+    equals the ledgered `ThesisGraded` event's `payload["outcome"]`. Same
+    convention as `draft()` returning the id it just minted (the ledgered
+    event is always the source of truth; the return value is a convenience
+    mirror of it, never a second computation). Pinned by every happy-path
+    test in `test_grade_verb.py` (e.g.
+    `test_happy_pass_emits_thesis_graded_with_measured_values_and_bar_refs`).
+
+68. **`grade()`'s lookback-window derivation (FLAGGED — CTO addendum says
+    "activation->now window" but `mae._runtime.get_closed_bars(symbol,
+    timeframe, lookback_days)` has no explicit `start` parameter):** pinned
+    as `lookback_days` derived such that `now - timedelta(days=
+    lookback_days) == activation_ts` exactly, using DAY-ALIGNED fixture
+    timestamps so the derivation is checkable precisely rather than
+    approximately (`test_grade_verb.py::
+    test_grade_passes_predicate_timeframe_and_activation_window_to_the_seam`).
+    The dev pass may need `math.ceil` for non-day-aligned real activation
+    timestamps (this batch's tests don't probe that rounding edge — flagged
+    as an open gap, not resolved).
+
+69. **pnl fill-ordering convention (FLAGGED — `contracts._execution.Fill`
+    carries NO `side`/`direction` field, so "Σ signed fill notionals net of
+    fees" needs an entry/exit convention from somewhere else):** pinned as
+    "entry = the `FillRecorded` event with the EARLIEST `payload.ts_utc`
+    for this `thesis_id`; exit = the LATEST" with the sign taken from the
+    thesis contract's OWN `direction` field (`long`: pnl = (exit_price -
+    entry_price) * qty - Σfees; `short`: mirrored, UNTESTED this batch —
+    only the `long` case has a pinned test,
+    `test_pnl_computed_from_fill_events_net_of_fees_long_round_trip`).
+    Multi-fill partial-exit scenarios (more than one entry or exit fill)
+    are explicitly OUT OF SCOPE this batch. FLAGGED for CTO ratification;
+    the clean alternative (adding a `side` field to `Fill`/a typed
+    `FillRecordedPayload`) is a `contracts` change, above a test-author's
+    remit.
+
+70. **No `FillRecordedPayload` typed contract exists yet — harness fills
+    use `contracts._execution.Fill`'s field shape directly as the raw
+    `FillRecorded` event payload** (`order_id`, `thesis_id`, `ts_utc`,
+    `price`, `qty`, `fees_usd`), since that's the only pinned schema for a
+    fill anywhere in the codebase and the P0 envelope's `payload: dict`
+    accepts any JSON-native dict (ASSUMPTIONS 10). FLAGGED: a future batch
+    may want a dedicated `FillRecordedPayload` in `_event_payloads.py`
+    (same additive pattern as ASSUMPTIONS 59) — not attempted here (would
+    be a `contracts` src change, out of this test-authoring pass's remit).
+
+71. **pnl-with-no-fills convention — CTO OVERRIDE (2026-07-17): pnl is
+    NULLABLE.** This entry's first draft pinned `pnl_usd == Decimal("0")`
+    for a zero-fill grade because `ThesisGradedPayload.pnl_usd: Decimal`
+    was non-nullable as landed in batch A. The CTO adjudication overrode
+    that: a graded thesis with no fills has NO realized pnl, and
+    `Decimal("0")` FABRICATES a break-even datapoint that batch D's
+    series-expectancy math would silently ingest, diluting expectancy with
+    trades that never happened. Resolution (this batch):
+    `ThesisGradedPayload.pnl_usd` is now `Decimal | None`
+    (`src/tradekit/contracts/_event_payloads.py` — contracts is the one
+    fully-implemented module, so the edit is in-scope for a test pass);
+    still a REQUIRED field (None must be said explicitly — nullable !=
+    optional). Pinned by `tests/unit/contracts/test_event_payloads.py::
+    test_thesis_graded_pnl_usd_accepts_none` /
+    `test_thesis_graded_pnl_usd_still_required_even_though_nullable` and by
+    `tests/unit/thesis/test_grade_verb.py::
+    test_pnl_with_no_fills_is_none_never_a_fabricated_zero`.
+    **FORWARD-PIN for batch D (binding):** series expectancy must EXCLUDE
+    None-pnl theses from the expectancy computation — never coerce None to
+    zero. (They still count toward graded/non-void tallies per their
+    outcome; only the pnl aggregation skips them.)
+
+72. **`void()`'s typed refusal exception is named `VoidRefused` (additive
+    surface — sprint doc's own instruction: "pin a typed exception name,
+    e.g. VoidRefused, additive surface noted in ASSUMPTIONS"):** it does
+    NOT exist in `tradekit.thesis` yet (void() is still an unconditional
+    `NotImplementedError` stub this batch, and adding a new exception class
+    is implementation work outside a test-authoring pass's remit — "do not
+    modify src" holds for `thesis/__init__.py` too). Tests in
+    `test_void_verb.py` therefore do NOT write `pytest.raises(thesis.
+    VoidRefused)` directly (that would be an `AttributeError` at collection
+    time today, a different failure mode than the sprint's "red via
+    NotImplementedError" expectation) — instead a small local helper
+    (`_assert_raises_named`) catches broad `Exception` and asserts
+    `type(exc.value).__name__ == "VoidRefused"`, which today fails with a
+    clean, informative `AssertionError` (`'NotImplementedError' ==
+    'VoidRefused'`) and will correctly discriminate once the dev pass adds
+    the real class. `IllegalTransition` (already landed, batch A) IS
+    referenced directly (`thesis.IllegalTransition`) throughout, no
+    indirection needed.
+
+73. **Reviewer-signoff carrier event for `void()`'s second guard — CTO
+    OVERRIDE (2026-07-17), and the flag exposed a latent batch-A bug.**
+    This entry's first draft swapped the sign-off carrier to
+    `LessonRecorded` to dodge a collision: batch A's
+    `thesis._machine.derive_state` (`_STATE_BY_EVENT_TYPE`) and the
+    `theses` projection (`_projections._THESIS_STATE_BY_EVENT_TYPE`) map
+    ANY `ReviewCompleted` event — regardless of payload — to state
+    `"reviewed"`, so a void-signoff appended on an ACTIVE thesis would
+    clobber its derived state right when `void()` needs to see `active`.
+    CTO adjudication: the carrier stays **`ReviewCompleted` with an
+    additive `kind` field** (`LessonRecorded` is the memory module's
+    event; overloading it muddies the taxonomy) — and the collision the
+    first draft dodged is itself **the flagged defect**: the batch-A map
+    is UNGUARDED, meaning any out-of-order lifecycle event can corrupt
+    derived state. Resolution (this batch):
+    (a) `ReviewCompletedPayload` gains `kind: Literal["thesis_review",
+    "void_signoff"] = "thesis_review"` — additive + defaulted, so every
+    pre-existing payload (no `kind` key) keeps validating; pinned by
+    `test_event_payloads.py::test_review_completed_kind_defaults_to_
+    thesis_review` / `test_review_completed_kind_accepts_void_signoff_
+    and_rejects_junk`.
+    (b) `test_void_verb.py`'s sign-off harness (`_append_void_signoff`)
+    emits exactly the shape P3's `review.verify_claim` must produce: a
+    `ReviewCompleted` event whose payload is
+    `ReviewCompletedPayload(kind="void_signoff", thesis_id=...,
+    review_artifact_id=..., passed=True)`, validated through the typed
+    model; the success-path test asserts that shape explicitly so P3 has
+    an exact contract.
+    (c) **GUARDED-TRANSITION PIN (binding on the batch-B dev pass):**
+    `derive_state` (and the `theses` projection) must apply a
+    (state, event) -> state TABLE — a lifecycle event whose FROM-state
+    doesn't match the thesis's current state leaves state UNCHANGED
+    (projections must be total over any event history, never crash on and
+    never be corrupted by out-of-order events); a
+    `ReviewCompleted(kind="thesis_review")` only transitions
+    `submitted -> reviewed`; a `ReviewCompleted(kind="void_signoff")`
+    NEVER causes a state transition from any state (it is a sign-off
+    artifact, not a lifecycle edge). Pinned by the deliberately-RED
+    `test_lifecycle.py::test_review_completed_events_do_not_clobber_state_
+    guarded_transitions`, which exposes the batch-A unguarded map (under
+    it, approve() on an active thesis with a stray ReviewCompleted
+    wrongly succeeds). `_machine.py` + `_projections.py` are fixed
+    together by the batch-B dev pass.
+    Consequence: `test_void_verb.py`'s void success-path tests are red
+    for two stacked reasons (void() stub + unguarded derive_state); both
+    fixes are required to green them.
+
+    **CTO adjudication summary (2026-07-17) — batch-B flags:** entries 67
+    (grade() returns the dumped ThesisGradedPayload), 69 and 70 (pnl
+    fill-ordering + raw-Fill-shaped FillRecorded payloads — ratified as
+    P2-MVP conventions, TODO-P3: typed FillRecordedPayload, short-direction
+    and multi-fill handling), and 72 (VoidRefused naming + the
+    name-matching test indirection) are RATIFIED as pinned. Entry 68 is
+    ratified with one implementation note: the dev pass must round the
+    derived lookback UP (ceil) for non-day-aligned activation timestamps so
+    the fetched window always COVERS activation, never clips it. Entries 71
+    and 73 were OVERRIDDEN — see their rewritten bodies above.
