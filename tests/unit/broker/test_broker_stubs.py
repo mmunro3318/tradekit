@@ -2,7 +2,14 @@
 each raises `NotImplementedError` naming the batch that lands its real
 body; `create_paper_account` (TD-24's additive fifth verb) is REAL this
 batch and tested separately in `test_create_paper_account.py`.
-"""
+
+`get()` (SPRINT P3 batch B dev pass, superseding this file's own batch-A
+placeholder): real for the `"paper:"` prefix now — see
+`test_get_resolves_a_paper_prefixed_account_ref_to_a_paper_broker` below,
+which replaces the batch-A `NotImplementedError`-naming-its-batch pin this
+one function used to encode (that pin is definitionally obsolete once the
+verb it describes ships; every other stub below is untouched, still real
+`NotImplementedError`s naming their own batch)."""
 
 from __future__ import annotations
 
@@ -14,9 +21,17 @@ from tradekit import broker
 from tradekit.contracts import VerdictToken
 
 
-def test_get_is_not_yet_implemented_and_names_its_batch() -> None:
-    with pytest.raises(NotImplementedError, match="batch B"):
-        broker.get("paper:alpha")
+def test_get_resolves_a_paper_prefixed_account_ref_to_a_paper_broker() -> None:
+    from tradekit.broker._paper import PaperBroker
+
+    adapter = broker.get("paper:alpha")
+    assert isinstance(adapter, PaperBroker)
+    assert adapter.account_ref == "paper:alpha"
+
+
+def test_get_is_not_yet_implemented_for_non_paper_prefixes() -> None:
+    with pytest.raises(NotImplementedError, match="batch D"):
+        broker.get("live:alpaca")
 
 
 def test_execute_order_is_not_yet_implemented_and_names_its_batch() -> None:

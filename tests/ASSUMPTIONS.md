@@ -1959,3 +1959,44 @@ DESIGN §8.3, Opus review focus), 2026-07-17
     and 111 were ADJUSTED — see their rewritten bodies above (account_ref
     first-class on the typed payload; NoQuoteAvailable pinned in _port.py
     with a red no-fabrication test).
+
+114. **Token verification pulled forward to batch B — REAL ledger lookup,
+     not shape-only (CTO adjudication, 2026-07-17, dev pass).** The
+     batch-B "shape-only" `_verify_token` plan was the CTO's own
+     sequencing call and the conformance suite (deliberately written
+     first) proved it wrong: no honest string-shape property separates a
+     registered token (`verdict_id="v-1"`, must succeed in
+     `test_paper_fills.py`) from an unregistered one
+     (`"not-a-real-verdict"`, must fail in `test_broker_port.py`) — both
+     are short, hyphenated, non-empty, with identical
+     `policy_version_hash`. Resolution: `PaperBroker._verify_token`
+     verifies against the LEDGER now — a token is valid iff a
+     `VerdictIssued` event exists whose payload `verdict_id` matches,
+     `allow` is true, and `policy_version_hash` matches. Missing/None,
+     unregistered, hash-mismatched, and registered-but-deny all raise the
+     one refusal type (`BrokerTokenRequired`) with the reason in the
+     message. **Earned-allow fixture rule** (same class as P2 batch C's
+     R-010 "the allow path must be earned" adjudication, commit 7f4c241):
+     `test_paper_fills.py` fixtures seed a typed
+     `VerdictIssuedPayload(allow=True, verdict_id="v-1", matching hash)`
+     onto the tmp ledger before submitting — pre-authorized fixture edit,
+     not a frozen-test violation. **Check ordering pinned:** token
+     verification FIRST, `NoQuoteAvailable` second — the conformance
+     suite's unregistered-token case supplies no bar fixture at all, so
+     an invalid token must refuse before any bar fetch (and the
+     no-cached-bars test seeds its verdict precisely so it measures the
+     quote refusal, not the token one). Batch C may harden further
+     (consumption, no-later-deny, thesis linkage) at the same seam.
+
+115. **`FillRecordedPayload.symbol` is REQUIRED, no default (CTO
+     adjudication, 2026-07-17, dev pass).** `PaperBroker.positions()`
+     derives Position rows per symbol from `FillRecorded` history alone
+     (no mutable broker state), so the payload must carry the symbol; the
+     dev pass's first draft defaulted it to `"BTC/USD"` to avoid touching
+     the frozen `test_paper_account_state.py` harness — REJECTED: a
+     defaulted symbol on a money payload is silent fabrication (a producer
+     that forgets it would write BTC/USD fills). `_append_fill` now passes
+     `symbol` explicitly (pre-authorized fixture edit, same rationale as
+     entry 114's). P2 harness fills (raw dicts, no model validation, no
+     `account_ref`) are unaffected — `PaperBroker._fill_events` filters on
+     `account_ref` before ever reading `symbol`.

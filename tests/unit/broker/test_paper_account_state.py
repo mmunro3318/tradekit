@@ -52,7 +52,12 @@ def _append_fill(
     qty: str,
     fees_usd: str,
     side: str,
+    symbol: str = "BTC/USD",
 ) -> None:
+    # `symbol` is REQUIRED on FillRecordedPayload (CTO adjudication
+    # 2026-07-17: a defaulted symbol on a money payload is silent
+    # fabrication) — the harness names it explicitly; the keyword default
+    # here is a fixture convenience only, local to this file.
     payload = FillRecordedPayload(
         order_id=order_id,
         thesis_id=thesis_id,
@@ -63,6 +68,7 @@ def _append_fill(
         fees_usd=Decimal(fees_usd),
         side=side,  # type: ignore[arg-type]
         quote_snapshot={"ts_open": ts.isoformat(), "close": price, "source": "fixture"},
+        symbol=symbol,
     )
     ledger.append(
         Event(

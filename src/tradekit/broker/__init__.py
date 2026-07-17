@@ -22,6 +22,7 @@ from typing import Any
 
 from ulid import ULID
 
+from tradekit.broker._paper import PaperBroker
 from tradekit.broker._port import BrokerPort
 from tradekit.contracts import (
     AccountConfig,
@@ -51,12 +52,14 @@ class AccountAlreadyExists(Exception):
 
 
 def get(account_ref: str) -> BrokerPort:
-    """`"paper:alpha"` -> PaperBroker, `"live:alpaca"` -> AlpacaBroker,
-    `"advisory:*"` -> ManualBroker (§8.1). STUB — batch B (PaperBroker),
-    batch D (ManualBroker/AlpacaBroker stub)."""
+    """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real this batch);
+    every other prefix (`"live:alpaca"` -> AlpacaBroker, `"advisory:*"` ->
+    ManualBroker, §8.1) stays a `NotImplementedError` naming batch D."""
+    if account_ref.startswith("paper:"):
+        return PaperBroker(account_ref=account_ref)
     raise NotImplementedError(
-        f"tradekit.broker.get({account_ref!r}): batch B (PaperBroker) / batch D "
-        "(ManualBroker, AlpacaBroker stub) land the adapter resolution"
+        f"tradekit.broker.get({account_ref!r}): batch D (ManualBroker, AlpacaBroker stub) "
+        "lands adapter resolution for non-'paper:' account_refs"
     )
 
 
@@ -137,6 +140,7 @@ def create_paper_account(config: AccountConfig) -> str:
 __all__ = [
     "AccountAlreadyExists",
     "BrokerPort",
+    "PaperBroker",
     "create_paper_account",
     "execute_order",
     "get",

@@ -332,6 +332,44 @@ class AccountCreatedPayload(StrictFrozenModel):
     created_ts: AwareDatetime
 
 
+class OrderSubmittedPayload(StrictFrozenModel):
+    """Producer: a `BrokerPort.submit` adapter (SPRINT P3 batch B,
+    `PaperBroker` first) — appended BEFORE any fill evaluation, so an
+    order's own request shape is durably recorded and `order_status` can
+    later re-derive a resting order's terms without the adapter holding any
+    mutable state of its own (§8.3's "state from ledger events only"
+    discipline, mirrors `_paper.py`'s module docstring). Mirrors
+    `contracts.OrderRequest`'s fields, `asset` carried as
+    `model_dump(mode="json")` (same "carry the whole nested contract, no
+    second lookup" convention as `ThesisDraftedPayload.contract`), plus the
+    `order_id` assigned at submission and the submission timestamp — the
+    reference instant a later resting-limit evaluation compares bar
+    `ts_open`s against (only bars closing AFTER this ts count, ASSUMPTIONS
+    round-17 entry 110). Additive (batch B) — not in the SPRINT P3 batch A
+    scope note; no prior producer/consumer to migrate."""
+
+    order_id: str
+    thesis_id: str
+    account_ref: str
+    asset: dict[str, Any]
+    side: Literal["buy", "sell"]
+    order_type: Literal["market", "limit", "stop", "stop_limit"]
+    qty: Decimal
+    limit_price: Decimal | None = None
+    ts_utc: AwareDatetime
+
+
+class OrderAckPayload(StrictFrozenModel):
+    """Producer: a `BrokerPort.submit` adapter, immediately after
+    `OrderSubmitted` (mirrors `contracts.OrderAck`'s fields verbatim; §8.2
+    step 5's "OrderSubmitted/OrderAck" pairing). Additive (batch B)."""
+
+    order_id: str
+    status: Literal["accepted", "rejected"]
+    ts_utc: AwareDatetime
+    venue_order_id: str | None = None
+
+
 class FillRecordedPayload(StrictFrozenModel):
     """Producer: `broker._paper.PaperBroker.submit`/order-fill evaluation
     (SPRINT P3 batch B, §8.3) — and, later, `AlpacaBroker`/`ManualBroker`
@@ -377,6 +415,14 @@ class FillRecordedPayload(StrictFrozenModel):
     fees_usd: Decimal
     side: Literal["buy", "sell"]
     quote_snapshot: dict[str, Any] = Field(default_factory=dict)
+    # `symbol` (batch B dev-pass addition, CTO-adjudicated 2026-07-17):
+    # `PaperBroker.positions()` needs a per-symbol key to derive Position
+    # rows from FillRecorded history alone (no mutable broker state).
+    # REQUIRED, no default — a defaulted symbol on a money payload is
+    # silent fabrication (a producer that forgot it would write BTC/USD
+    # fills); every producer, harness fixtures included, must name the
+    # symbol explicitly.
+    symbol: str
 
 
 __all__ = [
@@ -390,6 +436,8 @@ __all__ = [
     "HaltSetPayload",
     "InvalidationAttestedPayload",
     "MarketSnapshotTakenPayload",
+    "OrderAckPayload",
+    "OrderSubmittedPayload",
     "PolicyVersionLoadedPayload",
     "PromotionConfirmedPayload",
     "PromotionGrantedPayload",

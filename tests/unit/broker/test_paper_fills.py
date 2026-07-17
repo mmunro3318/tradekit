@@ -24,16 +24,52 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from ulid import ULID
 
 from tradekit.broker._paper import PaperBroker
 from tradekit.broker._port import BrokerTokenRequired, NoQuoteAvailable
-from tradekit.contracts import AssetRef, Bar, BarSeries, EventFilter, OrderRequest, VerdictToken
+from tradekit.contracts import (
+    AssetRef,
+    Bar,
+    BarSeries,
+    Event,
+    EventFilter,
+    OrderRequest,
+    VerdictIssuedPayload,
+    VerdictToken,
+)
 from tradekit.ledger import default_ledger
 
 _ASSET = AssetRef(symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01"))
 _ACCOUNT_REF = "paper:fills-test"
 _VERDICT = VerdictToken(verdict_id="v-1", policy_version_hash="0" * 64)
 _T0 = datetime(2026, 1, 2, tzinfo=UTC)
+
+
+def _seed_allow_verdict(account_ref: str = _ACCOUNT_REF) -> None:
+    """Earn the allow (CTO adjudication 2026-07-17, same class as P2 batch
+    C's R-010 'the allow path must be earned' call): `_VERDICT` is only
+    valid because a REAL `VerdictIssued(allow=true)` event with a matching
+    `verdict_id`/`policy_version_hash` sits on the ledger — batch C's
+    pipeline is the normal producer; the harness appends it directly."""
+    default_ledger().append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=_T0,
+            type="VerdictIssued",
+            actor="system:test-harness",
+            run_id=None,
+            schema_ver=1,
+            payload=VerdictIssuedPayload(
+                verdict_id=_VERDICT.verdict_id,
+                kind="submit_order",
+                account_ref=account_ref,
+                thesis_id=None,
+                allow=True,
+                policy_version_hash=_VERDICT.policy_version_hash,
+            ).model_dump(mode="json"),
+        )
+    )
 
 
 def _bars(bars: list[Bar], source: str = "fake-kraken"):
@@ -90,6 +126,7 @@ def test_market_buy_fills_at_mid_plus_half_spread_with_fee_from_costs_table(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
+    _seed_allow_verdict()
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="buy"), _VERDICT)
 
@@ -112,6 +149,7 @@ def test_market_sell_fills_at_mid_minus_half_spread_with_fee_from_costs_table(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
+    _seed_allow_verdict()
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="sell"), _VERDICT)
 
@@ -134,6 +172,7 @@ def test_market_fill_quote_snapshot_matches_the_bar_used(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
+    _seed_allow_verdict()
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="buy"), _VERDICT)
 
@@ -173,6 +212,11 @@ def test_market_submit_with_no_cached_bars_raises_no_quote_available_and_appends
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0)
 
+    # Token verification runs FIRST (CTO adjudication, 2026-07-17) — the
+    # verdict must be earned so this test measures the NoQuoteAvailable
+    # refusal, not a token refusal. Seeded before the baseline count so the
+    # no-op assertion below is unaffected.
+    _seed_allow_verdict()
     events_before = len(default_ledger().query(EventFilter()))
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     with pytest.raises(NoQuoteAvailable):
@@ -207,6 +251,7 @@ def _submit_resting_buy_limit(monkeypatch: pytest.MonkeyPatch) -> tuple[PaperBro
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([quiet_bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0)
 
+    _seed_allow_verdict()
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     ack = broker.submit(_order(side="buy", order_type="limit", limit_price=str(_LIMIT)), _VERDICT)
     assert ack.status == "accepted"
@@ -323,6 +368,10 @@ def test_market_fill_replay_is_deterministic(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
+    # Both brokers resolve default_ledger() under the same TK_DATA_DIR tmp
+    # isolation, so one seeded VerdictIssued serves both submits — each
+    # broker's ledger (the shared one) carries the earned allow.
+    _seed_allow_verdict("paper:replay-a")
     broker_a = PaperBroker(account_ref="paper:replay-a")
     broker_b = PaperBroker(account_ref="paper:replay-b")
     broker_a.submit(_order(side="buy"), _VERDICT)
@@ -367,6 +416,7 @@ def test_market_fill_price_stays_within_the_spread_adjusted_bar_envelope(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
+    _seed_allow_verdict()
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side=side), _VERDICT)
 
