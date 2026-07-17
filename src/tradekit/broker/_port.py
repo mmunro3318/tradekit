@@ -30,6 +30,27 @@ from tradekit.contracts import (
 )
 
 
+class BrokerTokenRequired(Exception):
+    """The one refusal type every `BrokerPort.submit` adapter raises when
+    `verdict` is missing/invalid (§8.2, §15) — canonical home (SPRINT P3
+    batch B) so `tests/contract/test_broker_port.py`'s conformance suite and
+    every adapter module import the SAME class object; `pytest.raises`
+    matches by class identity, so a duplicate same-named class defined
+    inside the test module (as the batch-A skeleton did, pending a real
+    adapter to import from) would never actually catch a real adapter's
+    exception."""
+
+
+class NoQuoteAvailable(Exception):
+    """Raised by an adapter's fill evaluation when the order's symbol has NO
+    cached closed bars to price against (CTO adjudication, SPRINT P3 batch B
+    — ASSUMPTIONS Round-17 entry 111 pin): a broker that invents a price is
+    the exact fabrication class ASSUMPTIONS 71 exists to kill, so a market
+    order with no quote is a typed error and appends ZERO events — never a
+    guess-fill, never a silently-resting order. Canonical home alongside
+    `BrokerTokenRequired` for the same identity-match reason."""
+
+
 @runtime_checkable
 class BrokerPort(Protocol):
     def account(self) -> AccountState:
@@ -55,4 +76,4 @@ class BrokerPort(Protocol):
         ...
 
 
-__all__ = ["BrokerPort"]
+__all__ = ["BrokerPort", "BrokerTokenRequired", "NoQuoteAvailable"]

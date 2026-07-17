@@ -7,12 +7,15 @@ pass, each case built by its own factory function and registered once in
 `CASE_BUILDERS` — adding a future adapter is exactly one new factory +
 one new registry entry (TD-18's "one factory entry" property).
 
-SKELETON this batch (SPRINT P3 addendum, batch A pin: "write the
-assertions now so batch B's PaperBroker drops in"): `CASE_BUILDERS` holds
-only a placeholder marker, `pytest.skip`'d with a reason naming batch B
-(PaperBroker, the first real adapter) — every assertion body below is
-written against the Protocol's real shape so batch B's dev pass only has
-to add ONE `CASE_BUILDERS` entry, nothing else in this file changes.
+SPRINT P3 batch B (PaperBroker, the first real adapter) lands the first real
+`CASE_BUILDERS` entry (`"paper"`) below — the placeholder marker from batch A
+is gone, so this suite now runs FOR REAL (no longer skipped) for the "paper"
+case. `BrokerTokenRequired` is imported from its canonical home
+(`tradekit.broker._port`, SPRINT P3 batch B) rather than defined locally —
+batch A's local class could never have matched a real adapter's raised
+exception by identity (`pytest.raises` matches by class, not by name); moving
+it fixes that latent gap rather than carrying it forward (ASSUMPTIONS,
+this batch).
 
 Pins per adapter (§8.1, §15, ASSUMPTIONS round-16):
   - `account()` returns an `AccountState` with every money field `Decimal`
@@ -21,6 +24,14 @@ Pins per adapter (§8.1, §15, ASSUMPTIONS round-16):
     without a real allow-verdict behind them (§8.2, §15's "structurally
     impossible" ordering guarantee)
   - `fills(since)` returns `Fill`s ASCENDING by `ts_utc`
+
+Batch B status: `PaperBroker`'s methods are `NotImplementedError` stubs
+(fill-model dev pass lands after this red-phase session) — every case for
+"paper" below is therefore expected RED this batch, not skipped; the
+`BrokerTokenRequired` assertion specifically stays red because batch B's
+`submit()` doesn't reach even a shape-only token check yet (see
+`tests/unit/broker/test_paper_fills.py` for the token-required pin that
+prescribes the dev pass's real behavior).
 """
 
 from __future__ import annotations
@@ -33,15 +44,8 @@ from typing import Any
 
 import pytest
 
-from tradekit.broker._port import BrokerPort
-
-
-class BrokerTokenRequired(Exception):
-    """Pinned exception NAME (batch A) for an adapter's `submit()` refusal
-    when the `VerdictToken` argument is missing/invalid (§8.2, §15) — batch
-    B's `PaperBroker.submit` (and every later adapter) raises THIS type, not
-    an ad hoc `ValueError`, so callers can catch one thing across every
-    venue."""
+from tradekit.broker._paper import PaperBroker
+from tradekit.broker._port import BrokerPort, BrokerTokenRequired
 
 
 @dataclass(frozen=True)
@@ -54,29 +58,40 @@ class Case:
     factory: Callable[[], BrokerPort]
 
 
-def _not_yet_landed_case() -> BrokerPort:  # pragma: no cover — never invoked, see skip below
-    raise NotImplementedError("placeholder marker only — see CASE_BUILDERS' skip reason")
+def _build_paper_case() -> BrokerPort:
+    """SPRINT P3 batch B's first real `CASE_BUILDERS` entry: seeds a fresh
+    `AccountCreated` on the (per-test, `TK_DATA_DIR`-isolated, autouse
+    fixture) default ledger via the already-real `broker.create_paper_account`
+    (TD-24, batch A), then hands back a `PaperBroker` bound to that
+    `account_ref` — "a fresh instance per test", per `Case`'s own docstring.
+    A fresh `account_ref` per call (ULID suffix) avoids
+    `AccountAlreadyExists` across the multiple cases pytest builds from this
+    one factory (one per parametrized test function)."""
+    from ulid import ULID
+
+    from tradekit import broker
+    from tradekit.contracts import AccountConfig
+
+    account_ref = f"paper:conformance-suite-{ULID()}"
+    broker.create_paper_account(
+        AccountConfig(
+            account_ref=account_ref,
+            principal_usd=Decimal("500.00"),
+            max_trades_per_day=0,
+        )
+    )
+    return PaperBroker(account_ref=account_ref)
 
 
 # One entry per BrokerPort adapter this suite conforms — the ONLY place a
 # future adapter needs to be added (TD-18 "one factory entry" property).
-# Batch B adds `"paper": lambda: PaperBroker(account_ref="paper:conformance-suite")`
-# (or equivalent) here; nothing else in this file changes.
 CASE_BUILDERS: dict[str, Callable[[], BrokerPort]] = {
-    "placeholder": _not_yet_landed_case,
+    "paper": _build_paper_case,
 }
-
-_SKIP_REASON = (
-    "no BrokerPort adapter has landed yet — batch B (PaperBroker, SPRINT P3 addendum "
-    "batch plan) adds the first real CASE_BUILDERS entry; this suite's assertions are "
-    "written now so PaperBroker drops straight in (story 3.1 pin)"
-)
 
 
 @pytest.fixture(params=list(CASE_BUILDERS), ids=list(CASE_BUILDERS))
 def case(request: pytest.FixtureRequest) -> Case:
-    if request.param == "placeholder":
-        pytest.skip(_SKIP_REASON)
     return Case(id=request.param, factory=CASE_BUILDERS[request.param])
 
 

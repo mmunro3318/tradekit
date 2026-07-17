@@ -332,11 +332,59 @@ class AccountCreatedPayload(StrictFrozenModel):
     created_ts: AwareDatetime
 
 
+class FillRecordedPayload(StrictFrozenModel):
+    """Producer: `broker._paper.PaperBroker.submit`/order-fill evaluation
+    (SPRINT P3 batch B, §8.3) — and, later, `AlpacaBroker`/`ManualBroker`
+    (§8.4). Replaces P2's harness convention (ASSUMPTIONS round-9 entries
+    69/70: raw dicts shaped like `contracts.Fill`, no `side` field) with a
+    typed, additive contract every real fill producer validates through.
+
+    Superset of `contracts.Fill`'s field shape (`order_id`, `thesis_id`,
+    `ts_utc`, `price`, `qty`, `fees_usd`, `quote_snapshot`) PLUS `side` —
+    the field `Fill` never carried (ASSUMPTIONS 69's own flagged gap) and
+    that this typed payload closes so a future entry/exit convention no
+    longer has to infer direction from earliest/latest `ts_utc` alone —
+    PLUS `account_ref` (CTO adjudication, Round-17 entry 107: first-class,
+    required — multi-account attribution, TD-7/TD-24).
+    `quote_snapshot` carries the bar this fill priced off (§8.3: "every
+    paper fill auditable") — `ts_open`/`close`/`source` at minimum (batch B
+    pin), a plain JSON object per the ASSUMPTIONS-10 pattern (heterogeneous
+    across venues, never itself a nested typed model). `account_ref` is
+    FIRST-CLASS and required (CTO adjudication, Round-17 entry 107
+    override): multi-account attribution is TD-7's entire reason to exist,
+    and an untyped side-channel dict key on a typed payload would defeat
+    the model — producers carry it here, never as an extra merged key.
+
+    Compatibility note (ASSUMPTIONS round-17, this batch): `thesis.
+    _grade_wiring.compute_pnl` reads `FillRecorded` payloads as plain
+    dicts via `event.payload.get(...)` / `event.payload["..."]` — it never
+    imports or validates through a payload model (ASSUMPTIONS 10's
+    consumer-reads-the-dict split) and never touches `side` or
+    `quote_snapshot`. Every P2-harness-built fixture fill (this contract's
+    OWN pre-existing field set, minus `side`/`quote_snapshot`) therefore
+    still satisfies every field `compute_pnl` actually reads — no P2 test
+    changes, no migration needed for that consumer. `side` stays unused by
+    `compute_pnl`'s existing earliest/latest-`ts_utc` entry/exit convention
+    this batch; wiring `side` into pnl attribution (replacing the
+    ordering-based convention) is explicitly deferred, not attempted here."""
+
+    order_id: str
+    thesis_id: str
+    account_ref: str
+    ts_utc: AwareDatetime
+    price: Decimal
+    qty: Decimal
+    fees_usd: Decimal
+    side: Literal["buy", "sell"]
+    quote_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     "AccountCreatedPayload",
     "ActionProposedPayload",
     "ConfigChangedPayload",
     "DemotedPayload",
+    "FillRecordedPayload",
     "GateViolationDetectedPayload",
     "HaltClearedPayload",
     "HaltSetPayload",

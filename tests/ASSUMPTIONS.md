@@ -1807,3 +1807,155 @@ migration), 2026-07-17
     batch deliberately collapsed the TDD/dev split for declarative
     machinery (batch-C precedent); the conformance-suite skips are the
     honest red carried to batch B.
+
+---
+
+## Round-17 additions — P3 batch B TDD session (PaperBroker fill model,
+DESIGN §8.3, Opus review focus), 2026-07-17
+
+106. **`FillRecordedPayload` (`tradekit.contracts`, additive, real this
+     batch) is a superset of `contracts.Fill`'s field shape PLUS `side`:**
+     `order_id`, `thesis_id`, `ts_utc`, `price`, `qty`, `fees_usd`,
+     `quote_snapshot` (unchanged from `Fill`) + `side: Literal["buy",
+     "sell"]` (the field `Fill` never carried — ASSUMPTIONS 69's own
+     flagged gap). Compatibility with P2's harness convention (ASSUMPTIONS
+     69/70 — raw dicts shaped like `Fill`, no `side`): CHECKED, not
+     silently assumed. `thesis._grade_wiring.compute_pnl` reads
+     `FillRecorded` payloads as **plain dicts** via `event.payload.get(...)`
+     / `event.payload["..."]` — it never imports or validates through a
+     payload model (the ASSUMPTIONS-10 consumer-reads-the-dict split) and
+     never touches `side` or `quote_snapshot`. Every field `compute_pnl`
+     actually reads (`ts_utc`, `price`, `qty`, `fees_usd`, `thesis_id`) is
+     present on every P2-harness-built fixture fill. **Conclusion: no P2
+     test changes, no `compute_pnl` migration needed this batch** — `side`
+     stays unconsumed by the existing earliest/latest-`ts_utc` entry/exit
+     convention. Wiring `side` into pnl attribution (replacing the
+     ordering-based convention, closing ASSUMPTIONS 69's flagged gap for
+     real) is explicitly deferred to a later batch, not attempted here.
+
+107. **`account_ref` is a FIRST-CLASS required field on
+     `FillRecordedPayload` — CTO OVERRIDE (2026-07-17) of this entry's
+     first draft.** The first draft flagged that the CTO addendum's
+     enumerated field list ("fill price, qty, fees, side, thesis_id,
+     order_id, AND the quote snapshot") omits `account_ref`, and pinned an
+     extra-dict-key convention (option (a)) as the read path. Adjudication:
+     REJECTED — multi-account attribution is TD-7's entire reason to exist,
+     and an untyped side-channel key on a typed payload defeats the model.
+     Resolution (this batch): `FillRecordedPayload.account_ref: str` is a
+     required model field; `tests/unit/broker/test_paper_account_state.py`'s
+     `_append_fill` constructs it first-class and persists a pure
+     `payload.model_dump(mode="json")` with no merged extras.
+     Compatibility re-check after the change (per the adjudication's own
+     instruction): `thesis._grade_wiring.compute_pnl` reads raw dicts and
+     touches only `thesis_id`/`ts_utc`/`price`/`qty`/`fees_usd` — it never
+     reads `account_ref` — and P2's `test_grade_verb.py` harness fills are
+     raw dicts that never validate through the model, so an ADDED required
+     model field cannot fail them (only producers construct the model).
+     Confirmed: nothing else moves; entry 106's no-migration finding is
+     unchanged.
+
+108. **`buying_power_usd == settled_cash_usd` (no margin modeled in MVP)** —
+     `AccountState`'s three money fields collapse to one value for a cash-
+     settled paper account with no open positions carrying unrealized P&L
+     into buying power. Pinned by every `test_paper_account_state.py`
+     assertion; genuinely unpinned by any DESIGN prose read for this batch
+     (§8.1 only says "equity, settled cash, buying power" without a
+     formula) — flagged, not derived from a cited source.
+
+109. **A fully round-tripped (net qty == 0) symbol is OMITTED from
+     `positions()`, never returned as a zero-qty row** — `BrokerPort.
+     positions()`'s own docstring ("Every open position on this account")
+     reads qty-0 as "not open." Flagged convention, not literally pinned
+     by §8.1/§8.3 prose.
+
+110. **Limit-fill evaluation trigger — FLAGGED, inferred, not literally
+     pinned by §8.3's prose:** a resting limit order can only trade through
+     on a bar that closes AFTER the order was placed, so `PaperBroker`
+     cannot evaluate (and therefore cannot fill) a limit order at `submit()`
+     time alone — something must re-check later bars as they close.
+     `tests/unit/broker/test_paper_fills.py` pins `order_status(order_id)`
+     as that re-check point (mirrors §8.2 step 6: "`tk order status`
+     polling -> `FillRecorded`" — the pipeline's own polling verb), which
+     means `order_status` has a WRITE side effect (appends `FillRecorded`)
+     on a fill-triggering call, unusual for a "status getter" but consistent
+     with "no mutable broker state — the ledger is the only state." An
+     equally defensible alternative is a dedicated internal poll method
+     `execute_order` (batch C) calls directly instead of going through
+     `order_status`. The test suite's CONTRACT (submit a resting limit at
+     T0 -> later bars appear -> `order_status` reflects `"filled"` with a
+     matching `FillRecorded`) is what the dev pass must preserve; the
+     MECHANISM (`order_status` itself doing the evaluation vs. a private
+     helper `order_status` merely reads the result of) is not pinned,
+     flagged for CTO ratification.
+
+     **CTO ratification (2026-07-17): RATIFIED as pinned** — batch C's
+     pipeline is the poller (§8.2 step 6); a dedicated sweep verb can come
+     later if scheduling needs it.
+
+111. **No-cached-bars behavior — PINNED by CTO adjudication (2026-07-17),
+     no longer an open question:** typed exception `NoQuoteAvailable`,
+     canonical home `tradekit.broker._port` (alongside
+     `BrokerTokenRequired`, same identity-match rationale as entry 112),
+     raised by a market `submit()` when `mae._runtime.get_closed_bars`
+     returns ZERO bars for the order's symbol, with ZERO events appended
+     (no `OrderSubmitted`, no `OrderAck`, no `FillRecorded`) — never a
+     guess-fill; a broker that invents prices is the exact fabrication
+     class ASSUMPTIONS 71 exists to kill. Pinned by the (red this batch)
+     `tests/unit/broker/test_paper_fills.py::
+     test_market_submit_with_no_cached_bars_raises_no_quote_available_and_
+     appends_nothing`. The limit-order-with-no-bars variant is not
+     separately tested this batch (the adjudication specified the market
+     case; the same no-fabrication principle applies, coverage gap noted,
+     not a design gap).
+
+112. **`BrokerTokenRequired` moved from a test-local class
+     (`tests/contract/test_broker_port.py`, batch A skeleton) to its
+     canonical home, `tradekit.broker._port.BrokerTokenRequired`** — this
+     is a mechanical fix, not a design call: `pytest.raises(SomeClass)`
+     matches by class IDENTITY, so a same-named class defined only inside
+     the test module could never have caught a real adapter's raised
+     exception (the batch-A skeleton predates any real adapter to import
+     from, so the gap was latent, not deliberate). The conformance test's
+     own assertion body is UNCHANGED — only the import site moved, per the
+     batch-A pin's "nothing else in this file changes" intent for the
+     CASE_BUILDERS mechanics (the exception-location fix is orthogonal to
+     that pin, not a violation of it).
+
+113. **Conformance suite's `CASE_BUILDERS["paper"]` seeds a FRESH
+     `account_ref` per call (`f"paper:conformance-suite-{ULID()}"`), not
+     the fixed `"paper:conformance-suite"` string the batch-A skeleton's
+     placeholder comment suggested** — `pytest.fixture(params=...)` builds
+     one `Case` per parametrized TEST FUNCTION (five call sites this file),
+     and `broker.create_paper_account` refuses a duplicate `account_ref`
+     (`AccountAlreadyExists`, batch A, real) — a fixed string would 409 on
+     the second test function's factory call. ULID-suffixing keeps every
+     call collision-free without changing `Case`'s "fresh instance per
+     test" contract.
+
+    **Batch-B token-gate scope note (not a numbered flag, restating the
+    CTO addendum directly):** `PaperBroker.submit`/`.account`/`.positions`/
+    `.order_status`/`.fills` and the documented `_verify_token` seam are
+    ALL unconditional `NotImplementedError` stubs this batch (TDD red
+    phase, "Failing tests + stubs" per the batch dispatch) — including the
+    None-token shape check itself. This means `tests/contract/
+    test_broker_port.py::test_submit_refuses_without_a_valid_verdict_token
+    [paper]` and every other "paper" conformance case fail with
+    `NotImplementedError`, not the assertion they encode — the suite is
+    UNSKIPPED and running for real (675 collected vs. the prior 5-skip
+    baseline; batch A's placeholder marker and skip reason are gone), which
+    satisfies "conformance now failing-red for paper, not skipped." No
+    fill-model code was written in this session beyond `contracts`
+    additions (additive, real per house convention: "contracts are cheap")
+    and the `BrokerTokenRequired`/`NoQuoteAvailable` exception classes in
+    `_port.py` (mechanical fix, entry 112 / CTO-pinned typed error, entry
+    111).
+
+    **CTO adjudication summary (2026-07-17) — batch-B flags (106-113):**
+    entries 106 (FillRecordedPayload superset + no-migration finding), 108
+    (buying_power == settled_cash — no margin in paper, EVER), 109
+    (zero-qty positions omitted), 110 (order_status polling — batch C's
+    pipeline is the poller), 112 (BrokerTokenRequired relocation), 113
+    (ULID-suffixed conformance seeding) RATIFIED as pinned. Entries 107
+    and 111 were ADJUSTED — see their rewritten bodies above (account_ref
+    first-class on the typed payload; NoQuoteAvailable pinned in _port.py
+    with a red no-fabrication test).
