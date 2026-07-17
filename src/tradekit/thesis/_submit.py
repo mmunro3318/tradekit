@@ -17,6 +17,13 @@ so tests monkeypatching `"tradekit.mae._runtime.get_closed_bars"` /
 too. `mae.size_position` is called through the public `tradekit.mae` module
 attribute (`from tradekit import mae`), never bypassed, so it stays the
 single source of truth for R-012's sizing-purity comparison.
+
+SPRINT P2 batch C: the `PAPER_STARTING_EQUITY_USD` hardcode (ASSUMPTIONS
+61, "ratified-temporary, must not survive the sprint") is RETIRED this
+batch — sizing now reads `PolicyDials.load().paper_starting_equity_usd` at
+call time (no caching, same discipline as `TK_CONFIG_PATH`/`TK_DATA_DIR`).
+`thesis` importing `tradekit.policy._dials` (dials only, nothing else from
+`policy`) does not create a cycle: `policy` imports nothing from `thesis`.
 """
 
 from __future__ import annotations
@@ -34,11 +41,7 @@ from tradekit.contracts import (
     quantize,
 )
 from tradekit.mae import _runtime as _mae_runtime
-
-# CTO addendum / ASSUMPTIONS 61: hardcoded module constant, TEMPORARY — batch
-# C's `PolicyDials.paper_starting_equity_usd` replaces this, same commit as
-# the dials land. Must not survive the sprint.
-PAPER_STARTING_EQUITY_USD = Decimal("500")
+from tradekit.policy._dials import PolicyDials
 
 # SME F5: recompute must not differ from the stated EV by more than one cent.
 _EV_TOLERANCE_USD = Decimal("0.01")
@@ -76,11 +79,12 @@ def build_submit_payloads(
         source=bars.source,
     )
 
-    sizing = mae.size_position(symbol, account_equity_usd=PAPER_STARTING_EQUITY_USD)
+    paper_starting_equity_usd = PolicyDials.load().paper_starting_equity_usd
+    sizing = mae.size_position(symbol, account_equity_usd=paper_starting_equity_usd)
     sizing_payload = SizingComputedPayload(
         thesis_id=thesis_id,
         symbol=symbol,
-        account_equity_usd=PAPER_STARTING_EQUITY_USD,
+        account_equity_usd=paper_starting_equity_usd,
         sizing=sizing,
     )
 

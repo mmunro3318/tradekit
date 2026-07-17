@@ -1057,3 +1057,185 @@ state machine).
     derived lookback UP (ceil) for non-day-aligned activation timestamps so
     the fetched window always COVERS activation, never clips it. Entries 71
     and 73 were OVERRIDDEN — see their rewritten bodies above.
+
+74. **SPRINT P2 batch C red/green split — `_dials.py`/`_rules.py` land
+    REAL, the six `policy` verbs + `_context.assemble` + `_evaluate.
+    evaluate_pure` + RULES.md generation + the `tk policy`/`tk promote` CLI
+    verbs stay unconditional `NotImplementedError` stubs (CTO's own call in
+    the batch-C dispatch message, transcribed verbatim: "_dials.py and
+    _rules.py may land REAL this phase ... the six VERBS + _context +
+    _evaluate + RULES.md generation + CLI stay stubs -> red"). Consequence
+    for `tests/unit/policy/test_rules.py`: because `Rule.check` is pure and
+    real, every R-001..R-016 allow/deny pair is GREEN even though nothing
+    downstream (`_evaluate`, `policy.evaluate`) can run them together yet —
+    same "declarative data the tests read" status batch A gave `contracts`'
+    typed payload models. `test_evaluate.py`/`test_halt.py` follow the
+    P2-batch-A/B red-phase convention exactly: assertions describe the REAL
+    behavior the next dev pass implements, not `pytest.raises(
+    NotImplementedError)` wrappers — 13 tests fail today, all with
+    `NotImplementedError` as the sole failure mode (verified: `uv run
+    pytest` — 522 collected, 13 failed, 0 errors, the 13 named exactly
+    `test_evaluate.py`'s 9 + `test_halt.py`'s 4).
+
+75. **`PolicyContext` is NOT built on `contracts.FrozenModel` (FLAGGED, a
+    deliberate deviation from `contracts` payload-model house style).**
+    `FrozenModel`/`StrictFrozenModel` live in `tradekit.contracts._base`,
+    which is TID251-banned outside `contracts` itself (DESIGN §1, the same
+    deep-module enforcement that bans `thesis._machine` from being imported
+    by `policy`). `PolicyContext` is `policy`'s OWN leaf type — never a
+    ledgered payload, never cross-boundary in the `contracts` sense (it is
+    assembled fresh per `evaluate()` call and never persisted) — so it is
+    built directly on `pydantic.BaseModel` with `ConfigDict(frozen=True,
+    arbitrary_types_allowed=True)` (the latter only to let `PolicyDials`, a
+    `BaseSettings` rather than a plain `BaseModel`, sit as a field).
+    `contracts.ProposedAction`/`Verdict`/`RuleHit` (the actual cross-
+    boundary contracts `policy` produces/consumes) ARE imported from the
+    public `tradekit.contracts` surface everywhere in `policy/*` and
+    `tests/unit/policy/*` — only the private `_base` re-export was avoided.
+
+76. **Insufficient-context vs vacuous-pass split, enumerated per rule (CTO
+    addendum's required deliverable for this batch).** "Insufficient
+    context" = the rule genuinely NEEDS this field to render an honest
+    verdict and P2 has no producer for it yet -> `RuleHit(outcome="fail",
+    measured="insufficient_context:<field>")`, NEVER a silent pass.
+    "Vacuous pass" = the field's empty/zero value is a TRUE, legitimate
+    fact about P2 (no open positions, no fills yet), not a data gap.
+    - R-001 (halted): defaults `False` — a fresh, un-halted system genuinely
+      has no halt; this is state, not data absence, so no insufficient-
+      context path exists for this rule at all.
+    - R-002 (account_tier): **insufficient_context** when `None` — a tier
+      is never "vacuously T0", it must be assigned.
+    - R-003 (settled_balance_usd): **insufficient_context** when `None`.
+    - R-004 (allowlist): not applicable (vacuous pass) for non-live
+      accounts — the allowlist is a live-only gate by DESIGN §7.2 itself,
+      not a P2 data gap.
+    - R-005/R-006 (equity/live_exposure_usd): `account_equity_usd`
+      **insufficient_context** when `None` (paper path only, must be
+      supplied); `live_exposure_usd` defaults to `Decimal("0")` — VACUOUS,
+      because P2 ships no broker fill pipeline, so "no live exposure yet"
+      is simply true, not missing.
+    - R-007 (trades_today_count): **insufficient_context** when `None`.
+    - R-008 (min notional): no context field at all — pure arithmetic on
+      the action's own order, no split applies.
+    - R-009 (drawdown): **insufficient_context** when `None` — CTO
+      addendum's own text: "None => insufficient_context (never assumed
+      0)"; a drawdown of exactly 0% must be said explicitly.
+    - R-010 (thesis prerequisites): **insufficient_context** on any of the
+      three `None` fields (review_artifact_id / market_snapshot_id /
+      ev_ok) — a thesis missing its review artifact is not "vacuously
+      reviewed."
+    - R-011 (live sequence budget): **insufficient_context** when `None`
+      for a LIVE action (vacuous pass — not applicable — for paper/
+      advisory, since the budget only gates T2 live trades); FLAGGED
+      consequence: because P2 has no `promotion_state` projection yet
+      (batch D), every real live action will see `None` here and be
+      denied — this is the anti-permissive default working as intended,
+      not a bug, but it means R-011 cannot pass for real live traffic
+      until batch D wires `promotion_state`.
+    - R-012 (sizing purity): **insufficient_context** when
+      `recorded_sizing_usd` is `None` OR `Decimal("0")` (zero-recorded
+      would divide-by-zero the deviation ratio — treated as insufficient
+      context, not a crash, not a silent pass).
+    - R-013 (correlation cap): **vacuous pass** on `{}` — P2 ships no
+      broker fill pipeline, so "no open positions" is a true fact, per the
+      CTO addendum's own example.
+    - R-014 (cooling-off): not applicable (vacuous pass) for non-advisory
+      accounts and for notional at/under the dial; **insufficient_context**
+      when `thesis_age_hours` is `None` AND the notional/account_ref gate
+      says the age check is actually needed.
+    - R-015 (VOID-rate audit): **vacuous pass** on an empty
+      `trailing_graded_outcomes` tuple — nothing graded yet is a true P2-
+      MVP fact (no grading has occurred), same status as R-013.
+    - R-016 (promotion metrics): **insufficient_context** when
+      `strategy_metrics` is `None` — see entry 77's seam flag below.
+
+77. **R-016's `strategy_metrics` context field is a FLAGGED SEAM, not the
+    real `mae.compute_strategy_metrics` wiring (CTO addendum, story-3
+    pins, explicit).** `PolicyContext.strategy_metrics` is an untyped
+    `dict[str, Any] | None` this batch, read by `_check_r016` for exactly
+    one key (`"passes_gates": bool`) — a synthetic stand-in shaped loosely
+    like `contracts.StrategyMetrics`'s promotion-relevant subset, chosen so
+    R-016 is unit-testable NOW without `policy` importing `mae` at all
+    (CTO addendum, story-3 pins: "policy touches NONE" of mae internals).
+    **FORWARD-PIN for batch D (binding):** the real wiring calls
+    `mae.compute_strategy_metrics(trade_log, n_trials=dials.
+    n_trials_default, base_equity_usd=...)` inside `_context.assemble`
+    (never inside `_check_r016` itself — `_evaluate`'s pure core must stay
+    I/O-free) and must render its `StrategyMetrics` output down to
+    whatever shape `_check_r016` ends up needing against the real §9.4
+    acceptance table, at which point this entry's `passes_gates`
+    boolean-flag stand-in is retired.
+
+78. **`tk grade sweep`'s auto-discovery of every `active` thesis is NOT
+    implemented this batch (FLAGGED, a scope-reduction from the sprint
+    doc's one-line CLI spec).** The mission doc lists `tk grade sweep|show`
+    without further detail; the natural reading ("grade every thesis
+    currently in `active` state") needs a way to enumerate theses by
+    derived state, which today only exists as `thesis._machine.
+    derive_state` — a `thesis`-internal, TID251-banned from `cli` the same
+    way it's banned from `policy` (DESIGN §1 deep-module enforcement; the
+    `theses` projection that WOULD make this a legitimate public query
+    doesn't have a queryable-by-state CLI/verb surface yet either).
+    Resolution (this batch): `tk grade sweep` takes a repeatable
+    `--thesis <id>` option and grades exactly the ids given — thin dispatch
+    over `thesis.grade`, zero new business logic, correct but not
+    auto-discovering. **FORWARD-PIN:** a real `sweep` needs either a public
+    `thesis` verb/query that lists active thesis_ids, or a CLI-level
+    `theses` projection reader — Mike's call which, deferred to whichever
+    batch first needs it for real (not blocking for P2's Definition of
+    Done, which doesn't require sweep automation).
+
+79. **CLI `_guard_not_implemented` (thin-shell hygiene, `cli/main.py`) is
+    REAL code this batch even though everything it wraps (`policy.*`) is a
+    stub — FLAGGED because it is the one piece of new `cli/main.py` logic
+    beyond pure 1:1 verb dispatch.** Scope: it catches ONLY
+    `NotImplementedError` and converts it to `typer.echo(...)` +
+    `typer.Exit(code=1)` — no business-logic branching, no silent
+    swallowing of any OTHER exception type (a real bug in a future
+    `policy.evaluate` still crashes loudly through `CliRunner`, as it
+    should). This is why `tests/unit/cli/test_cli_policy.py`'s `policy
+    status`/`halt`/`resume`/`promote status` tests are GREEN this batch —
+    they pin the CLEAN-failure behavior, not the (still-stubbed) business
+    behavior underneath it.
+
+80. **`thesis._submit`'s `PAPER_STARTING_EQUITY_USD` hardcode is RETIRED
+    this batch, per the CTO addendum's own instruction ("the ratified-
+    temporary constant must not survive the sprint — this batch retires
+    it").** `build_submit_payloads` now calls `PolicyDials.load().
+    paper_starting_equity_usd` at call time (no caching — same discipline
+    as `TK_CONFIG_PATH`/`TK_DATA_DIR`). This makes `thesis` depend on
+    `tradekit.policy._dials` (dials only, nothing else from `policy`) —
+    FLAGGED as a cross-module dependency the sprint doc's "Traps" section
+    doesn't explicitly pre-authorize ("Do not let policy import broker or
+    mae internals" says nothing about `thesis` importing FROM `policy`).
+    No cycle results (`policy` imports nothing from `thesis`), and the
+    direction matches DESIGN §7.3's own precedent ("promotion state...
+    is an input to gates" — `policy` is the dial-owning module, `thesis`
+    is a dial CONSUMER, same relationship submit's EV/sizing math already
+    has to `mae`). Pinned by `tests/unit/thesis/test_submit.py::
+    test_submit_equity_follows_a_config_toml_paper_starting_equity_
+    override` (the batch's own binding pin: "a tmp config with
+    paper_starting_equity_usd=1000 -> equity 1000") and by
+    `tests/unit/policy/test_dials.py::
+    test_paper_starting_equity_usd_override_via_tk_config_path`.
+
+    **CTO-facing summary for this batch's flags (74-80):** none of these
+    are self-adjudicated — 75 (BaseModel instead of FrozenModel), 77 (R-016
+    metrics seam), 78 (sweep scope reduction), and 80 (thesis->policy
+    dependency direction) are the four that most need an explicit CTO
+    ratify/override pass before batch D begins; 74, 76, and 79 are
+    descriptive (recording what was built and why), not decisions awaiting
+    a call.
+
+    **CTO ratification (2026-07-17) — batch-C flags:** (74/PolicyContext on
+    plain pydantic.BaseModel) RATIFIED — TID251's contracts._base ban is
+    working as designed; the frozen-model property is what matters, not the
+    base class. (R-016 synthetic passes_gates stand-in) RATIFIED, batch D
+    wires real compute_strategy_metrics — the stand-in must not survive the
+    sprint. (tk grade sweep --thesis explicit ids) RATIFIED AS MVP —
+    auto-discovery of active theses lands when a ledger read-accessor
+    surface exists (batch E or P3; ledger.models is pinned in §4.2 but
+    unimplemented). (thesis._submit -> policy._dials import) RATIFIED as a
+    documented cross-module internal exception, same class as
+    thesis -> mae._runtime; if policy ever grows a thesis dependency the
+    dials extract to a shared leaf (TD-register change, Mike sign-off).

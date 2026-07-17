@@ -10,19 +10,40 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
 import tradekit
+from tradekit import policy, thesis
 from tradekit.contracts import EventFilter, json_schemas
 from tradekit.ledger import default_ledger
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 schema_app = typer.Typer(no_args_is_help=True)
 ledger_app = typer.Typer(no_args_is_help=True)
+thesis_app = typer.Typer(no_args_is_help=True)
+grade_app = typer.Typer(no_args_is_help=True)
+policy_app = typer.Typer(no_args_is_help=True)
+promote_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
+app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
+app.add_typer(grade_app, name="grade", help="Grading (§10.2).")
+app.add_typer(policy_app, name="policy", help="Policy engine (§7).")
+app.add_typer(promote_app, name="promote", help="Promotion ladder (§7.3).")
+
+
+def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Thin-shell hygiene, not business logic (SPRINT P2 batch C): a verb
+    this sprint stubs out (`policy.*`, story 4's series/promotion) still
+    deserves a CLEAN nonzero exit — a raw traceback is not an acceptable
+    CLI failure mode even for work that hasn't landed yet."""
+    try:
+        return fn(*args, **kwargs)
+    except NotImplementedError as exc:
+        typer.echo(f"not yet implemented: {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.callback()
@@ -95,6 +116,156 @@ def ledger_query(
     else:
         for e in events:
             typer.echo(f"{e.ts_utc.isoformat()}  {e.type:24}  {e.actor}  {e.event_id}")
+
+
+@thesis_app.command("draft")
+def thesis_draft(
+    file: Annotated[Path, typer.Option(help="Path to a JSON ThesisContract.")],
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """`thesis.draft` from a JSON contract file (thin dispatch, TD-2)."""
+    contract = json.loads(file.read_text(encoding="utf-8"))
+    thesis_id = thesis.draft(contract)
+    if as_json:
+        typer.echo(json.dumps({"thesis_id": thesis_id}))
+    else:
+        typer.echo(thesis_id)
+
+
+@thesis_app.command("submit")
+def thesis_submit(thesis_id: str) -> None:
+    """`thesis.submit` (thin dispatch)."""
+    thesis.submit(thesis_id)
+    typer.echo(f"submitted {thesis_id}")
+
+
+@thesis_app.command("show")
+def thesis_show(
+    thesis_id: str,
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """This thesis's own lifecycle events, in seq order (thin ledger query —
+    no thesis-module internals, TD-2)."""
+    events = [
+        e
+        for e in default_ledger().query(EventFilter())
+        if e.payload.get("thesis_id") == thesis_id
+    ]
+    if not events:
+        typer.echo(f"no events found for thesis_id={thesis_id!r}")
+        raise typer.Exit(code=1)
+    if as_json:
+        typer.echo("[" + ",".join(e.model_dump_json() for e in events) + "]")
+    else:
+        for e in events:
+            typer.echo(f"{e.ts_utc.isoformat()}  {e.type:24}  {e.event_id}")
+
+
+@thesis_app.command("approve")
+def thesis_approve(thesis_id: str) -> None:
+    """`thesis.approve` (thin dispatch)."""
+    thesis.approve(thesis_id)
+    typer.echo(f"approved {thesis_id}")
+
+
+@thesis_app.command("reject")
+def thesis_reject(
+    thesis_id: str, why: Annotated[str, typer.Option(help="Reason (mandatory, §10.1).")]
+) -> None:
+    """`thesis.reject` (thin dispatch)."""
+    thesis.reject(thesis_id, why)
+    typer.echo(f"rejected {thesis_id}")
+
+
+@thesis_app.command("void")
+def thesis_void(
+    thesis_id: str,
+    attestation: Annotated[str, typer.Option(help="Structural invalidation attestation.")],
+) -> None:
+    """`thesis.void` (thin dispatch)."""
+    thesis.void(thesis_id, attestation)
+    typer.echo(f"voided {thesis_id}")
+
+
+@grade_app.command("sweep")
+def grade_sweep(
+    thesis_id: Annotated[
+        list[str], typer.Option("--thesis", help="thesis_id to grade; repeatable.")
+    ],
+) -> None:
+    """`thesis.grade` over an explicit list of thesis_ids (thin dispatch —
+    auto-discovering every `active` thesis needs a projection query surface
+    this batch doesn't add to the CLI; FLAGGED, see tests/ASSUMPTIONS.md)."""
+    for tid in thesis_id:
+        result = thesis.grade(tid)
+        typer.echo(json.dumps({"thesis_id": tid, "outcome": result["outcome"]}))
+
+
+@grade_app.command("show")
+def grade_show(
+    thesis_id: str,
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """Most recent `ThesisGraded` event for `thesis_id` (thin ledger query)."""
+    events = [
+        e
+        for e in default_ledger().query(EventFilter(types=["ThesisGraded"]))
+        if e.payload.get("thesis_id") == thesis_id
+    ]
+    if not events:
+        typer.echo(f"no ThesisGraded event found for thesis_id={thesis_id!r}")
+        raise typer.Exit(code=1)
+    latest = events[-1]
+    typer.echo(latest.model_dump_json() if as_json else str(latest.payload))
+
+
+@policy_app.command("status")
+def policy_status(
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = False,
+    rules: Annotated[
+        bool, typer.Option("--rules", help="Also (re)write rules/RULES.md.")
+    ] = False,
+) -> None:
+    """`policy.status` (thin dispatch); `--rules` additionally regenerates
+    `rules/RULES.md` from the registry."""
+    result = _guard_not_implemented(policy.status)
+    if rules:
+        from tradekit.policy import _rules_md
+
+        _guard_not_implemented(_rules_md.write_rules_md)
+    if as_json:
+        typer.echo(json.dumps(result))
+    else:
+        typer.echo(str(result))
+
+
+@policy_app.command("halt")
+def policy_halt(reason: str) -> None:
+    """`policy.halt` — R-001 kill switch (thin dispatch)."""
+    _guard_not_implemented(policy.halt, reason)
+    typer.echo(f"halted: {reason}")
+
+
+@policy_app.command("resume")
+def policy_resume() -> None:
+    """`policy.resume` — clears the kill switch (thin dispatch)."""
+    _guard_not_implemented(policy.resume)
+    typer.echo("resumed")
+
+
+@promote_app.command("status")
+def promote_status(as_json: Annotated[bool, typer.Option("--json/--no-json")] = False) -> None:
+    """`policy.promotion_status` (thin dispatch; story 4, batch D)."""
+    result = _guard_not_implemented(policy.promotion_status)
+    typer.echo(json.dumps(result) if as_json else str(result))
+
+
+@promote_app.command("confirm")
+def promote_confirm() -> None:
+    """`policy.confirm_promotion` — Mike-only verb (thin dispatch; story 4,
+    batch D)."""
+    _guard_not_implemented(policy.confirm_promotion)
+    typer.echo("promotion confirmed")
 
 
 if __name__ == "__main__":

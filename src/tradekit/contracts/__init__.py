@@ -35,11 +35,14 @@ SPRINT P2 batch A additive surface (thesis-lifecycle payload models):
 """
 
 from tradekit.contracts._event_payloads import (
+    ActionProposedPayload,
+    ConfigChangedPayload,
     GateViolationDetectedPayload,
     HaltClearedPayload,
     HaltSetPayload,
     InvalidationAttestedPayload,
     MarketSnapshotTakenPayload,
+    PolicyVersionLoadedPayload,
     ReviewCompletedPayload,
     SizingComputedPayload,
     ThesisActivatedPayload,
@@ -48,6 +51,7 @@ from tradekit.contracts._event_payloads import (
     ThesisGradedPayload,
     ThesisRejectedPayload,
     ThesisSubmittedPayload,
+    VerdictIssuedPayload,
 )
 from tradekit.contracts._events import ChainReport, Event, EventFilter
 from tradekit.contracts._execution import (
@@ -79,11 +83,13 @@ from tradekit.contracts._thesis import AssetRef, EntrySpec, EVBlock, ThesisContr
 
 __all__ = [
     "TIMEFRAME_SECONDS",
+    "ActionProposedPayload",
     "AssetRef",
     "Bar",
     "BarSeries",
     "ChainReport",
     "CoinMarket",
+    "ConfigChangedPayload",
     "CriteriaOutcome",
     "EVBlock",
     "EntrySpec",
@@ -102,6 +108,7 @@ __all__ = [
     "MarketSnapshotTakenPayload",
     "OrderAck",
     "OrderRequest",
+    "PolicyVersionLoadedPayload",
     "Predicate",
     "ProposedAction",
     "ReviewCompletedPayload",
@@ -118,6 +125,7 @@ __all__ = [
     "ThesisSubmittedPayload",
     "TradeRecord",
     "Verdict",
+    "VerdictIssuedPayload",
     "VerdictToken",
     "json_schemas",
     "quantize",

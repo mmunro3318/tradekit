@@ -211,12 +211,75 @@ class HaltClearedPayload(StrictFrozenModel):
     cleared_by: str
 
 
+class ActionProposedPayload(StrictFrozenModel):
+    """Producer: `policy.evaluate` (SPRINT P2 batch C) — appended BEFORE the
+    pure core runs, so intent is on the record even if evaluation itself
+    blows up (DESIGN §8.2 step 2: "intent recorded BEFORE evaluation").
+    Mirrors `contracts.ProposedAction`'s fields verbatim; `order` is the
+    nested `OrderRequest`, `model_dump(mode="json")`'d, when the action
+    carries one (not every `kind` does)."""
+
+    kind: str
+    account_ref: str
+    requested_by: str
+    thesis_id: str | None = None
+    order: dict[str, Any] | None = None
+
+
+class VerdictIssuedPayload(StrictFrozenModel):
+    """Producer: `policy.evaluate`, immediately after `ActionProposed`
+    (DESIGN §8.2 step 3: "verdict recorded BEFORE broker call"). Mirrors
+    `contracts.Verdict` plus the action linkage a bare `Verdict` doesn't
+    carry (`account_ref`/`thesis_id`/`kind`) so a reader can find "what was
+    this a verdict ON" without cross-referencing the preceding
+    `ActionProposed` event by timestamp."""
+
+    verdict_id: str
+    kind: str
+    account_ref: str
+    thesis_id: str | None = None
+    allow: bool
+    rule_hits: list[dict[str, Any]] = Field(default_factory=list)
+    policy_version_hash: str
+
+
+class PolicyVersionLoadedPayload(StrictFrozenModel):
+    """Producer: `policy.evaluate`/`policy.status` — appended the first time
+    a given `policy_version_hash` is seen by this process (CTO addendum,
+    "Ambient wiring"). `rule_ids` is sorted (the hash's own input order,
+    ASSUMPTIONS-pinned) so the event is independently reproducible from the
+    registry; `dials` is the canonical dial dump (`_dials.canonical_dump`)
+    that, together with `rule_ids`, hashes to `policy_version_hash`."""
+
+    policy_version_hash: str
+    rule_ids: list[str]
+    dials: dict[str, Any]
+
+
+class ConfigChangedPayload(StrictFrozenModel):
+    """Producer: `policy.evaluate`/`policy.status` — appended IN ADDITION to
+    `PolicyVersionLoaded` when the freshly-computed hash differs from the
+    last recorded one (CTO addendum: "a hash different from the last
+    recorded one additionally appends ConfigChanged"). `previous_hash` is
+    `None` only for the very first hash this ledger has ever seen (there is
+    no prior config to have changed FROM — that case gets
+    `PolicyVersionLoaded` alone, never a `ConfigChanged` with a fabricated
+    predecessor)."""
+
+    previous_hash: str | None
+    new_hash: str
+    dials: dict[str, Any]
+
+
 __all__ = [
+    "ActionProposedPayload",
+    "ConfigChangedPayload",
     "GateViolationDetectedPayload",
     "HaltClearedPayload",
     "HaltSetPayload",
     "InvalidationAttestedPayload",
     "MarketSnapshotTakenPayload",
+    "PolicyVersionLoadedPayload",
     "ReviewCompletedPayload",
     "SizingComputedPayload",
     "ThesisActivatedPayload",
@@ -225,4 +288,5 @@ __all__ = [
     "ThesisGradedPayload",
     "ThesisRejectedPayload",
     "ThesisSubmittedPayload",
+    "VerdictIssuedPayload",
 ]

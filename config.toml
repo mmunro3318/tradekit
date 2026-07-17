@@ -1,0 +1,54 @@
+# tradekit policy dials (DESIGN §7.2; SPRINT P2 batch C, CTO addendum
+# "Ambient wiring"). Committed defaults Mike confirms at sprint sign-off —
+# `tradekit.policy._dials.PolicyDials` loads THIS file by default; set
+# TK_CONFIG_PATH to point at a different one (tests always do). Every value
+# here participates in the policy-version hash (`_dials.canonical_dump` +
+# `_dials.policy_version_hash`), so changing a dial changes the hash.
+#
+# THIS FILE IS DATA, NOT CODE: rule GATES live in
+# `src/tradekit/policy/_rules.py`; this file only supplies the numeric/list
+# knobs each rule's `check` reads off `ctx.dials`. Flat keys (top-level, no
+# tables) — `pydantic_settings.TomlConfigSettingsSource` maps them straight
+# onto `PolicyDials` field names.
+
+# R-004: live-account asset allowlist (liquid large-caps + BTC/ETH, SME §5).
+allowed_assets_live = ["BTC/USD", "ETH/USD", "AAPL", "MSFT", "SPY"]
+
+# R-005: max single-position notional.
+max_position_usd_live = "25"
+max_position_pct_paper = "0.10"
+
+# R-006: max total live exposure (D12).
+max_total_live_exposure_usd = "100"
+
+# R-007: daily trade count caps.
+max_daily_trades_live = 3
+max_daily_trades_paper = 20
+
+# R-008: min notional — blocks micro-trade series gaming.
+min_notional_usd = "10"
+
+# R-009: drawdown circuit breaker (30d peak).
+drawdown_breaker_pct = "0.10"
+
+# R-011: live sequence budget per promotion.
+live_sequence_budget = 3
+
+# R-012: sizing-purity tolerance.
+sizing_tolerance_pct = "0.01"
+
+# R-013: correlation cap.
+correlation_cap = "0.75"
+
+# R-014: advisory cooling-off (manual trades > this need thesis age >= this).
+cooling_off_notional_usd = "200"
+cooling_off_hours = 24
+
+# R-015: VOID-rate audit window + cap.
+void_rate_window = 20
+void_rate_cap_pct = "0.20"
+
+# Series/promotion (batch D consumes these; dials land now per the CTO pin).
+series_epoch = "2026-01-01T00:00:00Z"
+paper_starting_equity_usd = "500"
+n_trials_default = 1

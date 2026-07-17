@@ -192,6 +192,28 @@ def test_submit_equity_base_case_uses_paper_starting_equity_with_no_fills(thesis
     assert sizing_event.payload["account_equity_usd"] == str(_PAPER_STARTING_EQUITY_USD)
 
 
+def test_submit_equity_follows_a_config_toml_paper_starting_equity_override(
+    thesis_kwargs, tmp_path, monkeypatch
+) -> None:
+    """SPRINT P2 batch C: `PAPER_STARTING_EQUITY_USD` is retired — submit()
+    must read `PolicyDials.load().paper_starting_equity_usd` at call time, so
+    a `TK_CONFIG_PATH` override changes SizingComputed's equity (this batch's
+    binding pin: 'a tmp config with paper_starting_equity_usd=1000 -> equity
+    1000')."""
+    config = tmp_path / "override.toml"
+    config.write_text('paper_starting_equity_usd = "1000"\n', encoding="utf-8")
+    monkeypatch.setenv("TK_CONFIG_PATH", str(config))
+
+    thesis_id = thesis.draft(thesis_kwargs)
+    thesis.submit(thesis_id)
+
+    sizing_event = _thesis_events("SizingComputed", thesis_id)[0]
+    assert sizing_event.payload["account_equity_usd"] == "1000", (
+        f"expected the config.toml override (1000) to flow through to SizingComputed's "
+        f"equity, got {sizing_event.payload['account_equity_usd']!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # EV validation (F5)
 # ---------------------------------------------------------------------------
