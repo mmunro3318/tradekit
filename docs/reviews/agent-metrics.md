@@ -105,3 +105,39 @@ all sprint. (2) The one HIGH lived in exactly the code the sprint doc
 pre-registered as Opus-gated (override logic) — the routing rule works.
 (3) New standing rule from batch A: ANY module that writes files gets a
 path seam and tests must tmp-path it.
+
+## Round 5 — 2026-07-17 — P2 thesis lifecycle + policy engine (commits 23c3897..5b547be)
+
+Reviewer: code-reviewer agent (Opus). Verification: full gate green (589 at
+review time), state-hygiene probes, five-rule spot-audit vs §7.2, VOID
+laundering analysis (probed the void-to-dodge-completeness path — blocked by
+construction), R-016 numeraire-reconstruction scale-invariance verified
+against _metrics field usage. Verdict: **FIX-FIRST** (1 HIGH, 1 MED, 2 LOW),
+fixed same-day be4a8a8→5b547be, 594 green after.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tdd-p2 (Sonnet) | batch A tests+payloads+projection scaffolding | 0* | 0 | 0 | A- | 13 real payload models, suite-wide TK_DATA_DIR isolation, honest red/green accounting. *The unguarded transition map it scaffolded became batch B's flagged defect — designed-in, caught in-sprint by the next TDD agent. |
+| dev-p2 (Sonnet) | batch A src | 0* | 0 | 0 | A- | Clean; validate-then-append ordering right. *Shared the unguarded-map defect. |
+| tdd-p2-b (Sonnet) | batch B tests (grade/void) | 0 | 0 | 0 | A | Found the batch-A unguarded-transition bug while designing void sign-off; its LessonRecorded workaround was overridden (CTO) but the diagnosis was the valuable part. Applied 3 CTO adjustments cleanly. |
+| dev-p2-b (Sonnet) | batch B src | 0 | 0 | 0 | A | Guarded transition tables in both derive paths; refused-void audit trail exact; honest frozen-core interface notes. |
+| tdd-p2-c (Sonnet) | batch C tests+policy scaffolding | 0 | 0 | 0 | A- | Boundary-exact rule pins; four flags all ratifiable as proposed. |
+| dev-p2-c (Sonnet) | batch C src | 1* | 0 | 0 | B+ | *Pre-review CTO catch: implemented a permissive fallback letting FABRICATED thesis_ids pass R-010/R-012 (the test fixture had never earned its allow). Flagged it honestly; on adjudication removed it, strengthened the fixture, added two deny pins. Never reached review. |
+| tdd-p2-d (Sonnet) | batch D tests (series/promotion) | 0 | 0 | 0 | A | Freeze-gated expectancy/MDD fixtures; discovered the >=30-non-void redundancy; 11 flags all sharp. |
+| dev-p2-d2 (Sonnet) | batch D src | 1 | 1 | 2 | B | The round's HIGH: series MDD equity base pooled ALL accounts (winning sibling dilutes a losing account's drawdown -> dirty series grades clean -> promotion opens; reviewer probe 0.0833 vs 0.25 vs 0.0333). Both derivations shared the bug so the agreement pin passed. Also the wall-clock projection MED. Its TradeRecord numeraire-100 reconstruction and window-anchoring calls were sound and ratified. (First attempt died at a usage cap; reverted cleanly to red, second agent finished.) |
+| adversarial-p2 (Opus) | batch E scenarios | — | — | — | A | 11 ring-3 scenarios, real-verb driven, coverage-honest (P3-only vectors flagged); positive controls on the boundary rules. |
+| fix-p2 (Sonnet) | review-fix round | — | — | — | A | Discriminating two-account fixture proved the HIGH both directions (0.0788 falsely-clean -> 0.1733 dirty); log-relative completeness restored projection purity. |
+
+CTO-gate catches this sprint (pre-review): the fabricated-thesis-id
+permissive fallback (batch C); the unguarded transition map (batch B TDD);
+pnl-fabrication override (None, never 0); LessonRecorded-overload override;
+dials-drift tripwire test added at batch-D gate.
+
+Process notes: (1) the flag-don't-improvise pattern carried the sprint — 30+
+flagged design calls, all adjudicated in ASSUMPTIONS before implementation
+built on them; (2) the one reviewer HIGH lived in the pre-registered Opus
+focus area (series accounting) for the third consecutive sprint — the
+routing rule keeps earning its keep; (3) usage-cap deaths are now routine
+and harmless: always `git status` + gate before assuming loss, revert
+partial single-file work to the committed red rather than resuming
+mid-thought.

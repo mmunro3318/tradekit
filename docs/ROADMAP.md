@@ -100,22 +100,22 @@
 
 **Done-gate:** adversarial replay scenarios green — VOID gaming, micro-series gaming, window cherry-picking, revenge-sizing all *provably* blocked.
 
-### M2.1 Thesis lifecycle (§10)
+### M2.1 Thesis lifecycle (§10) — done 2026-07-17 (P2)
 
-- [ ] State machine (draft→submitted→reviewed→approved→active→graded/rejected/void) with event emission
-- [ ] `submit`: snapshot capture, predicate resolution to absolute quantized prices, EV validation (F5)
-- [ ] Grading engine: bar-ordered predicate evaluation, conservative ambiguous-bar rule, `Grade` artifacts
-- [ ] VOID path: measurable auto-eval; structural attestation + reviewer sign-off hook (§10.4)
-- [ ] P&L attribution projection (fills → thesis/strategy_tag → `pnl_daily`)
+- [x] State machine (draft→submitted→reviewed→approved→active→graded/rejected/void) with event emission — GUARDED (state,event)→state transitions in _machine + projection (out-of-order events can't corrupt state; batch-B catch)
+- [x] `submit`: snapshot capture, predicate resolution to absolute quantized prices, EV validation (F5) — validate-everything-then-append, transition marker last
+- [x] Grading engine: bar-ordered predicate evaluation, conservative ambiguous-bar rule, `Grade` artifacts — wired over the frozen _grading core; pnl None when no fills (never fabricated, ASSUMPTIONS 71)
+- [x] VOID path: measurable auto-eval; structural attestation + reviewer sign-off hook (§10.4) — refused-void leaves the attestation as audit trail; sign-off = ReviewCompleted(kind=void_signoff), P3's review module emits it
+- [x] P&L attribution projection (fills → thesis/strategy_tag → `pnl_daily`) — P2 convention: grade-time attribution; FillRecorded-time refinement lands with the P3 broker
 
-### M2.2 Policy engine (§7)
+### M2.2 Policy engine (§7) — done 2026-07-17 (P2)
 
-- [ ] `_context.py` snapshot assembly from read models
-- [ ] Rules R-001…R-016 as declarative registry with WHYs; `RULES.md` generation
-- [ ] `evaluate()` pure core + verdict events + policy-version hash stamping
-- [ ] Promotion state machine: series accounting (fixed 30-day blocks), clean/complete flags, T0–T2 transitions, demotion triggers (TD-10)
-- [ ] `halt`/`resume` + circuit breakers (R-001, R-009)
-- [ ] Adversarial replay scenario suite (threat-model vectors of §15 as tests)
+- [x] `_context.py` snapshot assembly from read models — anti-permissive: missing data ⇒ insufficient_context deny, fabricated-thesis-id bypass closed (ASSUMPTIONS 81)
+- [x] Rules R-001…R-016 as declarative registry with WHYs; `RULES.md` generation — **Mike sign-off on WHYs + dials PENDING (last open DoD item)**
+- [x] `evaluate()` pure core + verdict events + policy-version hash stamping — byte-identical verdicts, deny never silent
+- [x] Promotion state machine: series accounting (fixed 30-day blocks), clean/complete flags, T0–T2 transitions, demotion triggers (TD-10) — per-account MDD base (review-round HIGH fix), log-relative projection completeness, two-man confirm rule
+- [x] `halt`/`resume` + circuit breakers (R-001, R-009)
+- [x] Adversarial replay scenario suite (threat-model vectors of §15 as tests) — 11 scenarios, all gates held; P3-only vectors flagged in ASSUMPTIONS 93
 
 ---
 

@@ -2,6 +2,51 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-17 (Fable) — P2 thesis lifecycle + policy engine COMPLETE (M2.1, M2.2)*
+
+- *One open DoD item: **Mike's sign-off on rules/RULES.md WHYs + config.toml dials**
+  — requested, pending his reply. Everything else done.
+- **The spine and the gates are live.** tradekit.thesis: draft/submit/approve/
+  reject/grade/void, event-sourced, guarded (state,event)→state transitions,
+  submit = validate-everything-then-append (snapshot → sizing → marker), EV
+  Decimal tolerance $0.01, quantized predicate resolution. tradekit.policy:
+  R-001..R-016 declarative registry + WHYs, pure byte-identical evaluate with
+  deny-never-silent ledgering, dials via pydantic-settings config.toml,
+  policy-version hashing, halt/resume, series accounting (per-account, 30-day
+  calendar blocks), T1→T2 promotion machine with two-man confirm + demotion,
+  R-016 wired to real compute_strategy_metrics. rules/RULES.md generated.
+  13+ typed event payload models; theses/series/promotion_state/pnl_daily
+  projections, rebuild-idempotent and log-pure.
+- **Five batches, four-stage each** (addendum 23c3897): A lifecycle (0ae41bb→
+  8159b2c), B grade/void (598e439→c434362), C policy (b8e0d5e→7f4c241), D
+  series/promotion (101288d→f6c147b), E adversarial suite (acf478c). ~30
+  flagged design calls adjudicated in ASSUMPTIONS 58-97 (highlights: pnl None
+  never fabricated-zero; void sign-off = ReviewCompleted kind=void_signoff;
+  read-verb-that-writes for promotion_status; edge_verdict positive-only).
+- **In-sprint CTO catches**: batch-A's unguarded transition map (any stray
+  ReviewCompleted could corrupt state — found by batch-B TDD, fixed batch B);
+  batch-C dev's permissive fallback that let FABRICATED thesis_ids pass
+  R-010/R-012 (rejected; fixture made to earn its allow; two deny pins).
+- **Done-gate: 11 adversarial replay scenarios (Opus-authored), all §15 gates
+  held** — VOID-farm, micro-series, cherry-pick, revenge-size, drawdown incl.
+  advisory, kill switch, fabricated-id, refused-void, tamper evidence.
+- **Review round (Opus, FIX-FIRST)**: HIGH — series MDD equity base pooled ALL
+  accounts (winning sibling dilutes a loser's drawdown → dirty series grades
+  clean → promotion opens); both derivations shared the bug so their agreement
+  pin passed. Fixed with a discriminating two-account fixture (0.0788 falsely
+  clean → 0.1733 dirty). MED: projection completeness now log-relative (max
+  event ts, pure rebuild). 2 LOW. Fixes be4a8a8→5b547be. agent-metrics #5.
+- Codex tag-team scaffolding landed mid-sprint (docs/handoff/CODEX-HANDOFF-
+  2026-07-17.md + docs/research/codex-brief.md, anchor then 101288d) — unused
+  this shift (Mike upgraded the plan; Fable finished the sprint), stays as the
+  off-hours fallback pattern.
+- **Final: 594 tests green, ruff clean, mypy clean.**
+- Next: SPRINT-P3 (broker/paper trading/review/reporting). P3 owes: review
+  module emits ReviewCompleted incl. void_signoff; FillRecorded typed payload
+  + fill-time pnl attribution; live-tier context wiring (fail-closed till
+  then); SeriesClosed event; ledger.models read accessors; strategy-tag
+  registry re-derivation (ASSUMPTIONS 57f).
+
 ## 2026-07-16/17 (Fable) — P1C regime/scanner/sizing/correlation COMPLETE (M1.4, M1.5, P1 done)
 
 - **All four remaining MAE verbs live**: size_position (wired over frozen _sizing),
