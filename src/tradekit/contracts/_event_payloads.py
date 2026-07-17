@@ -425,6 +425,46 @@ class FillRecordedPayload(StrictFrozenModel):
     symbol: str
 
 
+class ReconciliationRunPayload(StrictFrozenModel):
+    """Producer: `broker.reconcile` / `broker._pipeline.reconcile` (SPRINT P3
+    batch C, §8.2 step 7 / §15). Compares `BrokerPort.fills()` against this
+    account's own `FillRecorded` ledger history; `result="ok"` when every
+    broker fill has a matching ledger row (match key: `order_id` + `ts_utc`
+    + `qty`, per the batch's own reconcile pin), `result="mismatch"` when
+    ANY broker fill has no matching ledger row — an out-of-band trade §15's
+    threat model exists to catch. `mismatches` carries one entry per
+    unmatched broker fill (plain dict, `contracts.Fill`-shaped, same
+    ASSUMPTIONS-10 heterogeneous-payload convention as `quote_snapshot`
+    elsewhere) so the event is self-auditing without a second broker call.
+    A mismatch run is ALWAYS immediately followed by a `HaltSet` event
+    (automatic, §8.2 step 7) — that pairing is the caller's job
+    (`broker.reconcile`), not this payload's; a clean run appends no halt."""
+
+    account_ref: str
+    result: Literal["ok", "mismatch"]
+    broker_fill_count: int
+    ledger_fill_count: int
+    mismatches: list[dict[str, Any]] = Field(default_factory=list)
+    ts_utc: AwareDatetime
+
+
+class OrderCancelledPayload(StrictFrozenModel):
+    """Producer: `broker.cancel_order` (SPRINT P3 batch C, additive fifth
+    broker verb alongside TD-24's `create_paper_account` — cancel is not one
+    of §4.2's original four pinned verbs, ratified the same "contracts are
+    cheap, declarative additions don't widen the deep-module surface"
+    class of call as `create_paper_account`). MVP semantics (pinned, no
+    improvisation): only a RESTING order (`order_status(...).status ==
+    "open"`) may be canceled — a `filled`/`canceled`/`rejected` order
+    refuses (typed `OrderAlreadyFilled`/similar, `broker._pipeline`'s job to
+    define) and this event is never appended for a refused cancel attempt."""
+
+    order_id: str
+    account_ref: str
+    ts_utc: AwareDatetime
+    reason: str | None = None
+
+
 __all__ = [
     "AccountCreatedPayload",
     "ActionProposedPayload",
@@ -437,10 +477,12 @@ __all__ = [
     "InvalidationAttestedPayload",
     "MarketSnapshotTakenPayload",
     "OrderAckPayload",
+    "OrderCancelledPayload",
     "OrderSubmittedPayload",
     "PolicyVersionLoadedPayload",
     "PromotionConfirmedPayload",
     "PromotionGrantedPayload",
+    "ReconciliationRunPayload",
     "ReviewCompletedPayload",
     "SizingComputedPayload",
     "ThesisActivatedPayload",

@@ -2000,3 +2000,143 @@ DESIGN §8.3, Opus review focus), 2026-07-17
      entry 114's). P2 harness fills (raw dicts, no model validation, no
      `account_ref`) are unaffected — `PaperBroker._fill_events` filters on
      `account_ref` before ever reading `symbol`.
+
+## Round-18 — P3 batch C TDD session (execute_order two-phase pipeline,
+reconcile->auto-halt, live-tier context wiring), 2026-07-17
+
+RED this session — `broker._pipeline.execute_order`/`reconcile`/
+`cancel_order` are unconditional `NotImplementedError` stubs; `policy.
+_context`'s live-tier account_tier/live_trades_remaining derivation for
+`"live:"` refs still returns the P2 fail-closed carve-out unconditionally
+(ASSUMPTIONS 92, now superseded — see entry 119 below). Every test written
+this session describes REAL target behavior and fails today for one of
+those two reasons, never wrapped in `pytest.raises(NotImplementedError)`
+(same discipline as P2 batch C's own red pass, entries 76+).
+
+116. **Token-minting rule (DESIGN §8.2/§15, CTO pin, no improvisation
+     needed — the sprint doc already resolved this): `VerdictToken(
+     verdict_id=verdict.verdict_id, policy_version_hash=
+     verdict.policy_version_hash)`, minted directly off the `Verdict`
+     `policy.evaluate()` returns.** No new ULID, no separate token
+     registry — `PaperBroker._verify_token` (batch B, real, entry 114)
+     already validates exactly this pair against the ledgered
+     `VerdictIssued` event. Pinned in `_pipeline.py`'s module docstring,
+     step 4; `test_pipeline.py::
+     test_execute_order_mints_a_token_that_passes_the_real_verify_token_check`
+     exercises it end-to-end with NO monkeypatch of `_verify_token`.
+
+117. **Single-poll MVP (ASSUMPTIONS, this session, per the sprint doc's own
+     phrasing): `execute_order` calls `adapter.order_status(order_id)`
+     EXACTLY ONCE after `submit()`, never loops/blocks waiting for a later
+     fill.** A market order's poll always observes `"filled"` immediately
+     (§8.3 synchronous fill); a limit order's poll may observe `"open"` —
+     `execute_order` returns that `OrderAck` as-is with no thesis
+     activation and no R-011 touch, and `tk order status`/a later
+     `broker.get(...).order_status(...)` call is the user-facing re-poll
+     surface for a still-resting limit, not a second `execute_order` call.
+     Pinned in `_pipeline.py`'s module docstring, step 6.
+
+118. **Thesis activation is a PRIVATE `thesis._machine` seam
+     (`_activate_on_fill`), never a public `thesis` verb (DESIGN §4.2's
+     own wording: "activation-on-fill (internal, invoked by the broker
+     pipeline)").** Added as a stub in `src/tradekit/thesis/_machine.py`
+     this session (not exported from `tradekit.thesis.__all__`) —
+     `broker._pipeline.execute_order` is the pipeline's own pinned single
+     caller. Legal only from `approved` (mirrors every other transition's
+     `require_state` guard); appends `ThesisActivated(thesis_id, order_id,
+     ts_utc)`, the SAME event type `_machine._SIMPLE_TRANSITIONS` already
+     wires `("approved", "ThesisActivated") -> "active"` for.
+
+119. **Live-sequence budget (R-011) is a PURE READ-TIME DERIVATION, never a
+     ledgered decrement event (ASSUMPTIONS, this session, per the sprint
+     doc's explicit "no new event type" instruction).**
+     `live_trades_remaining` = the account's own `PromotionConfirmed.
+     live_sequence_remaining` (always 3 at confirmation) MINUS the count of
+     `FillRecorded` events for that `account_ref` at/after that
+     `PromotionConfirmed`'s own `ts_utc`. Lives in `policy._context.
+     assemble()` (SPRINT P3 batch C dev pass), read by R-011 on every
+     subsequent `policy.evaluate()` call — `broker._pipeline.execute_order`
+     itself does nothing extra on the live path beyond appending the
+     `FillRecorded` its adapter already produces (documented at length in
+     `_pipeline.py`'s module docstring, step 7, to head off a dev-pass
+     temptation to add a decrement event/verb that doesn't exist in the
+     taxonomy). A `Demoted` event strictly after the most recent
+     `PromotionConfirmed` reverts `account_tier` to (at most) `"T1"` and
+     `live_trades_remaining` to `None` (mirrors `policy.__init__.
+     _current_tier`'s existing T2-iff-no-later-Demoted logic — the context
+     wiring must not reimplement that independently; it should call/mirror
+     the SAME derivation `policy._current_tier` already uses, not invent a
+     second one that could drift).
+
+120. **ASSUMPTIONS 92 SUPERSEDED — the P2 fail-closed carve-out for
+     `"live:"` `account_tier` ends THIS batch, not P4 (DESIGN §7.1's
+     addendum, CTO pin, "the P2 fail-closed carve-out ends here").** An
+     UNCONFIRMED `"live:"` account_ref keeps the fail-closed `None` (that
+     branch is NOT changing — `tests/unit/policy/test_live_tier.py::
+     test_account_tier_stays_none_for_an_unconfirmed_live_account_fail_closed`
+     pins it as a still-passing regression guard, not a red case, alongside
+     the already-real `Demoted`-reverts-tier case). Only a CONFIRMED (and
+     not-since-demoted) `"live:"` account_ref newly resolves `"T2"`.
+
+121. **Reconcile match key: exact `(order_id, ts_utc, qty)` triple, no
+     fuzzy/tolerance matching (ASSUMPTIONS, this session, sprint doc's own
+     phrasing "match on order_id+ts+qty").** A ledger `FillRecorded` with a
+     DIFFERENT `order_id` than the broker's own report, even with
+     identical `ts_utc`/`qty`, still counts as a mismatch — pinned by
+     `test_reconcile.py::
+     test_reconcile_does_not_match_fills_across_different_order_ids`.
+     `reconcile`'s automatic `HaltSet` is appended DIRECTLY by
+     `broker._pipeline.reconcile` (not via a `policy.halt()` call) to avoid
+     a `broker` -> `policy` verb-level dependency for a broker-observed
+     fact — mirrors the existing rule that `policy.evaluate` never calls
+     into `broker`.
+
+122. **`cancel_order` is an ADDITIVE fifth broker verb (MVP), not one of
+     §4.2's original four pinned verbs — same "declarative addition, not a
+     surface widen" class of call as TD-24's `create_paper_account`
+     (ASSUMPTIONS, this session — FLAGGED for CTO ratification, since the
+     sprint doc's own broker verb list only names
+     get/execute_order/reconcile/record_manual_fill).** Only a RESTING
+     order (`order_status(...).status == "open"`) may be canceled; any
+     other status raises `broker._pipeline.OrderNotCancelable` (typed,
+     zero events appended on refusal) rather than a silent no-op. No new
+     `BrokerPort` method — cancellation reads the adapter's existing
+     `order_status` and appends `OrderCancelled` itself (pipeline-level
+     bookkeeping, not a sixth Protocol method, so §8.1's "five methods"
+     depth test in `test_broker_stubs.py` stays unchanged).
+
+123. **`ReconciliationRunPayload`/`OrderCancelledPayload` land as additive
+     typed contracts this session** (same "contracts are cheap" status as
+     every other declarative addition this sprint) — `contracts.
+     ReconciliationRunPayload` carries `account_ref`/`result`
+     (`"ok"`/`"mismatch"`)/`broker_fill_count`/`ledger_fill_count`/
+     `mismatches` (a list of plain-dict unmatched-fill records, same
+     ASSUMPTIONS-10 heterogeneous-payload convention as `quote_snapshot`)/
+     `ts_utc`; `contracts.OrderCancelledPayload` carries `order_id`/
+     `account_ref`/`ts_utc`/`reason`.
+
+124. **Pipeline entry-price rule for qty derivation (ASSUMPTIONS, this
+     session, CTO pin encoded verbatim in `_pipeline.py`'s module
+     docstring, step 1): `qty = recommended_size_usd / entry_price`, where
+     `entry_price` is the thesis contract's own `entry.limit_price` for a
+     LIMIT entry, or the `MarketSnapshotTaken.last_close` recorded at
+     `thesis.submit()` time for a MARKET entry — never a fresh quote at
+     execute_order time.** This makes the submitted order a mechanical
+     transcription of what was already `approved`, not a fresh sizing
+     decision at submit time. `test_pipeline.py`'s happy-path tests use a
+     MARKET entry (simpler to pin deterministically than the limit-entry
+     rule) — the limit-entry qty rule is documented but not exercised by a
+     dedicated test this session; FLAGGED as a coverage gap for the dev
+     pass or a follow-up batch to close.
+
+    **CTO ratification (2026-07-17) — batch-C/P3 flags (116-124):**
+    cancel_order as broker's sixth verb RATIFIED — `tk order cancel` is
+    pinned by the sprint doc's own CLI list, and six sits exactly at the
+    §4.2 ~6-verb depth line (any seventh verb is a design smell — noted).
+    Limit-entry qty derivation coverage gap: NOT accepted as debt — the
+    dev pass MUST add one limit-entry pipeline test (additive coverage is
+    a permitted dev-side test addition; weakening is not). Live-tier
+    Demoted handling reuses policy._current_tier rather than duplicating:
+    RATIFIED (the projection-vs-derivation duplication in _projections is
+    already tripwired; no third copy). All other round-18 entries ratified
+    as pinned.

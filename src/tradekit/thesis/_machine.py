@@ -149,6 +149,39 @@ def require_state(
     return state
 
 
+def _activate_on_fill(ledger: Ledger, thesis_id: str, order_id: str, ts: Any) -> None:
+    """PRIVATE internal seam (DESIGN §4.2: "activation-on-fill (internal,
+    invoked by the broker pipeline)" — SPRINT P3 batch C, ASSUMPTIONS
+    round-18). Deliberately NOT a public `thesis` verb: §4.2 pins `thesis`'s
+    public surface at exactly six verbs (draft/submit/approve/reject/grade/
+    void); a thesis only ever becomes `active` as the direct consequence of
+    `broker._pipeline.execute_order`'s first observed fill, so this lives
+    here as a module-private function the pipeline imports and calls
+    directly (`from tradekit.thesis import _machine` then
+    `_machine._activate_on_fill(...)`), never through `tradekit.thesis`'s
+    public `__all__`.
+
+    Legal only from `approved` (mirrors every other lifecycle transition's
+    own `require_state` guard — `IllegalTransition` propagates unchanged
+    for any other state). Appends `ThesisActivated(thesis_id, order_id,
+    ts_utc=ts)` — the SAME event type `_next_state`'s `_SIMPLE_TRANSITIONS`
+    table already wires `("approved", "ThesisActivated") -> "active"` for
+    (batch A pinned that edge before a real producer existed; P2 tests
+    appended it as a harness action — this function is the FIRST real
+    producer, SPRINT P3 batch C dev pass).
+
+    STUB this batch — the dev pass implements the body; RED tests
+    (`tests/unit/broker/test_pipeline.py`) exercise it indirectly through
+    `execute_order`, and a direct `tests/unit/thesis` unit test may exercise
+    it standalone."""
+    raise NotImplementedError(
+        f"tradekit.thesis._machine._activate_on_fill(thesis_id={thesis_id!r}, "
+        f"order_id={order_id!r}, ...): SPRINT P3 batch C dev pass lands this — the private "
+        "activation-on-fill seam DESIGN §4.2 pins for the broker pipeline to call "
+        "(never a public thesis verb)"
+    )
+
+
 def latest_payload(ledger: Ledger, thesis_id: str, event_type: str) -> dict[str, Any] | None:
     """The payload of the most recent `event_type` event for `thesis_id`, or
     `None` if it has never occurred."""

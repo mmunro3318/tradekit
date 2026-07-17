@@ -27,6 +27,7 @@ grade_app = typer.Typer(no_args_is_help=True)
 policy_app = typer.Typer(no_args_is_help=True)
 promote_app = typer.Typer(no_args_is_help=True)
 account_app = typer.Typer(no_args_is_help=True)
+order_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
@@ -34,6 +35,7 @@ app.add_typer(grade_app, name="grade", help="Grading (§10.2).")
 app.add_typer(policy_app, name="policy", help="Policy engine (§7).")
 app.add_typer(promote_app, name="promote", help="Promotion ladder (§7.3).")
 app.add_typer(account_app, name="account", help="Named accounts (§8, TD-24).")
+app.add_typer(order_app, name="order", help="Two-phase order pipeline (§8.2, SPRINT P3 batch C).")
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -296,6 +298,75 @@ def account_create_paper(
         typer.echo(json.dumps({"account_ref": account_ref}))
     else:
         typer.echo(account_ref)
+
+
+@order_app.command("submit")
+def order_submit(
+    thesis_id: str,
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """`broker.execute_order` (thin dispatch, SPRINT P3 batch C, §8.2). A
+    deny verdict is a clean nonzero exit carrying the `Verdict`
+    (`broker.PipelineDenied`), never a raw traceback — mirrors
+    `_guard_not_implemented`'s NotImplementedError handling but for a
+    DIFFERENT typed exception (the money-path's own refusal type, not a
+    stub marker)."""
+    try:
+        ack = _guard_not_implemented(broker.execute_order, thesis_id)
+    except broker.PipelineDenied as exc:
+        if as_json:
+            typer.echo(json.dumps({"denied": True, "verdict": exc.verdict.model_dump(mode="json")}))
+        else:
+            typer.echo(f"denied: {exc}")
+        raise typer.Exit(code=1) from exc
+    if as_json:
+        typer.echo(ack.model_dump_json())
+    else:
+        typer.echo(f"{ack.order_id} {ack.status}")
+
+
+@order_app.command("status")
+def order_status(
+    account_ref: Annotated[str, typer.Option(help="Account_ref that owns this order.")],
+    order_id: str,
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """`broker.get(account_ref).order_status(order_id)` (thin dispatch) —
+    ALSO the polling point that evaluates a still-resting limit order
+    (§8.3, ASSUMPTIONS round-17 entry 110)."""
+    status = broker.get(account_ref).order_status(order_id)
+    if as_json:
+        typer.echo(status.model_dump_json())
+    else:
+        typer.echo(f"{status.order_id} {status.status}")
+
+
+@order_app.command("cancel")
+def order_cancel(
+    account_ref: Annotated[str, typer.Option(help="Account_ref that owns this order.")],
+    order_id: str,
+) -> None:
+    """`broker.cancel_order` (thin dispatch, SPRINT P3 batch C, additive
+    fifth broker verb, ASSUMPTIONS round-18). MVP: resting limit orders
+    only — a filled/canceled/rejected order refuses cleanly
+    (`broker.OrderNotCancelable`), never a raw traceback."""
+    try:
+        _guard_not_implemented(broker.cancel_order, account_ref, order_id)
+    except broker.OrderNotCancelable as exc:
+        typer.echo(f"cannot cancel: {exc}")
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"canceled {order_id}")
+
+
+@account_app.command("reconcile")
+def account_reconcile(account_ref: str) -> None:
+    """`broker.reconcile` (thin dispatch, SPRINT P3 batch C, §8.2 step 7).
+    A mismatch appends an automatic HaltSet — this verb itself always exits
+    0 on a successful RUN (the halt is the audit signal, not a CLI failure
+    exit; `tk policy status --json` surfaces the resulting `halted` state
+    for a caller that wants a nonzero-exit gate)."""
+    _guard_not_implemented(broker.reconcile, account_ref)
+    typer.echo(f"reconciled {account_ref}")
 
 
 if __name__ == "__main__":

@@ -204,7 +204,23 @@ def _account_tier(account_ref: str) -> Literal["T0", "T1", "T2"] | None:
     `PromotionConfirmed`/T2 path exists, but no P2 producer ever moves an
     account to `"live:"`), so returning `None` here -> R-002 correctly
     denies every live action, same anti-permissive shape as R-011's
-    live-sequence budget."""
+    live-sequence budget.
+
+    RED-PHASE PIN (SPRINT P3 batch C, ASSUMPTIONS round-18, supersedes the
+    ASSUMPTIONS-92 note above): the P2 fail-closed carve-out ENDS this
+    batch. The dev pass must make this helper (and `assemble()`'s
+    `live_trades_remaining` derivation below) read the real
+    `promotion_state` (`PromotionConfirmed` minus any later `Demoted`) for
+    a "live:" account_ref -- `tests/unit/policy/test_live_tier.py` pins the
+    expected shape: a confirmed-T2 account_ref resolves to "T2" here, and
+    `live_trades_remaining` derives PURELY (no new event type) as
+    `PromotionConfirmed.live_sequence_remaining` (always 3) minus the count
+    of this account's own `FillRecorded` events at/after that
+    `PromotionConfirmed`'s `ts_utc`. An UNCONFIRMED "live:" account_ref
+    keeps returning None -- the fail-closed default remains for that case
+    only. THIS FUNCTION STILL RETURNS None UNCONDITIONALLY FOR "live:"
+    REFS THIS BATCH (red) -- see `broker._pipeline`'s module docstring for
+    the R-011 decrement-is-a-read-time-derivation pin."""
     if account_ref.startswith("paper:"):
         return "T1"
     if account_ref.startswith("advisory:"):

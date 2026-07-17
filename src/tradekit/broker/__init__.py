@@ -23,6 +23,13 @@ from typing import Any
 from ulid import ULID
 
 from tradekit.broker._paper import PaperBroker
+from tradekit.broker._pipeline import (
+    OrderNotCancelable,
+    PipelineDenied,
+)
+from tradekit.broker._pipeline import cancel_order as _pipeline_cancel_order
+from tradekit.broker._pipeline import execute_order as _pipeline_execute_order
+from tradekit.broker._pipeline import reconcile as _pipeline_reconcile
 from tradekit.broker._port import BrokerPort
 from tradekit.contracts import (
     AccountConfig,
@@ -65,22 +72,28 @@ def get(account_ref: str) -> BrokerPort:
 
 def execute_order(thesis_id: str) -> OrderAck:
     """The two-phase money pipeline (§8.2): ActionProposed -> policy.evaluate
-    -> VerdictIssued -> (deny -> exit) -> adapter.submit -> OrderSubmitted/
-    OrderAck -> fill polling -> FillRecorded -> thesis.activate. STUB —
-    batch C."""
-    raise NotImplementedError(
-        f"tradekit.broker.execute_order({thesis_id!r}): batch C (two-phase pipeline, "
-        "§8.2) lands this"
-    )
+    -> VerdictIssued -> (deny -> PipelineDenied) -> adapter.submit ->
+    OrderSubmitted/OrderAck -> single-poll fill check -> thesis activation
+    (+ R-011 live-sequence derivation). Thin delegation to `_pipeline.
+    execute_order` (SPRINT P3 batch C dev pass lands the real body — see
+    `_pipeline.py`'s module docstring for the pinned algorithm)."""
+    return _pipeline_execute_order(thesis_id)
 
 
 def reconcile(account_ref: str) -> None:
     """Broker records vs ledger; any mismatch -> ReconciliationRun(mismatch)
-    + automatic HaltSet (§8.2 step 7, D4). STUB — batch C."""
-    raise NotImplementedError(
-        f"tradekit.broker.reconcile({account_ref!r}): batch C (reconcile -> auto-halt "
-        "path) lands this"
-    )
+    + automatic HaltSet (§8.2 step 7, D4/§15). Thin delegation to
+    `_pipeline.reconcile` (SPRINT P3 batch C dev pass lands the real body)."""
+    _pipeline_reconcile(account_ref)
+
+
+def cancel_order(account_ref: str, order_id: str) -> None:
+    """`tk order cancel` — additive fifth broker verb, TD-24/`create_paper_
+    account`'s same "declarative addition, not a §4.2 surface widen" class
+    of call (SPRINT P3 batch C, ASSUMPTIONS round-18). MVP: only a resting
+    order may be canceled (`OrderNotCancelable` otherwise). Thin delegation
+    to `_pipeline.cancel_order` (batch C dev pass lands the real body)."""
+    _pipeline_cancel_order(account_ref, order_id)
 
 
 def record_manual_fill(
@@ -140,7 +153,10 @@ def create_paper_account(config: AccountConfig) -> str:
 __all__ = [
     "AccountAlreadyExists",
     "BrokerPort",
+    "OrderNotCancelable",
     "PaperBroker",
+    "PipelineDenied",
+    "cancel_order",
     "create_paper_account",
     "execute_order",
     "get",
