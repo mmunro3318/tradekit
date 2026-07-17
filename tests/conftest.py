@@ -227,3 +227,21 @@ def read_model_snapshot(ledger_path):
 @pytest.fixture(autouse=True)
 def _no_unmocked_network(respx_mock):
     yield respx_mock
+
+
+# ---------------------------------------------------------------------------
+# TK_DATA_DIR isolation (SPRINT P2 batch A, CTO pin) — the P1C cache-poisoning
+# lesson applied to the ledger: `tradekit.ledger.default_ledger()` resolves
+# TK_DATA_DIR (default "./data") at call time, so ANY test that reaches state
+# through a public verb (thesis.*, eventually policy.*) rather than the
+# `ledger`/`ledger_path` fixtures would otherwise open the REAL
+# `data/ledger.db` next to the repo. Autouse + suite-wide (not opt-in) because
+# the whole point is that no test author has to remember to ask for it —
+# same rationale as `_no_unmocked_network` above. Individual tests that also
+# want the concrete tmp_path (e.g. to assert on `TK_DATA_DIR/ledger.db`
+# directly) can request `tmp_path` themselves; pytest fixture caching returns
+# the SAME per-test tmp_path both times.
+@pytest.fixture(autouse=True)
+def _tk_data_dir_isolation(tmp_path, monkeypatch):
+    monkeypatch.setenv("TK_DATA_DIR", str(tmp_path))
+    yield

@@ -720,3 +720,162 @@ same commit (DESIGN maintenance rule applies here too).
     `_regime._STRATEGY_TAGS`) are session-invented mappings; they get
     re-derived from the real strategy-tag registry when P2 introduces it
     (revisit marker: SPRINT-P2 thesis strategy_tag work).
+
+## Round-8 additions — P2 batch A TDD session (thesis lifecycle + typed
+event payloads + projections), 2026-07-17
+
+58. **Suite-wide `TK_DATA_DIR` isolation (CTO pin, extends the P1C
+    cache-poisoning lesson to the ledger):** `tests/conftest.py` gains an
+    AUTOUSE fixture (`_tk_data_dir_isolation`) that `monkeypatch.setenv
+    ("TK_DATA_DIR", str(tmp_path))` for EVERY test in the suite, not just
+    thesis/ledger tests — same rationale and same shape as the existing
+    `_no_unmocked_network` autouse fixture. `tradekit.ledger.default_ledger()`
+    reads `TK_DATA_DIR` (default `"./data"`, relative to process CWD) at
+    call time; without this fixture, any test reaching state through a
+    public verb (rather than the `ledger`/`ledger_path` fixtures, which
+    take an explicit tmp_path) would silently touch the REAL
+    `data/ledger.db` checked into the repo. Pinned by
+    `tests/unit/ledger/test_tk_data_dir_isolation.py`: one pure
+    `os.environ` probe test (no filesystem I/O, cannot flake — explicitly
+    allowed by the batch dispatch) plus one test that opens
+    `default_ledger()`, performs a verb-shaped append, and asserts the
+    REAL `data/ledger.db` (located via `Path(__file__).resolve().parents
+    [3] / "data" / "ledger.db"`, robust to whatever CWD pytest is invoked
+    from) is byte-for-byte unchanged.
+
+59. **Additive `contracts`/`thesis` public surface widening (§4.2's "the
+    shared-leaf exception whose interface IS its models"):** `contracts`
+    gains thirteen new frozen, `extra="forbid"` payload models
+    (`_event_payloads.py`) — `ThesisDraftedPayload`,
+    `ThesisSubmittedPayload`, `MarketSnapshotTakenPayload`,
+    `SizingComputedPayload`, `ThesisApprovedPayload`,
+    `ThesisRejectedPayload`, `ThesisActivatedPayload`,
+    `ReviewCompletedPayload`, `InvalidationAttestedPayload`,
+    `ThesisGradedPayload`, `GateViolationDetectedPayload`,
+    `HaltSetPayload`, `HaltClearedPayload` — re-exported from
+    `tradekit.contracts.__init__`. `tradekit.thesis` gains
+    `IllegalTransition` (`__init__(current_state: str, verb: str)`),
+    exported alongside the six verbs. Both widenings are ADDITIVE only
+    (assumption 47's floor-not-ceiling precedent extended from contract
+    schemas to whole-module public surfaces): no existing model or verb
+    signature changed. The P0 envelope itself (`Event.payload: dict`)
+    is UNCHANGED — these are producer-side models per ASSUMPTIONS 10's
+    ratified pattern (validate through the model, `model_dump(mode=
+    "json")` into the dict envelope), pinned end-to-end by
+    `tests/unit/contracts/test_event_payloads.py::
+    test_producer_round_trip_pattern_thesis_submitted`.
+
+60. **`ThesisDraftedPayload.supersedes` is threaded through an EXTRA key
+    in the contract dict, not a `draft()` kwarg or a `ThesisContract`
+    field (session design call, not derived from any pinned source):**
+    `ThesisContract` has no `supersedes` field (§5.1's field list is
+    closed), and `draft(contract: dict) -> str`'s pinned signature takes
+    no second argument. This batch's tests
+    (`test_lifecycle.py::test_draft_with_supersedes_links_payload_to_
+    the_old_thesis`) put `"supersedes": <old_id>` as an EXTRA key in the
+    contract dict passed to `draft()` — `ThesisContract` is a plain
+    `FrozenModel` (pydantic v2 default `extra="ignore"`, NOT
+    `extra="forbid"`), so the model itself silently drops the extra key
+    on validation, and `draft()` is expected to read
+    `contract.get("supersedes")` before/independent of constructing
+    `ThesisContract` and thread it into `ThesisDraftedPayload.supersedes`.
+    Flagged: this is a reasonable but non-obvious reading of the CTO
+    addendum's one-line mention of supersede-linkage; ratify or correct
+    before the dev pass treats it as load-bearing.
+
+61. **`submit()`'s `equity` computation uses a HARDCODED module constant
+    this batch, not `PolicyDials`:** the CTO addendum pins `equity =
+    paper_starting_equity_usd + cumulative realized pnl ... from
+    pnl_daily`, with `paper_starting_equity_usd` a `PolicyDials` default
+    of 500 — but `tradekit.policy`/`PolicyDials` don't exist until batch
+    C. `tests/unit/thesis/test_submit.py` pins a local
+    `_PAPER_STARTING_EQUITY_USD = Decimal("500")` constant and expects
+    batch A's `submit()` implementation to use an equivalent hardcoded
+    value (later replaced by a real `PolicyDials` read in batch C).
+    Flagged, not silently assumed permanent.
+
+62. **`pnl_daily` FillRecorded population is deferred whole-cloth to
+    batch B/D (CTO addendum's own explicit escape hatch: "if pnl_daily
+    consumption is too batch-D-entangled, pin equity=500 base case
+    only and note the deferral"):** this batch ships `pnl_daily`'s DDL
+    only (`_projections.py`'s `_TABLES["pnl_daily"]`); `_apply()` has NO
+    handling for `FillRecorded` yet, so the table stays permanently
+    empty until a later batch wires it. Consequently
+    `test_submit.py::test_submit_equity_base_case_uses_paper_starting_
+    equity_with_no_fills` is the ONLY equity test this batch — the
+    "equity accumulates realized pnl from a harness-appended fill
+    history" case named in the batch dispatch is explicitly NOT
+    attempted here.
+
+63. **`theses` projection's event-driven state-TRANSITION derivation is
+    a `NotImplementedError` stub this batch, same discipline as every
+    thesis VERB (batch dispatch: "Failing tests + stubs only") — with
+    ONE deliberate carve-out for `ThesisDrafted` itself:**
+    `_projections.py`'s DDL for `theses`/`pnl_daily`/`series`/
+    `promotion_state` is real (idempotence/empty-rebuild/tables-exist
+    tests are GREEN infrastructure). `_apply()` gives `ThesisDrafted` a
+    minimal REAL handler (inserts a `state="draft"` row) rather than
+    raising, because the pre-existing P0 done-gate replay test
+    (`tests/replay/test_p0_replay.py::test_p0_done_gate_replay`) already
+    appends a bare `ThesisDrafted` event and calls `ledger.rebuild()` —
+    that baseline test must stay green, so a blanket raise on
+    `ThesisDrafted` would be a regression, not a red test. Every
+    state-transition PAST `draft` (`ThesisSubmitted`, `ReviewCompleted`,
+    `ThesisApproved`, `ThesisRejected`, `ThesisActivated`,
+    `ThesisGraded`) still raises `NotImplementedError`, so
+    `test_rebuild.py::test_theses_projection_materializes_state_from_
+    event_sequence` (whose fixture walks draft -> submitted -> reviewed
+    -> approved) is deliberately RED at the `ThesisSubmitted` step,
+    matching every thesis-verb test's red state this batch.
+    `series`/`promotion_state` get no `_apply` handling at all (batch
+    D); unhandled event types are silently skipped by `_apply`'s
+    existing if/elif chain (same as `LessonRecorded` today), so those
+    two tables stay empty and inert with no red test attached.
+
+64. **§10.1 diagram reading, PINNED not flagged — `reject` branches ONLY
+    from `reviewed`:** the state-machine diagram
+    (`reviewed ─┬─approve→ approved ... └─reject→ rejected`) has no
+    `approved ─reject→` edge at all; `reject` on an `approved` thesis is
+    therefore an `IllegalTransition`, same as any other out-of-band verb
+    call. This reading is unambiguous from the diagram itself (unlike
+    assumptions 51-57's genuinely open questions), so it is PINNED
+    directly rather than flagged for ratification — pinned by
+    `test_lifecycle.py::test_reject_on_approved_raises_illegal_
+    transition`.
+
+65. **Submit's event-ordering + validate-before-append pin (CTO
+    addendum, restated as a test-suite contract):** `thesis.submit`
+    must (a) run EV validation (and any other pre-append validation)
+    BEFORE appending anything — a rejected submit leaves the event
+    count unchanged, no orphan `MarketSnapshotTaken`/`SizingComputed`
+    rows (pinned by `test_submit.py::
+    test_submit_ev_validation_rejects_over_tolerance_and_appends_
+    nothing`); (b) on success, append in the EXACT order
+    `MarketSnapshotTaken` -> `SizingComputed` -> `ThesisSubmitted`, the
+    transition marker LAST (pinned by `test_submit.py::
+    test_submit_appends_snapshot_sizing_submitted_in_pinned_order`).
+    State is defined as "does a `ThesisSubmitted` marker event exist",
+    so a crash between steps (a) and the final append leaves the thesis
+    correctly in `draft` with harmless orphan prep events — documented
+    behavior, not a bug (CTO addendum).
+
+66. **`mypy` strict override extended to `tradekit.thesis.*`
+    (`pyproject.toml`):** the existing `[[tool.mypy.overrides]]` block's
+    comment already claimed "Strict where money and state live:
+    contracts, ledger, policy, thesis" but its `module` list only named
+    `tradekit.contracts.*`/`tradekit.ledger.*`. This batch adds
+    `tradekit.thesis.*` to that list (matching the batch dispatch's "note:
+    thesis/policy are strict-mypy per pyproject" — `tradekit.policy.*`
+    does not exist yet, added when the module lands in batch C).
+
+    **CTO ratification (2026-07-17) — batch-A flags:** the `supersedes`
+    dict-key threading through draft() is RATIFIED (keeps the pinned
+    signature; draft pops the key before ThesisContract validation and
+    records it in the ThesisDrafted payload — a kwarg would widen the pin,
+    a contract field would misplace lineage into the immutable contract).
+    The hardcoded Decimal("500") equity constant is RATIFIED AS TEMPORARY
+    — batch C's PolicyDials.paper_starting_equity_usd replaces it, same
+    commit as the dials land, and the constant must not survive the
+    sprint. Reject-from-approved being illegal is confirmed per §10.1's
+    diagram (reject branches from reviewed only). pnl_daily population
+    deferral to batch B/D confirmed.

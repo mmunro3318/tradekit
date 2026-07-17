@@ -22,8 +22,33 @@ Public surface (implemented in P0 M0.2):
 Note on payload models: per the CTO ratification of ASSUMPTIONS 10, the P0
 envelope takes plain-dict payloads with taxonomy validation on ``type``;
 typed per-event payload models land with their producing subsystems (P2/P3).
+
+SPRINT P2 batch A additive surface (thesis-lifecycle payload models):
+    ThesisDraftedPayload, ThesisSubmittedPayload, MarketSnapshotTakenPayload,
+    SizingComputedPayload, ThesisApprovedPayload, ThesisRejectedPayload,
+    ThesisActivatedPayload, ReviewCompletedPayload,
+    InvalidationAttestedPayload, ThesisGradedPayload,
+    GateViolationDetectedPayload, HaltSetPayload, HaltClearedPayload
+    — producer-side: validate through the model, then
+    ``model_dump(mode="json")`` into ``Event.payload`` (ASSUMPTIONS 10's
+    ratified pattern). See ``_event_payloads.py`` and ``tests/ASSUMPTIONS.md``.
 """
 
+from tradekit.contracts._event_payloads import (
+    GateViolationDetectedPayload,
+    HaltClearedPayload,
+    HaltSetPayload,
+    InvalidationAttestedPayload,
+    MarketSnapshotTakenPayload,
+    ReviewCompletedPayload,
+    SizingComputedPayload,
+    ThesisActivatedPayload,
+    ThesisApprovedPayload,
+    ThesisDraftedPayload,
+    ThesisGradedPayload,
+    ThesisRejectedPayload,
+    ThesisSubmittedPayload,
+)
 from tradekit.contracts._events import ChainReport, Event, EventFilter
 from tradekit.contracts._execution import (
     Fill,
@@ -66,18 +91,31 @@ __all__ = [
     "EventFilter",
     "Fill",
     "Friction",
+    "GateViolationDetectedPayload",
     "GlobalCrypto",
     "Grade",
+    "HaltClearedPayload",
+    "HaltSetPayload",
+    "InvalidationAttestedPayload",
     "InvalidationSpec",
     "MarketSnapshot",
+    "MarketSnapshotTakenPayload",
     "OrderAck",
     "OrderRequest",
     "Predicate",
     "ProposedAction",
+    "ReviewCompletedPayload",
     "RuleHit",
     "RunManifest",
+    "SizingComputedPayload",
     "StrategyMetrics",
+    "ThesisActivatedPayload",
+    "ThesisApprovedPayload",
     "ThesisContract",
+    "ThesisDraftedPayload",
+    "ThesisGradedPayload",
+    "ThesisRejectedPayload",
+    "ThesisSubmittedPayload",
     "TradeRecord",
     "Verdict",
     "VerdictToken",
