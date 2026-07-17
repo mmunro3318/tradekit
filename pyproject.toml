@@ -96,7 +96,13 @@ module = ["hmmlearn", "hmmlearn.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["tradekit.contracts.*", "tradekit.ledger.*", "tradekit.thesis.*", "tradekit.policy.*"]
+module = [
+    "tradekit.contracts.*",
+    "tradekit.ledger.*",
+    "tradekit.thesis.*",
+    "tradekit.policy.*",
+    "tradekit.broker.*",
+]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_calls = true

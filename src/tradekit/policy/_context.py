@@ -33,7 +33,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from tradekit import mae
 from tradekit.contracts import Event, EventFilter, ProposedAction, StrategyMetrics, TradeRecord
 from tradekit.ledger import Ledger, default_ledger
-from tradekit.policy._dials import PolicyDials
+from tradekit.policy._dials import PolicyDials, resolve_account_dial
 
 
 class PolicyContext(BaseModel):
@@ -109,6 +109,34 @@ class PolicyContext(BaseModel):
     # a synthetic summary shaped like `contracts.StrategyMetrics`'s
     # promotion-relevant subset). None => insufficient_context.
     strategy_metrics: dict[str, Any] | None = None
+
+    # R-005 (live)/R-006/R-014/R-017/R-018 (SPRINT P3 batch A, TD-24) — the
+    # targeted account's AccountConfig.principal_usd, resolved by
+    # `assemble()` from the ledgered `AccountCreated` event (or, for P2's
+    # default account with no explicit AccountConfig on record, synthesized
+    # from `dials.paper_starting_equity_usd` — the addendum's "implicit
+    # AccountConfig from config.toml defaults"). None => insufficient_context
+    # for any rule that needs it (never a guessed principal).
+    account_principal_usd: Decimal | None = None
+
+    # R-017/R-018 — the RESOLVED per-account dial (AccountConfig field ->
+    # PolicyDials default -> code default, `_dials.resolve_account_dial`).
+    # `None` is a legitimate resolved value meaning "disabled for this
+    # account" -> the rule emits `not_configured`, never insufficient_context
+    # (disabled is a real, deliberate answer, not missing data).
+    account_max_daily_drawdown: Decimal | None = None
+    account_max_lifetime_drawdown: Decimal | None = None
+
+    # R-017 — today's realized pnl as a FRACTION of account principal (UTC
+    # calendar day, `pnl_daily`-equivalent aggregation). Signed: negative on
+    # a losing day. None => insufficient_context (never assumed 0 — same
+    # anti-permissive discipline as `trailing_30d_drawdown_pct`).
+    daily_pnl_fraction: Decimal | None = None
+
+    # R-018 — lifetime peak-to-trough drawdown as a FRACTION of principal,
+    # over the account's full graded history (no 30-day window, unlike
+    # `trailing_30d_drawdown_pct`). None => insufficient_context.
+    lifetime_drawdown_fraction: Decimal | None = None
 
 
 # Ambient "now" seam — `policy` may import NEITHER `mae` nor `thesis`
@@ -256,6 +284,111 @@ def _trailing_drawdown_pct(
         if peak > 0:
             max_drawdown = max(max_drawdown, (peak - equity) / peak)
     return max_drawdown
+
+
+def _account_config(ledger: Ledger, account_ref: str) -> dict[str, Any] | None:
+    """Latest `AccountCreated.config` payload for `account_ref` (TD-24), or
+    `None` when no such event has ever been ledgered."""
+    matches = [
+        event.payload.get("config")
+        for event in ledger.query(EventFilter(types=["AccountCreated"]))
+        if event.payload.get("account_ref") == account_ref
+    ]
+    return matches[-1] if matches else None
+
+
+def _account_principal(ledger: Ledger, dials: PolicyDials, account_ref: str) -> Decimal | None:
+    """R-005(live)/R-006/R-014/R-017/R-018's `account_principal_usd` (TD-24).
+    A real `AccountCreated` event wins when present; P2's default account
+    (`dials.default_account_ref`, "paper:alpha") gets the addendum's
+    "implicit AccountConfig from config.toml defaults" — its principal is
+    `dials.paper_starting_equity_usd` even with no `AccountCreated` event on
+    record. Any other account with no `AccountCreated` event -> `None`
+    (insufficient_context, never a guessed principal)."""
+    config = _account_config(ledger, account_ref)
+    if config is not None:
+        principal = config.get("principal_usd")
+        return Decimal(str(principal)) if principal is not None else None
+    if account_ref == dials.default_account_ref:
+        return dials.paper_starting_equity_usd
+    return None
+
+
+def _account_drawdown_dial(
+    ledger: Ledger, dials: PolicyDials, account_ref: str, field: str, dial_default: Decimal | None
+) -> Decimal | None:
+    """R-017/R-018's resolved dial: AccountConfig field -> PolicyDials
+    config.toml/code default (`_dials.resolve_account_dial`, TD-24's
+    three-layer order)."""
+    config = _account_config(ledger, account_ref)
+    account_value_raw = config.get(field) if config is not None else None
+    account_value = Decimal(str(account_value_raw)) if account_value_raw is not None else None
+    return resolve_account_dial(account_value, dial_default)
+
+
+def _daily_pnl_fraction(
+    ledger: Ledger, account_ref: str, principal: Decimal | None, now: datetime
+) -> Decimal | None:
+    """R-017's today's-realized-pnl fraction of principal (UTC calendar
+    day). `None` only when `principal` itself is unknown (propagated
+    insufficient_context); a real day with no grades yet is a GENUINELY
+    COMPUTED `Decimal("0")` (same discipline as `_trailing_drawdown_pct`'s
+    own "no graded history -> real 0, never assumed" rule)."""
+    if principal is None or principal == 0:
+        return None
+    thesis_ids = _account_thesis_ids(ledger, account_ref)
+    today = now.date()
+    total = Decimal("0")
+    for event in ledger.query(EventFilter(types=["ThesisGraded"])):
+        if event.payload.get("thesis_id") not in thesis_ids:
+            continue
+        graded_ts = _parse_graded_ts_for_context(event)
+        if graded_ts.astimezone(UTC).date() != today:
+            continue
+        pnl = event.payload.get("pnl_usd")
+        if pnl is not None:
+            total += Decimal(str(pnl))
+    return total / principal
+
+
+def _lifetime_drawdown_fraction(
+    ledger: Ledger, account_ref: str, principal: Decimal | None, now: datetime
+) -> Decimal | None:
+    """R-018's lifetime peak-to-trough drawdown, as a FRACTION OF PRINCIPAL
+    (deliberately not "of peak equity" like R-009's `trailing_30d_drawdown_pct`
+    — TD-24's own wording is "vs principal"; FLAGGED ambiguity, see
+    tests/ASSUMPTIONS.md round-16). `None` only when `principal` is unknown."""
+    if principal is None or principal == 0:
+        return None
+    thesis_ids = _account_thesis_ids(ledger, account_ref)
+    graded = sorted(
+        (
+            event
+            for event in ledger.query(EventFilter(types=["ThesisGraded"]))
+            if event.payload.get("thesis_id") in thesis_ids
+            and _parse_graded_ts_for_context(event) <= now
+        ),
+        key=_parse_graded_ts_for_context,
+    )
+    equity = principal
+    peak = equity
+    max_drawdown = Decimal("0")
+    for event in graded:
+        pnl = event.payload.get("pnl_usd")
+        if pnl is None:
+            continue
+        equity += Decimal(str(pnl))
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, (peak - equity) / principal)
+    return max_drawdown
+
+
+def _parse_graded_ts_for_context(event: Event) -> datetime:
+    raw = event.payload.get("graded_ts")
+    if raw:
+        ts = datetime.fromisoformat(str(raw))
+        return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+    return event.ts_utc
 
 
 def _thesis_prereqs(
@@ -507,6 +640,18 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
             dumped["passes_gates"] = metrics.edge_verdict == "positive"
             strategy_metrics = dumped
 
+    principal = _account_principal(ledger, dials, action.account_ref)
+    max_daily_dd = _account_drawdown_dial(
+        ledger, dials, action.account_ref, "max_daily_drawdown", dials.max_daily_drawdown_default
+    )
+    max_lifetime_dd = _account_drawdown_dial(
+        ledger,
+        dials,
+        action.account_ref,
+        "max_lifetime_drawdown",
+        dials.max_lifetime_drawdown_default,
+    )
+
     return PolicyContext(
         now=now,
         dials=dials,
@@ -533,6 +678,13 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
             ledger, action.account_ref, dials.void_rate_window
         ),
         strategy_metrics=strategy_metrics,
+        account_principal_usd=principal,
+        account_max_daily_drawdown=max_daily_dd,
+        account_max_lifetime_drawdown=max_lifetime_dd,
+        daily_pnl_fraction=_daily_pnl_fraction(ledger, action.account_ref, principal, now),
+        lifetime_drawdown_fraction=_lifetime_drawdown_fraction(
+            ledger, action.account_ref, principal, now
+        ),
     )
 
 

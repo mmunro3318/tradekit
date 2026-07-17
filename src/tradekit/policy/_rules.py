@@ -1,4 +1,4 @@
-"""Rules catalog v1 — R-001..R-016 (DESIGN §7.2; CTO addendum, story-3
+"""Rules catalog v1 — R-001..R-018 (DESIGN §7.2; CTO addendum, story-3
 pins). REAL this batch (declarative data the tests read, like `_dials.py` —
 CTO's batch-C red/green split call): every `Rule.check` below is a PURE
 function of `(action, ctx)`, unit-testable with a synthetic
@@ -47,6 +47,16 @@ def _hit(rule_id: str, *, allow: bool, measured: str | None, limit: str | None) 
 
 def _insufficient(rule_id: str, field: str, limit: str | None = None) -> RuleHit:
     return _hit(rule_id, allow=False, measured=f"insufficient_context:{field}", limit=limit)
+
+
+def _not_configured(rule_id: str, dial_field: str) -> RuleHit:
+    """R-017/R-018 (TD-24, ASSUMPTIONS round-16): a `None` (disabled) dial
+    is still CONSULTED — the rule emits a `RuleHit(outcome="not_configured")`
+    so the audit trail shows it ran, distinct from both `pass` (a real check
+    that allowed) and `fail`/`insufficient_context` (a real check that
+    denied or lacked data). `evaluate_pure` treats `not_configured` the same
+    as `pass` for the overall verdict (never denies on its own)."""
+    return RuleHit(rule_id=rule_id, outcome="not_configured", measured=None, limit=dial_field)
 
 
 def _order_notional(action: ProposedAction) -> Decimal | None:
@@ -140,7 +150,12 @@ def _check_r004(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
 
 
 # ---------------------------------------------------------------------------
-# R-005 — max position notional (live: $25; paper: 10% equity)
+# R-005 — max position notional (live: 5% of principal; paper: 10% equity)
+# TD-24 migration (SPRINT P3 batch A, Mike-signed 2026-07-17): the live leg
+# used to be a flat max_position_usd_live=$25 dial; it is now
+# max_position_pct_live * ctx.account_principal_usd (5% * $500 default
+# principal = $25, numerically unchanged for the default account). The
+# paper leg is UNTOUCHED — still max_position_pct_paper * account_equity_usd.
 # ---------------------------------------------------------------------------
 
 
@@ -153,12 +168,17 @@ def _check_r005(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
             return _insufficient("R-005", "account_equity_usd")
         limit = ctx.dials.max_position_pct_paper * ctx.account_equity_usd
     else:
-        limit = ctx.dials.max_position_usd_live
+        if ctx.account_principal_usd is None:
+            return _insufficient("R-005", "account_principal_usd")
+        limit = ctx.dials.max_position_pct_live * ctx.account_principal_usd
     return _hit("R-005", allow=notional <= limit, measured=str(notional), limit=str(limit))
 
 
 # ---------------------------------------------------------------------------
-# R-006 — max total live exposure (D12)
+# R-006 — max total live exposure (D12), TD-24 migration: was a flat
+# max_total_live_exposure_usd=$100 dial; now max_total_live_exposure_pct *
+# ctx.account_principal_usd (20% * $500 = $100, unchanged for the default
+# account).
 # ---------------------------------------------------------------------------
 
 
@@ -166,8 +186,10 @@ def _check_r006(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
     notional = _order_notional(action)
     if notional is None:
         return _insufficient("R-006", "order_notional")
+    if ctx.account_principal_usd is None:
+        return _insufficient("R-006", "account_principal_usd")
     projected = ctx.live_exposure_usd + notional
-    limit = ctx.dials.max_total_live_exposure_usd
+    limit = ctx.dials.max_total_live_exposure_pct * ctx.account_principal_usd
     return _hit("R-006", allow=projected <= limit, measured=str(projected), limit=str(limit))
 
 
@@ -286,7 +308,11 @@ def _check_r013(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
 
 
 # ---------------------------------------------------------------------------
-# R-014 — advisory cooling-off: manual trades > $200 need thesis age >= 24h
+# R-014 — advisory cooling-off: manual trades over a FRACTION of principal
+# need thesis age >= 24h. TD-24 migration: was a flat
+# cooling_off_notional_usd=$200 dial; now cooling_off_pct *
+# ctx.account_principal_usd (40% * $500 = $200, unchanged for the default
+# account).
 # ---------------------------------------------------------------------------
 
 
@@ -296,7 +322,10 @@ def _check_r014(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
     notional = _order_notional(action)
     if notional is None:
         return _insufficient("R-014", "order_notional")
-    if notional <= ctx.dials.cooling_off_notional_usd:
+    if ctx.account_principal_usd is None:
+        return _insufficient("R-014", "account_principal_usd")
+    threshold = ctx.dials.cooling_off_pct * ctx.account_principal_usd
+    if notional <= threshold:
         return _hit("R-014", allow=True, measured=str(notional), limit=None)
     if ctx.thesis_age_hours is None:
         return _insufficient("R-014", "thesis_age_hours")
@@ -332,6 +361,44 @@ def _check_r016(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
         return _insufficient("R-016", "strategy_metrics")
     passes = bool(ctx.strategy_metrics.get("passes_gates", False))
     return _hit("R-016", allow=passes, measured=str(passes), limit="True")
+
+
+# ---------------------------------------------------------------------------
+# R-017 — max_daily_drawdown (TD-24, SPRINT P3 batch A, Mike-signed
+# 2026-07-17): disabled (dial resolves to None) -> not_configured, still
+# ledgered for audit. Configured -> deny when today's realized-loss FRACTION
+# of principal exceeds the dial; exactly at the dial ALLOWS (<=, not <).
+# ---------------------------------------------------------------------------
+
+
+def _check_r017(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
+    dial = ctx.account_max_daily_drawdown
+    if dial is None:
+        return _not_configured("R-017", "max_daily_drawdown")
+    if ctx.daily_pnl_fraction is None:
+        return _insufficient("R-017", "daily_pnl_fraction", limit=str(dial))
+    loss_fraction = max(Decimal("0"), -ctx.daily_pnl_fraction)
+    ok = loss_fraction <= dial
+    return _hit("R-017", allow=ok, measured=str(loss_fraction), limit=str(dial))
+
+
+# ---------------------------------------------------------------------------
+# R-018 — max_lifetime_drawdown (TD-24): same shape as R-017, but against
+# the account's lifetime peak-to-trough drawdown fraction of principal
+# rather than today's realized pnl alone.
+# ---------------------------------------------------------------------------
+
+
+def _check_r018(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
+    dial = ctx.account_max_lifetime_drawdown
+    if dial is None:
+        return _not_configured("R-018", "max_lifetime_drawdown")
+    if ctx.lifetime_drawdown_fraction is None:
+        return _insufficient("R-018", "lifetime_drawdown_fraction", limit=str(dial))
+    ok = ctx.lifetime_drawdown_fraction <= dial
+    return _hit(
+        "R-018", allow=ok, measured=str(ctx.lifetime_drawdown_fraction), limit=str(dial)
+    )
 
 
 _MUTATING = frozenset({"submit_order", "cancel", "promote", "void"})
@@ -382,9 +449,9 @@ RULES: tuple[Rule, ...] = (
         applies_to=frozenset({"submit_order"}),
         check=_check_r005,
         why=(
-            "Max position notional: live $25 flat, paper 10% of equity. Caps single-position "
-            "blast radius; a small bankroll survives being wrong, not being wrong big. Dial: "
-            "max_position_usd_live / max_position_pct_paper (D12)."
+            "Max position notional: live 5% of account principal, paper 10% of equity. Caps "
+            "single-position blast radius; a small bankroll survives being wrong, not being "
+            "wrong big. Dial: max_position_pct_live / max_position_pct_paper (D12, TD-24)."
         ),
     ),
     Rule(
@@ -394,7 +461,8 @@ RULES: tuple[Rule, ...] = (
         why=(
             "Max total live exposure across all open live positions — a portfolio-level cap "
             "so no combination of individually-legal orders can compound into a bankroll-"
-            "ending exposure. Dial: max_total_live_exposure_usd (D12)."
+            "ending exposure. Dial: max_total_live_exposure_pct, fraction of account "
+            "principal (D12, TD-24)."
         ),
     ),
     Rule(
@@ -474,9 +542,10 @@ RULES: tuple[Rule, ...] = (
         applies_to=frozenset({"submit_order"}),
         check=_check_r014,
         why=(
-            "Advisory cooling-off: manual trades over $200 need the backing thesis to be "
-            "at least 24h old — a guardrail against same-day impulse trades dressed up as "
-            "theses (F-guardrail 5). Dial: cooling_off_notional_usd / cooling_off_hours."
+            "Advisory cooling-off: manual trades over 40% of account principal need the "
+            "backing thesis to be at least 24h old — a guardrail against same-day impulse "
+            "trades dressed up as theses (F-guardrail 5). Dial: cooling_off_pct (fraction of "
+            "principal, TD-24) / cooling_off_hours."
         ),
     ),
     Rule(
@@ -499,6 +568,30 @@ RULES: tuple[Rule, ...] = (
             "promotion evaluation — a good win rate on a coin flip is not evidence of edge. "
             "Dial: none (per-metric thresholds live in mae.compute_strategy_metrics; P2 "
             "reads a stubbed summary — batch D wires the real computation, FLAGGED SEAM)."
+        ),
+    ),
+    Rule(
+        id="R-017",
+        applies_to=frozenset({"submit_order"}),
+        check=_check_r017,
+        why=(
+            "Per-account max daily drawdown: today's realized loss must not exceed this "
+            "FRACTION of account principal (TD-24) — enforced ONLY when the account's "
+            "AccountConfig (or the config.toml default) sets it; an unconfigured account "
+            "still gets a not_configured RuleHit so the audit trail shows the rule was "
+            "consulted, never a silent skip. Dial: max_daily_drawdown (AccountConfig field) "
+            "/ max_daily_drawdown_default (config.toml)."
+        ),
+    ),
+    Rule(
+        id="R-018",
+        applies_to=frozenset({"submit_order"}),
+        check=_check_r018,
+        why=(
+            "Per-account max lifetime drawdown: the account's peak-to-trough drawdown must "
+            "not exceed this FRACTION of principal (TD-24) — same not_configured-when-"
+            "disabled audit discipline as R-017. Dial: max_lifetime_drawdown (AccountConfig "
+            "field) / max_lifetime_drawdown_default (config.toml)."
         ),
     ),
 )

@@ -1686,3 +1686,124 @@ failures are `NotImplementedError` (`policy._series.*` stubs or
     simulations run — the ConfigChanged event trail is the mechanism.
     P2's DoD is now fully closed; the P2-era dollar dials remain the
     default-account values until TD-24's migration lands in P3.
+
+---
+
+## Round-16 — P3 batch A TDD session (BrokerPort + AccountConfig/TD-24
+migration), 2026-07-17
+
+99. **`not_configured` RuleHit convention (TD-24):** a rule whose backing
+    dial resolves to `None` (disabled — AccountConfig field unset AND
+    config.toml default unset) is still CONSULTED, not silently skipped —
+    it emits `RuleHit(outcome="not_configured")` so the audit trail proves
+    the rule ran. `RuleHit.outcome`'s `Literal` widened from `["pass",
+    "fail"]` to `["pass", "fail", "not_configured"]` (additive contract
+    change). `_evaluate.evaluate_pure`'s allow/deny roll-up changed from
+    `all(hit.outcome == "pass")` to `all(hit.outcome != "fail")` — the old
+    predicate would have made every `not_configured` hit deny the whole
+    verdict, defeating the point of the convention; this was a genuine bug
+    fix, not new production logic, needed for R-017/R-018 to be usable at
+    all. R-017 (`max_daily_drawdown`) and R-018 (`max_lifetime_drawdown`)
+    are the first two rules to use it; `_rules._not_configured()` is the
+    shared constructor.
+
+100. **Conformance-suite skeleton convention (TD-18 ring 2,
+    `tests/contract/test_broker_port.py`):** when a Protocol has zero real
+    adapters yet, `CASE_BUILDERS` holds exactly one `"placeholder"` entry
+    whose factory is never invoked — the `case` fixture `pytest.skip()`s it
+    with a reason naming the batch that adds the first real adapter (batch
+    B, PaperBroker). Every assertion body in the file is written against the
+    Protocol's real return shapes so the later batch's dev pass is a
+    ONE-LINE `CASE_BUILDERS` addition, mirroring `test_marketdata_port.py`'s
+    "one factory entry" property (TD-18) even before any adapter exists.
+    `BrokerTokenRequired` is PINNED here as the exception name batch B's
+    `PaperBroker.submit` (and every later adapter) must raise for a missing/
+    invalid `VerdictToken` — defined in the test file itself since no
+    adapter module exists yet to own it; batch B should re-home it under
+    `tradekit.broker` once `_paper.py` lands, at which point the test file
+    imports it rather than defining it.
+
+101. **Dial-migration equivalence table (TD-24, R-005 live/R-006/R-014):**
+    every renamed dial reproduces the OLD flat-dollar figure exactly at the
+    $500 default-account principal — `max_position_usd_live=$25` ->
+    `max_position_pct_live=0.05` (0.05 × 500 = 25.00);
+    `max_total_live_exposure_usd=$100` -> `max_total_live_exposure_pct=0.20`
+    (0.20 × 500 = 100.00); `cooling_off_notional_usd=$200` ->
+    `cooling_off_pct=0.40` (0.40 × 500 = 200.00). R-008's `min_notional_usd`
+    ($10) is UNCHANGED (stays absolute, CTO exception per Mike's sign-off,
+    entry 98). R-005's PAPER leg (`max_position_pct_paper=0.10` ×
+    `account_equity_usd`) is untouched by this migration — it was already
+    percent-of-equity before TD-24.
+
+    **Test-shape movers (values UNCHANGED, context SHAPE changed — flagged
+    per the task's "if any test_rules.py boundary test must change, STOP
+    and report" instruction):** R-006's and R-014's pre-existing
+    `test_rules.py` allow/deny fixtures now require an explicit
+    `account_principal_usd=Decimal("500")` in their synthetic `_ctx(...)`
+    call, because the rule itself now needs a principal to compute a
+    fraction-based limit where it previously read a flat dial requiring no
+    per-account context at all. The boundary VALUES asserted (100.00/100.01
+    for R-006; the 200/250 notional vs 200 threshold for R-014) are
+    IDENTICAL before and after — only the context construction gained one
+    required kwarg. R-005's LIVE leg had NO pre-existing `test_rules.py`
+    coverage (only the PAPER leg did), so its new 25.00/25.01 boundary
+    tests are pure additions, not migrations.
+    `tests/unit/policy/test_evaluate.py`'s `_allow_ctx()` fixture similarly
+    gained `account_principal_usd=Decimal("500")` (R-006 applies to EVERY
+    `submit_order`, not just live ones — a pre-existing, unchanged property
+    of `_check_r006` predating this batch — so the paper-account allow path
+    needed it too); its "no failing rule hits" assertion loosened from
+    `hit.outcome == "pass"` to `hit.outcome != "fail"` for the same
+    `not_configured`-is-not-a-failure reason as entry 99.
+
+102. **`AccountConfig.principal_usd` 2dp rejection is validator-based, not
+    quantization:** unlike `contracts.quantize` (which snaps a price onto a
+    tick grid), a principal with 3+ fractional digits is a caller ERROR
+    (typo'd config file), not a value to silently round — `AccountConfig`'s
+    `field_validator` inspects `Decimal.as_tuple().exponent < -2` and raises
+    `ValueError` (surfaces as pydantic `ValidationError`).
+
+103. **Lifetime-drawdown-fraction basis flagged ambiguity:** R-018's
+    `lifetime_drawdown_fraction` is computed as `(peak_equity -
+    current_equity) / principal` — a fraction OF PRINCIPAL, deliberately
+    NOT of peak equity (unlike R-009's pre-existing
+    `trailing_30d_drawdown_pct`, which divides by peak). The addendum's own
+    wording ("lifetime drawdown fraction ... vs principal") reads as
+    principal-relative; proposed interpretation, not confirmed by Mike —
+    flagged in `policy._context._lifetime_drawdown_fraction`'s docstring
+    for review before batch D+ depends on it.
+
+104. **R-017 "daily" == UTC calendar day of realized pnl, no rolling
+    window (proposed):** `_daily_pnl_fraction` sums `ThesisGraded.pnl_usd`
+    for events whose `graded_ts` (fallback `ts_utc`) falls on `now`'s UTC
+    calendar date — the same "UTC calendar day" convention
+    `_trades_today_count` (R-007) already uses. A rolling 24h window was
+    considered and deferred (per Mike's own P3 addendum note that rolling
+    windows are out of scope) — flagged as a proposal, not a sign-off.
+
+105. **`create_paper_account` lives in `tradekit.broker`, not a new
+    `tradekit.accounts` module:** TD-24 doesn't name a home for the verb;
+    DESIGN §8.3 already frames named paper accounts as "rows in our ledger"
+    owned by the broker subsystem, and `tk account create-paper` sits next
+    to the existing (already-pinned) `tk account list|balance|positions|
+    reconcile` verb family — adding a sixth `tradekit.broker` public
+    function stays under the §4.2 depth-test guidance (still far short of
+    "~6 verbs" as a hard smell threshold) so a new deep module wasn't
+    warranted for one additive verb. Flagged for Mike/CTO ratification —
+    the alternative (a dedicated `tradekit.accounts` leaf) is a legitimate
+    counter-design if account management grows past this one verb.
+
+    **CTO ratification (2026-07-17) — batch-A/P3 flags (99-105):** the
+    evaluate_pure fix is RATIFIED and HARDENED — CTO changed the shape from
+    a fail-blocklist to an explicit ALLOWLIST (pass|not_configured) so any
+    future outcome value fails closed; insufficient_context verified to
+    ride on outcome="fail" (RuleHit Literal is exactly the three values).
+    Context-shape movers with unchanged boundary values: accepted.
+    Lifetime-drawdown ÷principal basis and R-017 daily = UTC calendar day:
+    RATIFIED as proposed (rolling windows deferred per Mike's own note).
+    create_paper_account living in tradekit.broker: RATIFIED — accounts
+    are broker-domain, the verb is Mike-specified (TD-24 sketch), and
+    broker's surface stays at 5 verbs (within the ~6 depth rule). This
+    batch deliberately collapsed the TDD/dev split for declarative
+    machinery (batch-C precedent); the conformance-suite skips are the
+    honest red carried to batch B.

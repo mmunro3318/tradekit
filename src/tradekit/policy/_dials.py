@@ -63,15 +63,22 @@ class PolicyDials(BaseSettings):
         "MSFT",
         "SPY",
     )
-    # R-005
-    max_position_usd_live: Decimal = Decimal("25")
+    # R-005 (SPRINT P3 batch A, TD-24: percent-of-principal migration, Mike-
+    # signed 2026-07-17 — was max_position_usd_live: Decimal = Decimal("25")
+    # flat; 0.05 * $500 default principal = $25, so the default account's
+    # live cap is numerically UNCHANGED, only its basis moved from a flat
+    # dollar figure to a fraction of AccountConfig.principal_usd).
+    max_position_pct_live: Decimal = Decimal("0.05")
     max_position_pct_paper: Decimal = Decimal("0.10")
-    # R-006
-    max_total_live_exposure_usd: Decimal = Decimal("100")
+    # R-006 (TD-24 migration — was max_total_live_exposure_usd = Decimal("100");
+    # 0.20 * $500 = $100, default account UNCHANGED).
+    max_total_live_exposure_pct: Decimal = Decimal("0.20")
     # R-007
     max_daily_trades_live: int = 3
     max_daily_trades_paper: int = 20
-    # R-008
+    # R-008 — deliberately STAYS an absolute dollar floor (CTO exception,
+    # Mike-accepted, TD-24): a fee-noise floor scales with fee schedules,
+    # not with account principal.
     min_notional_usd: Decimal = Decimal("10")
     # R-009
     drawdown_breaker_pct: Decimal = Decimal("0.10")
@@ -81,12 +88,25 @@ class PolicyDials(BaseSettings):
     sizing_tolerance_pct: Decimal = Decimal("0.01")
     # R-013
     correlation_cap: Decimal = Decimal("0.75")
-    # R-014
-    cooling_off_notional_usd: Decimal = Decimal("200")
+    # R-014 (TD-24 migration — was cooling_off_notional_usd = Decimal("200");
+    # 0.40 * $500 = $200, default account UNCHANGED).
+    cooling_off_pct: Decimal = Decimal("0.40")
     cooling_off_hours: int = 24
     # R-015
     void_rate_window: int = 20
     void_rate_cap_pct: Decimal = Decimal("0.20")
+    # R-017/R-018 (SPRINT P3 batch A, TD-24) — config.toml-layer DEFAULTS for
+    # the two new per-account drawdown gates. `None` here (the code default)
+    # means "disabled account-wide unless an AccountConfig sets it" — the
+    # three-layer resolution order is AccountConfig field -> this dial ->
+    # code default, and `None` is a legitimate value at every layer (never
+    # coerced to +/-Infinity, ASSUMPTIONS round-16).
+    max_daily_drawdown_default: Decimal | None = None
+    max_lifetime_drawdown_default: Decimal | None = None
+    # TD-24: `AccountConfig.max_trades_per_day`'s config.toml-layer default
+    # when a `tk account create-paper` config file omits it — 0 == "paper/
+    # sim only" per Mike's sketch (no live-trade budget granted by default).
+    max_trades_per_day_default: int = 0
     # Series/promotion (CTO addendum; batch D consumes these)
     series_epoch: AwareDatetime = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
     paper_starting_equity_usd: Decimal = Decimal("500")
@@ -140,4 +160,22 @@ def policy_version_hash(dials: PolicyDials, rule_ids: list[str]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-__all__ = ["PolicyDials", "canonical_dump", "policy_version_hash"]
+def resolve_account_dial(
+    account_value: Decimal | None, dial_default: Decimal | None
+) -> Decimal | None:
+    """Three-layer dial resolution (TD-24, SPRINT P3 batch A): an
+    `AccountConfig` field value ALWAYS wins when set; otherwise fall back to
+    the `PolicyDials` value (itself already layered AccountConfig-file-absent
+    -> config.toml -> code default by `PolicyDials.load()`/pydantic-settings
+    above). `None` at every layer is a legitimate "disabled", never coerced
+    to a sentinel — the caller (a rule's `check`) is the one that turns a
+    `None` result into a `not_configured` RuleHit, not this function."""
+    return account_value if account_value is not None else dial_default
+
+
+__all__ = [
+    "PolicyDials",
+    "canonical_dump",
+    "policy_version_hash",
+    "resolve_account_dial",
+]

@@ -45,6 +45,8 @@ EventType = Literal[
     "GateViolationDetected",
     "LessonRecorded",
     "ReconciliationRun",
+    # SPRINT P3 batch A (TD-24): named-account lifecycle.
+    "AccountCreated",
 ]
 
 

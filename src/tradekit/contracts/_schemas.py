@@ -7,11 +7,15 @@ from typing import Any
 from tradekit.contracts._base import FrozenModel
 from tradekit.contracts._events import ChainReport, Event, EventFilter
 from tradekit.contracts._execution import (
+    AccountConfig,
+    AccountState,
     Fill,
     Grade,
     MarketSnapshot,
     OrderAck,
     OrderRequest,
+    OrderStatus,
+    Position,
     ProposedAction,
     RuleHit,
     RunManifest,
@@ -40,6 +44,8 @@ from tradekit.contracts._thesis import AssetRef, EntrySpec, EVBlock, ThesisContr
 # variant schema carries its `kind` discriminator, which is what a non-Python
 # agent needs to author one.
 _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
+    AccountConfig,
+    AccountState,
     AssetRef,
     Bar,
     BarSeries,
@@ -58,6 +64,8 @@ _PUBLIC_MODELS: tuple[type[FrozenModel], ...] = (
     MeasurableInvalidation,
     OrderAck,
     OrderRequest,
+    OrderStatus,
+    Position,
     PriceClose,
     PriceTouch,
     ProposedAction,

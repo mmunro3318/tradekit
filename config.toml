@@ -14,12 +14,15 @@
 # R-004: live-account asset allowlist (liquid large-caps + BTC/ETH, SME §5).
 allowed_assets_live = ["BTC/USD", "ETH/USD", "AAPL", "MSFT", "SPY"]
 
-# R-005: max single-position notional.
-max_position_usd_live = "25"
+# R-005: max single-position notional. Live is a FRACTION of AccountConfig
+# .principal_usd (TD-24, Mike-signed 2026-07-17; was a flat "25" — 0.05 *
+# $500 default principal = $25, numerically unchanged for the default account).
+max_position_pct_live = "0.05"
 max_position_pct_paper = "0.10"
 
-# R-006: max total live exposure (D12).
-max_total_live_exposure_usd = "100"
+# R-006: max total live exposure (D12) — FRACTION of principal (TD-24; was
+# a flat "100"; 0.20 * $500 = $100, unchanged for the default account).
+max_total_live_exposure_pct = "0.20"
 
 # R-007: daily trade count caps.
 max_daily_trades_live = 3
@@ -40,13 +43,29 @@ sizing_tolerance_pct = "0.01"
 # R-013: correlation cap.
 correlation_cap = "0.75"
 
-# R-014: advisory cooling-off (manual trades > this need thesis age >= this).
-cooling_off_notional_usd = "200"
+# R-014: advisory cooling-off (manual trades over this FRACTION of principal
+# need thesis age >= this). TD-24: was a flat "200"; 0.40 * $500 = $200,
+# unchanged for the default account.
+cooling_off_pct = "0.40"
 cooling_off_hours = 24
 
 # R-015: VOID-rate audit window + cap.
 void_rate_window = 20
 void_rate_cap_pct = "0.20"
+
+# R-017/R-018 (TD-24): account-wide DEFAULT drawdown gates, config.toml
+# layer — unset (commented) means "disabled by default"; per-account
+# AccountConfig fields (max_daily_drawdown / max_lifetime_drawdown) always
+# win over these when set. Left absent here deliberately: P2's default
+# account (paper:alpha) gets no implicit R-017/R-018 enforcement until an
+# AccountConfig explicitly sets one.
+# max_daily_drawdown_default = "0.03"
+# max_lifetime_drawdown_default = "0.25"
+
+# TD-24: `tk account create-paper` fills AccountConfig.max_trades_per_day
+# from this dial when a config file omits it — 0 = paper/sim only
+# (Mike's sketch: no live-trade budget granted by default).
+max_trades_per_day_default = 0
 
 # Series/promotion (batch D consumes these; dials land now per the CTO pin).
 series_epoch = "2026-01-01T00:00:00Z"

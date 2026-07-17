@@ -15,8 +15,8 @@ from typing import Annotated, Any
 import typer
 
 import tradekit
-from tradekit import policy, thesis
-from tradekit.contracts import EventFilter, json_schemas
+from tradekit import broker, policy, thesis
+from tradekit.contracts import AccountConfig, EventFilter, json_schemas
 from tradekit.ledger import default_ledger
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -26,12 +26,14 @@ thesis_app = typer.Typer(no_args_is_help=True)
 grade_app = typer.Typer(no_args_is_help=True)
 policy_app = typer.Typer(no_args_is_help=True)
 promote_app = typer.Typer(no_args_is_help=True)
+account_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
 app.add_typer(grade_app, name="grade", help="Grading (§10.2).")
 app.add_typer(policy_app, name="policy", help="Policy engine (§7).")
 app.add_typer(promote_app, name="promote", help="Promotion ladder (§7.3).")
+app.add_typer(account_app, name="account", help="Named accounts (§8, TD-24).")
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -266,6 +268,34 @@ def promote_confirm() -> None:
     batch D)."""
     _guard_not_implemented(policy.confirm_promotion)
     typer.echo("promotion confirmed")
+
+
+@account_app.command("create-paper")
+def account_create_paper(
+    config: Annotated[Path, typer.Option("--config", help="Path to a JSON AccountConfig.")],
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """TD-24: `tk account create-paper` — validate the JSON config (filling
+    `max_trades_per_day`/`max_daily_drawdown`/`max_lifetime_drawdown` from
+    config.toml defaults when the file omits them) and ledger AccountCreated.
+    A duplicate `account_ref` is a clean nonzero exit, not a traceback."""
+    from tradekit.policy import _dials
+
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    dials = _dials.PolicyDials.load()
+    raw.setdefault("max_trades_per_day", dials.max_trades_per_day_default)
+    raw.setdefault("max_daily_drawdown", dials.max_daily_drawdown_default)
+    raw.setdefault("max_lifetime_drawdown", dials.max_lifetime_drawdown_default)
+    account_config = AccountConfig(**raw)
+    try:
+        account_ref = broker.create_paper_account(account_config)
+    except broker.AccountAlreadyExists as exc:
+        typer.echo(f"account already exists: {exc.account_ref}")
+        raise typer.Exit(code=1) from exc
+    if as_json:
+        typer.echo(json.dumps({"account_ref": account_ref}))
+    else:
+        typer.echo(account_ref)
 
 
 if __name__ == "__main__":

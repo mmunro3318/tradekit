@@ -49,6 +49,7 @@ event past that window's end.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -138,6 +139,15 @@ _TABLES: dict[str, str] = {
           updated_ts               TEXT NOT NULL
         )
     """,
+    # SPRINT P3 batch A (TD-24): one row per `AccountCreated` event.
+    "accounts": """
+        CREATE TABLE IF NOT EXISTS accounts (
+          account_ref     TEXT PRIMARY KEY,
+          principal_usd   TEXT NOT NULL,
+          config          TEXT NOT NULL,
+          created_ts      TEXT NOT NULL
+        )
+    """,
 }
 
 # GUARDED (from_state, event_type) -> to_state table for the "simple"
@@ -210,6 +220,24 @@ def _apply(con: sqlite3.Connection, event: Event) -> None:
                 "INSERT INTO config_versions VALUES (?, ?, ?)",
                 (payload.get("config_version"), ts, event.actor),
             )
+    elif event.type == "AccountCreated":
+        # SPRINT P3 batch A (TD-24): idempotent by account_ref (INSERT OR
+        # REPLACE, same discipline as `runs`/`theses` above) — a
+        # duplicate-account_ref append is refused at the producer
+        # (`broker.create_paper_account`'s `AccountAlreadyExists`), so this
+        # projection never actually SEES two AccountCreated events for the
+        # same account_ref in a well-formed log, but rebuild must still be a
+        # pure function of whatever the log contains.
+        config = payload.get("config", {})
+        con.execute(
+            "INSERT OR REPLACE INTO accounts VALUES (?, ?, ?, ?)",
+            (
+                payload.get("account_ref"),
+                str(config.get("principal_usd", "")),
+                json.dumps(config, sort_keys=True),
+                ts,
+            ),
+        )
     elif event.type == "ThesisDrafted":
         # Minimal, real handling (NOT a stub): a fresh thesis starts life in
         # `draft`. Deliberately defensive about payload shape — the

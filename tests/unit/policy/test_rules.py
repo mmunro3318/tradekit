@@ -161,15 +161,58 @@ def test_r005_paper_denies_50_dollars_and_one_cent_notional_at_500_equity() -> N
     assert hit.outcome == "fail"
 
 
+# TD-24 migration (SPRINT P3 batch A, Mike-signed 2026-07-17): R-005's LIVE
+# leg moved from a flat $25 dial to 5% of account principal — these are the
+# NEW-semantics boundary tests (0.05 * 500 = 25.00), added fresh this batch
+# (the live leg had no pre-existing test_rules.py coverage to preserve).
+
+
+def test_r005_live_allows_exactly_25_dollars_notional_at_500_principal() -> None:
+    # 0.05 * 500 = 25.00; notional = 1 * 25.00 = 25.00 <= 25.00 -> allow
+    order = _order(account_ref="live:alpaca", limit_price="25.00")
+    action = _action(account_ref="live:alpaca", order=order)
+    hit = RULES_BY_ID["R-005"].check(action, _ctx(account_principal_usd=Decimal("500")))
+    assert hit.outcome == "pass"
+    assert hit.measured == "25.00" and hit.limit == "25.00"
+
+
+def test_r005_live_denies_25_dollars_and_one_cent_notional_at_500_principal() -> None:
+    # notional = 1 * 25.01 = 25.01 > 25.00 -> deny
+    order = _order(account_ref="live:alpaca", limit_price="25.01")
+    action = _action(account_ref="live:alpaca", order=order)
+    hit = RULES_BY_ID["R-005"].check(action, _ctx(account_principal_usd=Decimal("500")))
+    assert hit.outcome == "fail"
+
+
+def test_r005_live_denies_insufficient_context_with_no_principal() -> None:
+    order = _order(account_ref="live:alpaca", limit_price="25.00")
+    action = _action(account_ref="live:alpaca", order=order)
+    hit = RULES_BY_ID["R-005"].check(action, _ctx())
+    assert hit.outcome == "fail"
+    assert hit.measured == "insufficient_context:account_principal_usd"
+
+
 # ---------------------------------------------------------------------------
 # R-006 — max total live exposure (freeze gate: 80 + 20.00 = 100.00 <= 100)
+#
+# TD-24 migration (SPRINT P3 batch A, Mike-signed 2026-07-17): the dial
+# moved from a flat max_total_live_exposure_usd=$100 to
+# max_total_live_exposure_pct(0.20) * account_principal_usd — the boundary
+# VALUES below are UNCHANGED (0.20 * 500 = 100.00, identical to the old flat
+# $100), but the check now requires `account_principal_usd` in context,
+# so `_ctx(...)` gains that one extra kwarg. Flagged per the sprint
+# addendum's "enumerate any test whose dial VALUE legitimately moved" — the
+# VALUE did not move, only the context SHAPE (a new required field) did;
+# see the batch's final report for the full enumeration.
 # ---------------------------------------------------------------------------
 
 
 def test_r006_allows_when_projected_exposure_equals_the_cap() -> None:
     order = _order(account_ref="live:alpaca", limit_price="20.00")
     action = _action(account_ref="live:alpaca", order=order)
-    hit = RULES_BY_ID["R-006"].check(action, _ctx(live_exposure_usd=Decimal("80")))
+    hit = RULES_BY_ID["R-006"].check(
+        action, _ctx(live_exposure_usd=Decimal("80"), account_principal_usd=Decimal("500"))
+    )
     assert hit.outcome == "pass"
 
 
@@ -177,8 +220,18 @@ def test_r006_denies_when_projected_exposure_exceeds_the_cap_by_a_cent() -> None
     # 80 + 20.01 = 100.01 > 100
     order = _order(account_ref="live:alpaca", limit_price="20.01")
     action = _action(account_ref="live:alpaca", order=order)
+    hit = RULES_BY_ID["R-006"].check(
+        action, _ctx(live_exposure_usd=Decimal("80"), account_principal_usd=Decimal("500"))
+    )
+    assert hit.outcome == "fail"
+
+
+def test_r006_denies_insufficient_context_with_no_principal() -> None:
+    order = _order(account_ref="live:alpaca", limit_price="20.00")
+    action = _action(account_ref="live:alpaca", order=order)
     hit = RULES_BY_ID["R-006"].check(action, _ctx(live_exposure_usd=Decimal("80")))
     assert hit.outcome == "fail"
+    assert hit.measured == "insufficient_context:account_principal_usd"
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +365,11 @@ def test_r013_denies_above_the_correlation_cap() -> None:
 
 # ---------------------------------------------------------------------------
 # R-014 — advisory cooling-off (freeze gate: >$200 needs thesis age >= 24h)
+#
+# TD-24 migration: dial moved from a flat cooling_off_notional_usd=$200 to
+# cooling_off_pct(0.40) * account_principal_usd — VALUES unchanged (0.40 *
+# 500 = 200.00), context now needs account_principal_usd (same flagged
+# shape-only change as R-006 above).
 # ---------------------------------------------------------------------------
 
 
@@ -320,7 +378,9 @@ def test_r014_allows_an_aged_thesis_above_the_notional_threshold() -> None:
         account_ref="advisory:kraken",
         order=_order(account_ref="advisory:kraken", limit_price="250.00"),
     )
-    hit = RULES_BY_ID["R-014"].check(action, _ctx(thesis_age_hours=Decimal("30")))
+    hit = RULES_BY_ID["R-014"].check(
+        action, _ctx(thesis_age_hours=Decimal("30"), account_principal_usd=Decimal("500"))
+    )
     assert hit.outcome == "pass"
 
 
@@ -329,8 +389,31 @@ def test_r014_denies_a_fresh_thesis_above_the_notional_threshold() -> None:
         account_ref="advisory:kraken",
         order=_order(account_ref="advisory:kraken", limit_price="250.00"),
     )
-    hit = RULES_BY_ID["R-014"].check(action, _ctx(thesis_age_hours=Decimal("10")))
+    hit = RULES_BY_ID["R-014"].check(
+        action, _ctx(thesis_age_hours=Decimal("10"), account_principal_usd=Decimal("500"))
+    )
     assert hit.outcome == "fail"
+
+
+def test_r014_allows_exactly_at_the_40_percent_of_principal_boundary_with_no_age_check() -> None:
+    # 0.40 * 500 = 200.00; notional == threshold -> allow, no age needed
+    # (mirrors the pre-existing "notional <= threshold" allow branch).
+    action = _action(
+        account_ref="advisory:kraken",
+        order=_order(account_ref="advisory:kraken", limit_price="200.00"),
+    )
+    hit = RULES_BY_ID["R-014"].check(action, _ctx(account_principal_usd=Decimal("500")))
+    assert hit.outcome == "pass"
+
+
+def test_r014_denies_insufficient_context_with_no_principal() -> None:
+    action = _action(
+        account_ref="advisory:kraken",
+        order=_order(account_ref="advisory:kraken", limit_price="250.00"),
+    )
+    hit = RULES_BY_ID["R-014"].check(action, _ctx(thesis_age_hours=Decimal("30")))
+    assert hit.outcome == "fail"
+    assert hit.measured == "insufficient_context:account_principal_usd"
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +451,123 @@ def test_r016_denies_when_the_stubbed_metrics_summary_fails_gates() -> None:
 
 
 # ---------------------------------------------------------------------------
+# R-017 — max_daily_drawdown (TD-24, SPRINT P3 batch A, Mike-signed
+# 2026-07-17). FIXTURE-FREEZE: -15.00 = 0.03 * 500 exactly (allow, <=);
+# -15.01 is one cent past the 3% dial (deny).
+# ---------------------------------------------------------------------------
+
+
+def test_r017_allows_exactly_at_the_configured_daily_drawdown_boundary() -> None:
+    # dial 0.03; daily pnl -15.00 -> loss_fraction = 15.00/500 = 0.03 == dial -> allow
+    hit = RULES_BY_ID["R-017"].check(
+        _action(),
+        _ctx(
+            account_max_daily_drawdown=Decimal("0.03"),
+            daily_pnl_fraction=Decimal("-15.00") / Decimal("500"),
+        ),
+    )
+    assert hit.outcome == "pass"
+
+
+def test_r017_denies_one_cent_past_the_configured_daily_drawdown_boundary() -> None:
+    # daily pnl -15.01 -> loss_fraction = 15.01/500 = 0.03002 > 0.03 -> deny
+    hit = RULES_BY_ID["R-017"].check(
+        _action(),
+        _ctx(
+            account_max_daily_drawdown=Decimal("0.03"),
+            daily_pnl_fraction=Decimal("-15.01") / Decimal("500"),
+        ),
+    )
+    assert hit.outcome == "fail"
+
+
+def test_r017_emits_not_configured_when_the_dial_is_disabled() -> None:
+    # account_max_daily_drawdown resolves to None (AccountConfig + dial both
+    # unset) — the rule is still CONSULTED (audit trail), never a silent skip.
+    hit = RULES_BY_ID["R-017"].check(
+        _action(), _ctx(account_max_daily_drawdown=None, daily_pnl_fraction=Decimal("-0.50"))
+    )
+    assert hit.outcome == "not_configured"
+
+
+def test_r017_not_configured_does_not_deny_the_overall_verdict() -> None:
+    """`not_configured` must roll up as allow, not deny, in `evaluate_pure`
+    (the pure core rolling multiple RuleHits into one Verdict) — a rule
+    consulted-but-disabled cannot itself block a submission."""
+    from tradekit.policy._evaluate import evaluate_pure
+
+    action = _action(kind="submit_order")
+    ctx = _ctx(
+        halted=False,
+        account_tier="T1",
+        settled_balance_usd=Decimal("1000"),
+        account_equity_usd=Decimal("1000"),
+        trades_today_count=0,
+        trailing_30d_drawdown_pct=Decimal("0"),
+        thesis_review_artifact_id="RA-1",
+        thesis_market_snapshot_id="SNAP-1",
+        thesis_ev_ok=True,
+        recorded_sizing_usd=Decimal("10.00"),
+        account_max_daily_drawdown=None,
+        account_max_lifetime_drawdown=None,
+    )
+    rule = RULES_BY_ID["R-017"]
+    verdict = evaluate_pure(action, ctx, "hash-1", (rule,))
+    assert verdict.allow is True
+    assert verdict.rule_hits[0].outcome == "not_configured"
+
+
+# ---------------------------------------------------------------------------
+# R-018 — max_lifetime_drawdown (TD-24). Same shape as R-017, over
+# `lifetime_drawdown_fraction` instead of `daily_pnl_fraction`.
+# ---------------------------------------------------------------------------
+
+
+def test_r018_allows_exactly_at_the_configured_lifetime_drawdown_boundary() -> None:
+    hit = RULES_BY_ID["R-018"].check(
+        _action(),
+        _ctx(
+            account_max_lifetime_drawdown=Decimal("0.25"),
+            lifetime_drawdown_fraction=Decimal("0.25"),
+        ),
+    )
+    assert hit.outcome == "pass"
+
+
+def test_r018_denies_past_the_configured_lifetime_drawdown_boundary() -> None:
+    hit = RULES_BY_ID["R-018"].check(
+        _action(),
+        _ctx(
+            account_max_lifetime_drawdown=Decimal("0.25"),
+            lifetime_drawdown_fraction=Decimal("0.2501"),
+        ),
+    )
+    assert hit.outcome == "fail"
+
+
+def test_r018_emits_not_configured_when_the_dial_is_disabled() -> None:
+    hit = RULES_BY_ID["R-018"].check(
+        _action(),
+        _ctx(account_max_lifetime_drawdown=None, lifetime_drawdown_fraction=Decimal("0.10")),
+    )
+    assert hit.outcome == "not_configured"
+
+
+def test_r018_denies_insufficient_context_when_configured_but_no_fraction_known() -> None:
+    hit = RULES_BY_ID["R-018"].check(
+        _action(), _ctx(account_max_lifetime_drawdown=Decimal("0.25"))
+    )
+    assert hit.outcome == "fail"
+    assert hit.measured == "insufficient_context:lifetime_drawdown_fraction"
+
+
+# ---------------------------------------------------------------------------
 # Registry shape
 # ---------------------------------------------------------------------------
 
 
-def test_every_rule_id_r001_through_r016_is_registered_with_a_nonempty_why() -> None:
-    expected = {f"R-{i:03d}" for i in range(1, 17)}
+def test_every_rule_id_r001_through_r018_is_registered_with_a_nonempty_why() -> None:
+    expected = {f"R-{i:03d}" for i in range(1, 19)}
     assert set(RULES_BY_ID) == expected
     for rule in RULES_BY_ID.values():
         assert rule.why.strip(), f"{rule.id} has an empty WHY — Mike-facing text is mandatory"

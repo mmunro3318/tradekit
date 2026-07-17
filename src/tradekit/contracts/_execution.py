@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, field_validator
 
 from tradekit.contracts._base import FrozenModel
 from tradekit.contracts._thesis import AssetRef
@@ -19,7 +19,12 @@ from tradekit.contracts._thesis import AssetRef
 
 class RuleHit(FrozenModel):
     rule_id: str  # stable forever (§7.2)
-    outcome: Literal["pass", "fail"]
+    # "not_configured" (SPRINT P3 batch A, TD-24): a rule whose backing dial
+    # is None (disabled) is still CONSULTED — it emits a hit so the audit
+    # trail shows the rule ran, distinct from "pass" (a real check that
+    # allowed) and "fail" (a real check that denied). The verdict's overall
+    # allow/deny is unaffected by a not_configured hit (CTO addendum).
+    outcome: Literal["pass", "fail", "not_configured"]
     measured: str | None = None  # rendered value — rule-dependent type, audit-facing
     limit: str | None = None  # the dial the measurement was held against
 
@@ -97,3 +102,86 @@ class RunManifest(FrozenModel):
     prompt: str  # verbatim (D15)
     prompt_sha256: str
     config_version: int
+
+
+# ---------------------------------------------------------------------------
+# SPRINT P3 batch A — BrokerPort contracts (DESIGN §8.1) + TD-24 AccountConfig.
+# ---------------------------------------------------------------------------
+
+
+class AccountState(FrozenModel):
+    """`BrokerPort.account()`'s return shape (§8.1): "equity, settled cash,
+    buying power". `Decimal` end-to-end — every field here is money."""
+
+    account_ref: str
+    equity_usd: Decimal
+    settled_cash_usd: Decimal
+    buying_power_usd: Decimal
+
+
+class Position(FrozenModel):
+    """One row of `BrokerPort.positions()` (§8.1). `market_value_usd` is
+    `None` when no live quote is available to mark it (e.g. a stale/absent
+    cache entry) — never a fabricated value."""
+
+    account_ref: str
+    symbol: str
+    qty: Decimal
+    avg_price: Decimal
+    market_value_usd: Decimal | None = None
+
+
+class OrderStatus(FrozenModel):
+    """`BrokerPort.order_status(order_id)`'s return shape (§8.1)."""
+
+    order_id: str
+    status: Literal["open", "partially_filled", "filled", "canceled", "rejected"]
+    filled_qty: Decimal = Decimal("0")
+    remaining_qty: Decimal | None = None
+
+
+class AccountConfig(FrozenModel):
+    """Per-account dial overrides (TD-24, Mike-signed 2026-07-17). `None` on
+    any of the four optional gates below means the corresponding rule
+    (R-017/R-018; `max_daily_profit`/`consistency_rule` are accepted slots
+    with NO enforcing rule in P3) is DISABLED for this account — never
+    `+/-Infinity`, and never silently treated as "no context" (the rule
+    still runs and emits a `RuleHit(outcome="not_configured")`, ASSUMPTIONS
+    round-16).
+
+    `principal_usd` is quantized to whole cents (2dp) — money is Decimal
+    end-to-end (TD-3) and a sub-cent principal is not a real dollar amount
+    a broker could ever hold; more than 2 fractional digits is a
+    `ValidationError`, not a silent round (an agent-authored config file
+    with a typo'd principal must die at construction, not misprice every
+    dial that scales off it)."""
+
+    account_ref: str
+    principal_usd: Decimal
+    max_trades_per_day: int = Field(ge=0)
+    max_daily_drawdown: Decimal | None = None  # fraction of principal, None = disabled
+    max_lifetime_drawdown: Decimal | None = None  # fraction of principal, None = disabled
+    max_daily_profit: Decimal | None = None  # accepted slot, NO enforcing rule in P3
+    consistency_rule: str | None = None  # opaque; accepted slot, NO enforcing rule in P3
+
+    @field_validator("principal_usd")
+    @classmethod
+    def _principal_at_most_two_decimal_places(cls, v: Decimal) -> Decimal:
+        exponent = v.as_tuple().exponent
+        # `exponent` is an int for a finite Decimal (never the 'n'/'F'/'N'
+        # special-value string here — AwareDatetime-style special values
+        # don't apply to plain Decimal); more negative than -2 means more
+        # than 2 fractional digits, e.g. Decimal("1.005") -> exponent -3.
+        if isinstance(exponent, int) and exponent < -2:
+            raise ValueError(
+                f"principal_usd={v} carries more than 2 decimal places — money is "
+                "quantized to whole cents (TD-3)"
+            )
+        return v
+
+    @field_validator("max_daily_drawdown", "max_lifetime_drawdown", "max_daily_profit")
+    @classmethod
+    def _fraction_dials_are_non_negative(cls, v: Decimal | None) -> Decimal | None:
+        if v is not None and v < 0:
+            raise ValueError(f"fraction dial {v} must be >= 0 (None disables it, not negative)")
+        return v

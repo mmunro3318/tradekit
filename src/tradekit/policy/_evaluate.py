@@ -57,7 +57,11 @@ def evaluate_pure(
     `GateViolationDetected` around this pure call."""
     applicable = tuple(rule for rule in rules if action.kind in rule.applies_to)
     hits = [rule.check(action, ctx) for rule in applicable]
-    allow = all(hit.outcome == "pass" for hit in hits)
+    # "not_configured" (TD-24, SPRINT P3 batch A) is a disabled-rule audit
+    # marker, not a denial. ALLOWLIST, not a fail-blocklist: an outcome value
+    # this code doesn't know about must fail CLOSED (anti-permissive), so a
+    # future RuleHit.outcome addition can never silently allow.
+    allow = all(hit.outcome in ("pass", "not_configured") for hit in hits)
     verdict_id = _deterministic_verdict_id(action, ctx, policy_version_hash, hits)
     return Verdict(
         verdict_id=verdict_id,

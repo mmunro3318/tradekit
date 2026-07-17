@@ -167,6 +167,12 @@ def _allow_ctx() -> PolicyContext:
         thesis_market_snapshot_id="SNAP-1",
         thesis_ev_ok=True,
         recorded_sizing_usd=Decimal("10.00"),
+        # TD-24 (SPRINT P3 batch A): R-006/R-014 (and R-005's live leg) now
+        # scale off account_principal_usd rather than a flat-dollar dial —
+        # paper:alpha's implicit principal is the same $500 as its equity
+        # above, so every pre-existing allow-path assertion in this file
+        # keeps passing unchanged.
+        account_principal_usd=Decimal("500"),
     )
 
 
@@ -206,7 +212,10 @@ def test_evaluate_pure_allow_verdict_has_no_failing_rule_hits() -> None:
     version_hash = policy_version_hash(ctx.dials, list(RULE_IDS))
     verdict = _evaluate.evaluate_pure(action, ctx, version_hash, RULES)
     assert verdict.allow is True
-    assert all(hit.outcome == "pass" for hit in verdict.rule_hits)
+    # R-017/R-018 (TD-24, SPRINT P3 batch A) legitimately emit
+    # "not_configured", not "pass", when their dial is unset (as it is for
+    # _allow_ctx()'s default account) — that outcome must never deny.
+    assert all(hit.outcome != "fail" for hit in verdict.rule_hits)
 
 
 def test_evaluate_pure_deny_verdict_carries_the_denying_rule_hit() -> None:
@@ -280,7 +289,7 @@ def test_evaluate_appends_config_changed_when_the_hash_differs_from_last_recorde
     policy.evaluate(_allow_action())  # first hash recorded
 
     config = tmp_path / "changed.toml"
-    config.write_text('max_position_usd_live = "999"\n', encoding="utf-8")
+    config.write_text('max_position_pct_live = "0.99"\n', encoding="utf-8")
     monkeypatch.setenv("TK_CONFIG_PATH", str(config))
 
     policy.evaluate(_allow_action())  # different dials -> different hash

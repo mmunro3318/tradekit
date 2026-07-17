@@ -321,7 +321,19 @@ class ConfigChangedPayload(StrictFrozenModel):
     dials: dict[str, Any]
 
 
+class AccountCreatedPayload(StrictFrozenModel):
+    """Producer: `tradekit.broker.create_paper_account` (SPRINT P3 batch A,
+    TD-24). `config` is the full `AccountConfig`, `model_dump(mode="json")`'d
+    — same "carry the whole contract so a reader never needs a second
+    lookup" convention as `ThesisDraftedPayload.contract` above."""
+
+    account_ref: str
+    config: dict[str, Any]
+    created_ts: AwareDatetime
+
+
 __all__ = [
+    "AccountCreatedPayload",
     "ActionProposedPayload",
     "ConfigChangedPayload",
     "DemotedPayload",

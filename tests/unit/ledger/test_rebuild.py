@@ -587,6 +587,64 @@ def test_config_changed_policy_shaped_payload_inserts_no_config_versions_row(
     )
 
 
+# ---------------------------------------------------------------------------
+# SPRINT P3 batch A (TD-24): `accounts` projection — one row per
+# `AccountCreated` event, idempotent rebuild extension (same pattern as
+# batch A's `theses`/`pnl_daily`/`series`/`promotion_state` tests above).
+# ---------------------------------------------------------------------------
+
+
+def test_accounts_table_exists_after_rebuild(ledger, read_model_snapshot) -> None:
+    ledger.rebuild()
+    assert "accounts" in read_model_snapshot()
+
+
+def test_accounts_projection_materializes_a_row_from_account_created(
+    ledger, make_event, raw_sql
+) -> None:
+    ledger.append(
+        make_event(
+            type="AccountCreated",
+            payload={
+                "account_ref": "paper:alpha-test",
+                "config": {
+                    "account_ref": "paper:alpha-test",
+                    "principal_usd": "500.00",
+                    "max_trades_per_day": 0,
+                    "max_daily_drawdown": None,
+                    "max_lifetime_drawdown": None,
+                    "max_daily_profit": None,
+                    "consistency_rule": None,
+                },
+                "created_ts": "2026-07-17T00:00:00Z",
+            },
+        )
+    )
+    ledger.rebuild()
+    rows = raw_sql(
+        "SELECT account_ref, principal_usd FROM accounts WHERE account_ref = 'paper:alpha-test'"
+    )
+    assert rows == [("paper:alpha-test", "500.00")]
+
+
+def test_accounts_projection_rebuild_is_idempotent(ledger, make_event, read_model_snapshot) -> None:
+    ledger.append(
+        make_event(
+            type="AccountCreated",
+            payload={
+                "account_ref": "paper:idem",
+                "config": {"account_ref": "paper:idem", "principal_usd": "1000.00"},
+                "created_ts": "2026-07-17T00:00:00Z",
+            },
+        )
+    )
+    ledger.rebuild()
+    first = read_model_snapshot()["accounts"]
+    ledger.rebuild()
+    second = read_model_snapshot()["accounts"]
+    assert second == first
+
+
 def test_config_changed_p0_shaped_payload_still_inserts_config_versions_row(
     ledger, make_event, raw_sql
 ) -> None:
