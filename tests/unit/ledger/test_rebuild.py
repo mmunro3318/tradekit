@@ -326,6 +326,29 @@ def ledger_with_one_clean_series(ledger, make_event):
                 },
             )
         )
+    # MEDIUM (review round-14): `complete` is derived from the event LOG's
+    # own max ts_utc, not wall-clock `datetime.now(UTC)` (module docstring +
+    # ASSUMPTIONS — projection completeness is log-relative). The graded
+    # theses above only reach Jan 10 2026, short of series 0's window_end
+    # (Jan 31 2026 == start + 30d) — without evidence in the log that time
+    # has moved past window_end, a pure rebuild cannot call the window
+    # closed. This harness-appended marker event (an unrelated, never-graded
+    # ThesisDrafted, ts_utc == window_end exactly) is that evidence: it is
+    # the ONLY thing that makes this fixture's series-0 row `complete` under
+    # the log-derived rule, and it is deliberately inert for series-0's own
+    # arithmetic (a bare ThesisDrafted contributes no ThesisGraded/
+    # GateViolationDetected data `_materialize_series` reads).
+    ledger.append(
+        make_event(
+            type="ThesisDrafted",
+            ts=start + timedelta(days=30),
+            payload={
+                "thesis_id": "th-clean-series-log-clock-marker",
+                "contract": {"account_ref": "paper:marker"},
+                "supersedes": None,
+            },
+        )
+    )
     return ledger
 
 
@@ -460,3 +483,122 @@ def test_projection_series_constants_stay_synced_with_policy_dials_defaults() ->
     dials = PolicyDials.load()
     assert _projections._SERIES_EPOCH == dials.series_epoch
     assert _projections._PAPER_STARTING_EQUITY_USD == dials.paper_starting_equity_usd
+
+
+# ---------------------------------------------------------------------------
+# MEDIUM (review round-14): `series.complete` is log-derived, not
+# wall-clock-derived. `rebuild()`'s own interface docstring promises "output
+# depends on the event log alone" — `datetime.now(UTC)` for the completeness
+# flag breaks that: two rebuilds of the SAME log, run on two different days,
+# must agree forever, which only holds if "now" is itself something the log
+# can prove (the log's own max ts_utc), not the wall clock the rebuild
+# happens to run on.
+# ---------------------------------------------------------------------------
+
+
+def test_series_complete_is_derived_from_the_event_logs_own_max_ts_not_wall_clock(
+    ledger, make_event, raw_sql
+) -> None:
+    """Ten graded non-void `paper:alpha` theses spanning Jan 1-10 2026
+    (series 0's window is Jan 1 - Jan 31 2026, `window_end` = Jan 31) — with
+    NO later event anywhere in the log to prove time has moved past
+    `window_end`. Real wall-clock `now` when this suite runs is far past Jan
+    31 2026 (see `tests/conftest.py`'s ambient date) — a wall-clock-derived
+    `complete` would read `True` here. A log-derived `complete` must read
+    `False`: the log alone contains no evidence any instant past `window_end`
+    ever occurred, so a pure re-derivation from the log cannot claim the
+    window is closed. This is the discriminator: it fails under the old
+    `datetime.now(UTC)` implementation and passes under the log-max-ts fix."""
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    pnls = ["5.874", "-2.10", "1.00", "0", "0", "0", "0", "0", "0", "0"]
+    for i, pnl in enumerate(pnls):
+        thesis_id = f"th-log-clock-{i}"
+        ts = start + timedelta(days=i)
+        ledger.append(
+            make_event(
+                type="ThesisDrafted",
+                ts=start,
+                payload={
+                    "thesis_id": thesis_id,
+                    "contract": {"account_ref": "paper:alpha"},
+                    "supersedes": None,
+                },
+            )
+        )
+        ledger.append(
+            make_event(
+                type="ThesisGraded",
+                ts=ts,
+                payload={
+                    "thesis_id": thesis_id,
+                    "outcome": "PASS",
+                    "measured": [],
+                    "ambiguous_bar": False,
+                    "pnl_usd": pnl,
+                    "graded_ts": ts.isoformat(),
+                },
+            )
+        )
+    ledger.rebuild()
+    rows = raw_sql(
+        "SELECT complete FROM series WHERE account_ref = 'paper:alpha' AND series_index = 0"
+    )
+    assert len(rows) == 1
+    assert rows[0][0] == 0, (
+        "the log's own max ts_utc (Jan 10 2026) never reaches series 0's window_end "
+        "(Jan 31 2026) — `complete` must stay False regardless of wall-clock `now`, "
+        "which in this test environment is already far past Jan 31 2026"
+    )
+
+
+# ---------------------------------------------------------------------------
+# LOW-2 (review round-14): ConfigChanged shape collision. `_apply`'s
+# ConfigChanged branch unconditionally inserted `payload.get("config_version")`
+# into `config_versions` — for P0-shaped payloads (`{"config_version": int,
+# ...}`) that's correct, but `policy`'s own `ConfigChangedPayload`
+# (`previous_hash`/`new_hash`/`dials`, no `config_version` key at all)
+# produces a NULL-junk row instead of being skipped.
+# ---------------------------------------------------------------------------
+
+
+def test_config_changed_policy_shaped_payload_inserts_no_config_versions_row(
+    ledger, make_event, raw_sql
+) -> None:
+    """A policy-shaped `ConfigChanged` (`previous_hash`/`new_hash`/`dials`,
+    no `config_version` key) must not produce a NULL-junk `config_versions`
+    row."""
+    ledger.append(
+        make_event(
+            type="ConfigChanged",
+            payload={
+                "previous_hash": None,
+                "new_hash": "a" * 64,
+                "dials": {"paper_starting_equity_usd": "500"},
+            },
+        )
+    )
+    ledger.rebuild()
+    rows = raw_sql("SELECT * FROM config_versions")
+    assert rows == [], (
+        f"expected zero config_versions rows for a policy-shaped ConfigChanged payload "
+        f"(no 'config_version' key), got {rows}"
+    )
+
+
+def test_config_changed_p0_shaped_payload_still_inserts_config_versions_row(
+    ledger, make_event, raw_sql
+) -> None:
+    """Control: a P0-shaped `ConfigChanged` (`config_version` key present)
+    must still insert its row — the LOW-2 fix is a guard on ABSENCE of the
+    key, not a blanket skip of the whole branch."""
+    ledger.append(
+        make_event(
+            type="ConfigChanged",
+            payload={"config_version": 7},
+        )
+    )
+    ledger.rebuild()
+    rows = raw_sql("SELECT config_version FROM config_versions")
+    assert rows == [(7,)]

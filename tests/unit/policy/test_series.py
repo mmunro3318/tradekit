@@ -306,3 +306,100 @@ def test_series_stats_scoped_to_account_ref(ledger) -> None:
     stats = _series.series_stats(ledger, ACCOUNT, 0, DIALS, NOW_WINDOW_CLOSED)
     assert stats.graded_count == 10, "only paper:alpha's ten theses should be counted"
     assert stats.expectancy == Decimal("1"), "paper:beta's pnl must never leak into this mean"
+
+
+# ---------------------------------------------------------------------------
+# HIGH (review round-14): equity_entering must be scoped to account_ref.
+#
+# `_series.series_stats` (and its byte-for-byte twin,
+# `ledger._projections._materialize_series`) computed `equity_entering` by
+# summing `ThesisGraded.pnl_usd` over EVERY account before the window — no
+# account filter — while the in-window MDD walk IS per-account. Dangerous
+# direction: a winning SIBLING account's pre-window pnl inflates the pooled
+# base, which shrinks `mdd_pct` (same numerator, bigger denominator) and can
+# turn a genuinely dirty series clean.
+# ---------------------------------------------------------------------------
+
+
+def _seed_two_account_pooling_bug_fixture(ledger) -> None:
+    """FREEZE-GATE ARITHMETIC (discriminating fixture, equivalent to the
+    reviewer's probe):
+
+    Account `paper:alpha`'s OWN in-window graded pnls are the pre-existing
+    dirty-MDD freeze fixture from
+    `test_series_stats_not_clean_when_mdd_pct_at_or_above_15_pct`:
+    +250, -130, +40, then seven 0.00 (graded_count=10, expectancy = 160/10 =
+    16 > 0). Walked against A's OWN entering equity (paper_starting_equity_usd
+    == 500, no prior A history): 500 -> 750 (peak) -> 620 -> 660 -> flat.
+    mdd_usd = 750 - 620 = 130; mdd_pct = 130 / 750 = 0.17333333333333334
+    (>= 0.15 -> DIRTY on A's own base).
+
+    Sibling account `paper:beta` has ONE graded thesis, pnl +900, timestamped
+    one day BEFORE the window start (EPOCH). Under the bug, this pnl is
+    pooled into A's `equity_entering` (500 + 900 = 1400) even though it
+    belongs to a different account. Walked against the POOLED base: 1400 ->
+    1650 (peak) -> 1520 -> 1560 -> flat. mdd_usd is still 130 (A's own walk
+    is unchanged), but mdd_pct = 130 / 1650 = 0.0787878787878788 (< 0.15 ->
+    falsely CLEAN). expectancy (16) and gate_violations (0) are identical
+    either way, so this fixture isolates the pooling bug alone: the ONLY
+    thing that can flip `clean` between the two computations is which base
+    the MDD walk starts from.
+    """
+    _seed_series(ledger, ["250", "-130", "40", "0", "0", "0", "0", "0", "0", "0"])
+    ledger.append(_drafted_event("th-sibling-win", account_ref="paper:beta"))
+    ledger.append(
+        _graded_event(
+            "th-sibling-win",
+            EPOCH - timedelta(days=1),
+            "900",
+        )
+    )
+
+
+def test_series_stats_mdd_base_is_per_account_not_pooled_across_siblings(ledger) -> None:
+    """HIGH (review round-14): a winning sibling account's pre-window pnl
+    must NEVER inflate this account's `equity_entering` — the MDD walk base
+    is A's OWN entering equity (500), giving mdd_pct 0.17333... (>= 0.15,
+    DIRTY), not the pooled 0.078787... (< 0.15, falsely clean) the bug
+    produces. See `_seed_two_account_pooling_bug_fixture`'s docstring for the
+    full freeze-gate arithmetic. Before the fix this test fails: the buggy
+    implementation reports `mdd_pct` ~0.0787878787878788 and `clean=True`."""
+    _seed_two_account_pooling_bug_fixture(ledger)
+    stats = _series.series_stats(ledger, ACCOUNT, 0, DIALS, NOW_WINDOW_CLOSED)
+    assert stats.graded_count == 10, "the sibling's single thesis must not join A's own tally"
+    assert stats.expectancy == Decimal("16")
+    assert stats.mdd_pct is not None
+    assert abs(stats.mdd_pct - 0.17333333333333334) < 1e-12, (
+        f"mdd_pct={stats.mdd_pct!r} — expected A's OWN-base mdd_pct (130/750), not the "
+        "sibling-pooled 130/1650 == 0.0787878787878788 the bug produces"
+    )
+    assert stats.complete is True
+    assert stats.clean is False, (
+        "mdd_pct 17.33% (A's own base) >= the 15% clean threshold — a winning sibling's "
+        "pre-window pnl must never launder this into 'clean' via base inflation"
+    )
+
+
+def test_series_projection_and_series_stats_agree_on_two_account_pooling_fixture(
+    ledger, raw_sql
+) -> None:
+    """Rebuild-vs-`_series` agreement surface (review round-14): the
+    `series` projection table (`ledger._projections._materialize_series`)
+    and `policy._series.series_stats` must derive the SAME `clean` verdict
+    for `paper:alpha`'s series 0 on the two-account pooling fixture above.
+    Before the fix, both sides shared the identical pooling bug and so
+    'agreed' only by both being wrong (clean=True); after the fix they agree
+    because both are scoped to A's own account."""
+    _seed_two_account_pooling_bug_fixture(ledger)
+    ledger.rebuild()
+    rows = raw_sql(
+        "SELECT complete, clean FROM series WHERE account_ref = 'paper:alpha' AND series_index = 0"
+    )
+    assert len(rows) == 1
+    projection_complete, projection_clean = rows[0]
+
+    stats = _series.series_stats(ledger, ACCOUNT, 0, DIALS, NOW_WINDOW_CLOSED)
+
+    assert bool(projection_complete) == stats.complete
+    assert bool(projection_clean) == stats.clean
+    assert stats.clean is False, "both derivations must agree the series is DIRTY, not clean"
