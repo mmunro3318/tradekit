@@ -9,7 +9,19 @@ placeholder): real for the `"paper:"` prefix now — see
 which replaces the batch-A `NotImplementedError`-naming-its-batch pin this
 one function used to encode (that pin is definitionally obsolete once the
 verb it describes ships; every other stub below is untouched, still real
-`NotImplementedError`s naming their own batch)."""
+`NotImplementedError`s naming their own batch).
+
+`get()`/`execute_order`/`reconcile` (SPRINT P3 batch C dev pass,
+superseding this file's own batch-A/B placeholders again — the SAME
+obsolescence-update pattern `test_cli_policy.py`'s own docstring documents
+for its batch-C/D verbs): `execute_order`/`reconcile` are REAL now (see
+`test_pipeline.py`/`test_reconcile.py` for their exhaustive real-behavior
+coverage — this file no longer pins them as stubs), and `get()` also
+resolves a `"live:"` account_ref to a `PaperBroker` (ASSUMPTIONS round-18
+— no real venue adapter lands before batch D, so a confirmed-T2 live
+account routes through the same paper simulator until then). Only
+`"advisory:"` and `record_manual_fill` remain real `NotImplementedError`
+stubs naming batch D."""
 
 from __future__ import annotations
 
@@ -29,19 +41,22 @@ def test_get_resolves_a_paper_prefixed_account_ref_to_a_paper_broker() -> None:
     assert adapter.account_ref == "paper:alpha"
 
 
-def test_get_is_not_yet_implemented_for_non_paper_prefixes() -> None:
+def test_get_resolves_a_live_prefixed_account_ref_to_a_paper_broker() -> None:
+    """SPRINT P3 batch C (ASSUMPTIONS round-18): no real venue adapter
+    lands before batch D — a `"live:"` account_ref routes through the SAME
+    `PaperBroker` simulator `"paper:"` uses, so a confirmed-T2 live account
+    (`policy.confirm_promotion`'s own `PromotionConfirmed`) is a real,
+    executable `execute_order` target this batch."""
+    from tradekit.broker._paper import PaperBroker
+
+    adapter = broker.get("live:alpaca")
+    assert isinstance(adapter, PaperBroker)
+    assert adapter.account_ref == "live:alpaca"
+
+
+def test_get_is_not_yet_implemented_for_advisory_prefix() -> None:
     with pytest.raises(NotImplementedError, match="batch D"):
-        broker.get("live:alpaca")
-
-
-def test_execute_order_is_not_yet_implemented_and_names_its_batch() -> None:
-    with pytest.raises(NotImplementedError, match="batch C"):
-        broker.execute_order("TH-1")
-
-
-def test_reconcile_is_not_yet_implemented_and_names_its_batch() -> None:
-    with pytest.raises(NotImplementedError, match="batch C"):
-        broker.reconcile("paper:alpha")
+        broker.get("advisory:kraken")
 
 
 def test_record_manual_fill_is_not_yet_implemented_and_names_its_batch() -> None:

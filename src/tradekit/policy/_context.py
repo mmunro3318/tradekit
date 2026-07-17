@@ -193,54 +193,104 @@ def _halt_state(ledger: Ledger) -> tuple[bool, str | None]:
     return halted, reason
 
 
-def _account_tier(account_ref: str) -> Literal["T0", "T1", "T2"] | None:
+def _account_tier(ledger: Ledger, account_ref: str) -> Literal["T0", "T1", "T2"] | None:
     """MVP tier-by-construction: a `"paper:"` account_ref can only exist at
     T1 (the promotion ladder's own diagram: T0 research -> T1 paper -> T2
     live — trading paper AT ALL implies the T1 grant already happened), an
-    `"advisory:"` account_ref is T0 research/manual. A `"live:"`
-    account_ref's real tier lives in the `promotion_state` projection,
-    which this helper deliberately does NOT read: P2 never grants the live
-    tier (P3-deferred by design, ASSUMPTIONS 92 — the promotion machine's
-    `PromotionConfirmed`/T2 path exists, but no P2 producer ever moves an
-    account to `"live:"`), so returning `None` here -> R-002 correctly
-    denies every live action, same anti-permissive shape as R-011's
-    live-sequence budget.
+    `"advisory:"` account_ref is T0 research/manual.
 
-    RED-PHASE PIN (SPRINT P3 batch C, ASSUMPTIONS round-18, supersedes the
-    ASSUMPTIONS-92 note above): the P2 fail-closed carve-out ENDS this
-    batch. The dev pass must make this helper (and `assemble()`'s
-    `live_trades_remaining` derivation below) read the real
-    `promotion_state` (`PromotionConfirmed` minus any later `Demoted`) for
-    a "live:" account_ref -- `tests/unit/policy/test_live_tier.py` pins the
-    expected shape: a confirmed-T2 account_ref resolves to "T2" here, and
-    `live_trades_remaining` derives PURELY (no new event type) as
-    `PromotionConfirmed.live_sequence_remaining` (always 3) minus the count
-    of this account's own `FillRecorded` events at/after that
-    `PromotionConfirmed`'s `ts_utc`. An UNCONFIRMED "live:" account_ref
-    keeps returning None -- the fail-closed default remains for that case
-    only. THIS FUNCTION STILL RETURNS None UNCONDITIONALLY FOR "live:"
-    REFS THIS BATCH (red) -- see `broker._pipeline`'s module docstring for
-    the R-011 decrement-is-a-read-time-derivation pin."""
+    A `"live:"` account_ref's real tier lives in the `promotion_state`
+    projection (SPRINT P3 batch C, ASSUMPTIONS round-18 — ends the P2
+    fail-closed carve-out, ASSUMPTIONS 92). REUSE, not duplicate (CTO
+    adjudication): `policy.__init__._current_tier` already derives
+    `(tier, live_sequence_remaining, last_confirmed_event)` off
+    `PromotionConfirmed`/`Demoted` history — imported here via a deferred
+    `from tradekit import policy` (module-attribute call, called only at
+    function-call time, never at import time, to avoid the
+    `policy.__init__` <-> `policy._context` import cycle: `__init__.py`
+    itself imports `_context` at module scope). Only a T2 result is ever
+    surfaced here — `_current_tier`'s own `_base_tier` fallback (T0/T1) for
+    an unconfirmed or since-demoted "live:" ref is deliberately collapsed
+    to `None`: the fail-closed default for R-002 remains for any "live:"
+    account_ref that has not EARNED a currently-live T2 confirmation, same
+    anti-permissive discipline as R-011's live-sequence budget below."""
     if account_ref.startswith("paper:"):
         return "T1"
     if account_ref.startswith("advisory:"):
         return "T0"
+    if account_ref.startswith("live:"):
+        from tradekit import policy as _policy
+
+        tier, _remaining, _last_confirmed = _policy._current_tier(ledger, account_ref)
+        return tier if tier == "T2" else None
     return None
 
 
-def _paper_equity(dials: PolicyDials, account_ref: str) -> Decimal | None:
+def _live_trades_remaining(ledger: Ledger, account_ref: str) -> int | None:
+    """R-011's `live_trades_remaining` — SPRINT P3 batch C, ASSUMPTIONS
+    round-18: a PURE derivation, never a ledgered decrement event (no new
+    event type). `None` for a non-"live:" account_ref, or a "live:" ref
+    with no CURRENT T2 confirmation (unconfirmed, or since-demoted — same
+    fail-closed shape as `_account_tier` above; reuses the SAME
+    `policy._current_tier` call, deferred-imported to dodge the same
+    import cycle).
+
+    For a currently-confirmed T2 account: `PromotionConfirmed.
+    live_sequence_remaining` (the budget AT confirmation, always 3) MINUS
+    the count of this account's own `FillRecorded` events at OR AFTER that
+    `PromotionConfirmed`'s own `ts_utc` — a fill from a PRIOR confirmation
+    cycle (before the current one) never counts against the current
+    budget."""
+    if not account_ref.startswith("live:"):
+        return None
+    from tradekit import policy as _policy
+
+    tier, _remaining, last_confirmed = _policy._current_tier(ledger, account_ref)
+    if tier != "T2" or last_confirmed is None:
+        return None
+    budget = last_confirmed.payload.get("live_sequence_remaining")
+    if budget is None:
+        return None
+    since_ts = last_confirmed.ts_utc.astimezone(UTC)
+    fill_count = sum(
+        1
+        for event in ledger.query(EventFilter(types=["FillRecorded"]))
+        if event.payload.get("account_ref") == account_ref
+        and event.ts_utc.astimezone(UTC) >= since_ts
+    )
+    return int(budget) - fill_count
+
+
+def _confirmed_live_t2(ledger: Ledger, account_ref: str) -> bool:
+    """True iff `account_ref` is a `"live:"` ref that is CURRENTLY T2
+    (confirmed and not since demoted) — SPRINT P3 batch C, ASSUMPTIONS
+    round-18: `broker.get` now routes `"live:"` refs through the SAME
+    `PaperBroker` simulation `"paper:"` refs use (no real venue adapter
+    lands before batch D), so a confirmed-T2 live account settles against
+    the SAME `dials.paper_starting_equity_usd` sandbox balance a paper
+    account does — the P2 "no live/advisory balance feed" deferral's own
+    premise (`"no P2 producer ever moves an account to live:"`) no longer
+    holds once `policy.confirm_promotion` is a real producer (batch D).
+    Reuses `_account_tier` (itself reusing `policy._current_tier`) rather
+    than re-deriving confirmation state a third way."""
+    return account_ref.startswith("live:") and _account_tier(ledger, account_ref) == "T2"
+
+
+def _paper_equity(ledger: Ledger, dials: PolicyDials, account_ref: str) -> Decimal | None:
     """`paper_starting_equity_usd` + cumulative realized pnl for
     `account_ref` from `pnl_daily` (task pin) — `pnl_daily` has no real
     `FillRecorded` writer yet in P2 (ASSUMPTIONS 62: population deferred
     whole-cloth to batch B/D), so the cumulative term is always `0` this
     batch; this mirrors `thesis._submit.build_submit_payloads`'s OWN
     identical equity calc (`PolicyDials.load().paper_starting_equity_usd`,
-    no pnl term either, same deferral). `None` for non-paper accounts — P2
-    ships no live/advisory balance feed to derive a real settled balance
-    from (anti-permissive: a guessed live balance is worse than denying)."""
-    if not account_ref.startswith("paper:"):
-        return None
-    return dials.paper_starting_equity_usd
+    no pnl term either, same deferral). `None` for a non-paper, non-
+    confirmed-live-T2 account — P2 ships no live/advisory balance feed to
+    derive a real settled balance from (anti-permissive: a guessed live
+    balance is worse than denying); a CONFIRMED T2 `"live:"` account is the
+    SPRINT P3 batch C exception (see `_confirmed_live_t2` above)."""
+    if account_ref.startswith("paper:") or _confirmed_live_t2(ledger, account_ref):
+        return dials.paper_starting_equity_usd
+    return None
 
 
 def _trades_today_count(ledger: Ledger, account_ref: str, now: datetime) -> int:
@@ -320,12 +370,18 @@ def _account_principal(ledger: Ledger, dials: PolicyDials, account_ref: str) -> 
     "implicit AccountConfig from config.toml defaults" — its principal is
     `dials.paper_starting_equity_usd` even with no `AccountCreated` event on
     record. Any other account with no `AccountCreated` event -> `None`
-    (insufficient_context, never a guessed principal)."""
+    (insufficient_context, never a guessed principal). SPRINT P3 batch C
+    exception (ASSUMPTIONS round-18): a CONFIRMED T2 `"live:"` account with
+    no explicit `AccountConfig` also gets the same implicit-default
+    treatment as the default paper account (`_confirmed_live_t2` above) —
+    `broker.get` now routes `"live:"` refs through the SAME `PaperBroker`
+    sandbox `"paper:"` refs use, so a live account with no real venue
+    principal on record settles against the identical sandbox balance."""
     config = _account_config(ledger, account_ref)
     if config is not None:
         principal = config.get("principal_usd")
         return Decimal(str(principal)) if principal is not None else None
-    if account_ref == dials.default_account_ref:
+    if account_ref == dials.default_account_ref or _confirmed_live_t2(ledger, account_ref):
         return dials.paper_starting_equity_usd
     return None
 
@@ -407,6 +463,24 @@ def _parse_graded_ts_for_context(event: Event) -> datetime:
     return event.ts_utc
 
 
+def _latest_thesis_review(ledger: Ledger, thesis_id: str) -> dict[str, Any] | None:
+    """Latest `ReviewCompleted(kind="thesis_review")` payload for
+    `thesis_id` — a missing `kind` key defaults to `"thesis_review"`, the
+    SAME default `ReviewCompletedPayload` itself carries and
+    `thesis._machine._next_state` already applies
+    (`event.payload.get("kind", "thesis_review")`) when folding state; a
+    harness-built raw-dict `ReviewCompleted` event (no payload model, no
+    default merge) must resolve identically here, not be silently treated
+    as insufficient_context just because the dict omitted the field its own
+    typed payload would have defaulted in."""
+    matches = [
+        event
+        for event in _events_for_thesis(ledger, "ReviewCompleted", thesis_id)
+        if event.payload.get("kind", "thesis_review") == "thesis_review"
+    ]
+    return matches[-1].payload if matches else None
+
+
 def _thesis_prereqs(
     ledger: Ledger, thesis_id: str | None
 ) -> tuple[str | None, str | None, bool | None]:
@@ -432,9 +506,7 @@ def _thesis_prereqs(
     if thesis_id is None:
         return None, None, None
     submitted = _latest_payload_for_thesis(ledger, "ThesisSubmitted", thesis_id)
-    review = _latest_payload_for_thesis(
-        ledger, "ReviewCompleted", thesis_id, kind="thesis_review"
-    )
+    review = _latest_thesis_review(ledger, thesis_id)
     market_snapshot_id = submitted.get("market_snapshot_id") if submitted else None
     # `thesis.submit` only ever appends the ThesisSubmitted marker AFTER EV
     # validation passes within tolerance (ASSUMPTIONS 65) — the marker's
@@ -637,7 +709,7 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
     now = clock()
 
     halted, halt_reason = _halt_state(ledger)
-    equity = _paper_equity(dials, action.account_ref)
+    equity = _paper_equity(ledger, dials, action.account_ref)
     review_artifact_id, market_snapshot_id, ev_ok = _thesis_prereqs(ledger, action.thesis_id)
 
     strategy_metrics: dict[str, Any] | None = None
@@ -673,7 +745,7 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
         dials=dials,
         halted=halted,
         halt_reason=halt_reason,
-        account_tier=_account_tier(action.account_ref),
+        account_tier=_account_tier(ledger, action.account_ref),
         settled_balance_usd=equity,
         account_equity_usd=equity,
         live_exposure_usd=Decimal("0"),
@@ -682,11 +754,7 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
         thesis_review_artifact_id=review_artifact_id,
         thesis_market_snapshot_id=market_snapshot_id,
         thesis_ev_ok=ev_ok,
-        # P3-deferred by design (ASSUMPTIONS 92): P2 never grants the live
-        # tier, so no account ever needs a real live-sequence budget here —
-        # `None` -> R-011 correctly denies, same fail-closed shape as
-        # `_account_tier`'s own `"live:"` handling above.
-        live_trades_remaining=None,
+        live_trades_remaining=_live_trades_remaining(ledger, action.account_ref),
         recorded_sizing_usd=_recorded_sizing(ledger, action),
         open_position_correlations={},
         thesis_age_hours=_thesis_age_hours(ledger, action.thesis_id, now),

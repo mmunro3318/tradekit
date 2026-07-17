@@ -177,7 +177,34 @@ ASSUMPTIONS round-18):
 
 from __future__ import annotations
 
-from tradekit.contracts import OrderAck, Verdict
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any, Literal
+
+from ulid import ULID
+
+from tradekit.contracts import (
+    AssetRef,
+    Event,
+    EventFilter,
+    Fill,
+    HaltSetPayload,
+    OrderAck,
+    OrderCancelledPayload,
+    OrderRequest,
+    ProposedAction,
+    ReconciliationRunPayload,
+    Verdict,
+    VerdictToken,
+)
+from tradekit.ledger import Ledger, default_ledger
+from tradekit.mae import _runtime as _mae_runtime
+from tradekit.thesis import _machine as _thesis_machine
+
+# 'agent:<model>' | 'mike' | 'system:<job>' — every event this module
+# produces directly (OrderCancelled / ReconciliationRun / the auto-halt
+# HaltSet) is a machine-derived pipeline action, not an LLM or human action.
+_ACTOR = "system:broker-pipeline"
 
 
 class PipelineDenied(Exception):
@@ -210,32 +237,233 @@ class OrderNotCancelable(Exception):
         self.status = status
 
 
-def execute_order(thesis_id: str) -> OrderAck:
-    """STUB — SPRINT P3 batch C dev pass lands this (see module docstring
-    for the pinned §8.2 seven-step algorithm)."""
-    raise NotImplementedError(
-        f"tradekit.broker._pipeline.execute_order({thesis_id!r}): SPRINT P3 batch C dev "
-        "pass lands the two-phase pipeline (see module docstring for the pinned §8.2 "
-        "step-by-step algorithm)"
+def _append(ledger: Ledger, event_type: str, payload: dict[str, Any], ts: datetime) -> str:
+    event = Event(
+        event_id=str(ULID()),
+        ts_utc=ts,
+        type=event_type,  # type: ignore[arg-type]
+        actor=_ACTOR,
+        run_id=None,
+        schema_ver=1,
+        payload=payload,
     )
+    return ledger.append(event)
+
+
+def _latest_payload_for_thesis(
+    ledger: Ledger, event_type: str, thesis_id: str
+) -> dict[str, Any] | None:
+    """Latest `event_type` payload for `thesis_id` — `thesis._machine.
+    latest_payload` only searches the lifecycle-marker event types
+    (`THESIS_EVENT_TYPES`), which does NOT cover `MarketSnapshotTaken`/
+    `SizingComputed` (submit-time records, not lifecycle transitions), so
+    this pipeline needs its own direct ledger read for those two, mirroring
+    `policy._context`'s identically-named private helper."""
+    matches = [
+        event
+        for event in ledger.query(EventFilter(types=[event_type]))
+        if event.payload.get("thesis_id") == thesis_id
+    ]
+    return matches[-1].payload if matches else None
+
+
+def _entry_price(contract: dict[str, Any], ledger: Ledger, thesis_id: str) -> Decimal:
+    """The qty-deriving entry price per DESIGN §8.2 step 1: a limit entry's
+    own `limit_price` (verbatim from `contract["entry"]`), else — for a
+    market entry — the `MarketSnapshotTaken.last_close` this thesis's own
+    `submit()` already recorded (the last CLOSED bar, never a fresh quote).
+    This SAME price also becomes `OrderRequest.limit_price` regardless of
+    `order_type` (money-path rules — R-003/R-005/R-006/R-008/R-012 —
+    price the order's notional off `qty * limit_price`; a market order's
+    reference price is exactly this entry_price, `PaperBroker.submit`'s
+    own market-fill branch never reads `limit_price` so carrying it costs
+    nothing operationally, and R-012's sizing-purity check is structurally
+    unable to compare a submitted notional against the recorded
+    `SizingComputed` value without it)."""
+    entry = contract["entry"]
+    if entry["order_type"] == "limit":
+        return Decimal(str(entry["limit_price"]))
+    snapshot = _latest_payload_for_thesis(ledger, "MarketSnapshotTaken", thesis_id)
+    if snapshot is None:  # pragma: no cover — submit() always records this before approval
+        raise ValueError(f"no MarketSnapshotTaken event found for thesis_id={thesis_id!r}")
+    return Decimal(str(snapshot["last_close"]))
+
+
+def _build_order_request(thesis_id: str, ledger: Ledger) -> OrderRequest:
+    drafted = _thesis_machine.latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:  # pragma: no cover — require_state already proved a real thesis
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    contract = drafted["contract"]
+
+    sizing = _latest_payload_for_thesis(ledger, "SizingComputed", thesis_id)
+    if sizing is None:  # pragma: no cover — submit() always records this before approval
+        raise ValueError(f"no SizingComputed event found for thesis_id={thesis_id!r}")
+    recommended_size_usd = Decimal(str(sizing["sizing"]["recommended_size_usd"]))
+
+    entry_price = _entry_price(contract, ledger, thesis_id)
+    qty = recommended_size_usd / entry_price
+
+    return OrderRequest(
+        thesis_id=thesis_id,
+        account_ref=str(contract["account_ref"]),
+        asset=AssetRef.model_validate(contract["asset"]),
+        side="buy" if contract["direction"] == "long" else "sell",
+        order_type=contract["entry"]["order_type"],
+        qty=qty,
+        limit_price=entry_price,
+    )
+
+
+def _fill_event_for_order(ledger: Ledger, order_id: str) -> Event | None:
+    matches = [
+        event
+        for event in ledger.query(EventFilter(types=["FillRecorded"]))
+        if event.payload.get("order_id") == order_id
+    ]
+    return matches[-1] if matches else None
+
+
+def execute_order(thesis_id: str) -> OrderAck:
+    """DESIGN §8.2's seven-step two-phase pipeline — see the module
+    docstring for the pinned step-by-step algorithm this implements
+    verbatim."""
+    from tradekit import broker as _broker
+    from tradekit import policy as _policy
+
+    ledger = default_ledger()
+
+    # Step 1 — thesis-state guard + build the OrderRequest from the
+    # thesis's own contract/sizing (a mechanical transcription of what was
+    # already approved, never a fresh sizing decision at submit time).
+    _thesis_machine.require_state(ledger, thesis_id, frozenset({"approved"}), "execute_order")
+    order = _build_order_request(thesis_id, ledger)
+
+    # Steps 2-3 — policy.evaluate() itself appends ActionProposed THEN
+    # VerdictIssued; this pipeline's own contribution is calling it BEFORE
+    # the broker call and never submitting on a deny verdict.
+    verdict: Verdict = _policy.evaluate(
+        ProposedAction(
+            kind="submit_order",
+            account_ref=order.account_ref,
+            requested_by="system:broker-pipeline",
+            thesis_id=thesis_id,
+            order=order,
+        )
+    )
+    if not verdict.allow:
+        raise PipelineDenied(verdict)
+
+    # Step 4 — mint the token FROM the just-ledgered allow Verdict and call
+    # the adapter (module-attribute `broker.get`, monkeypatchable). A raise
+    # from `.submit(...)` propagates uncaught — ActionProposed/VerdictIssued
+    # already survive on the ledger.
+    token = VerdictToken(
+        verdict_id=verdict.verdict_id, policy_version_hash=verdict.policy_version_hash
+    )
+    adapter = _broker.get(order.account_ref)
+    ack = adapter.submit(order, token)
+
+    # Step 6 — single-poll MVP: one synchronous order_status() call, no
+    # looping/blocking on a still-resting limit order.
+    status = adapter.order_status(ack.order_id)
+    if status.status != "filled":
+        return ack
+
+    # Step 7 — first-fill activation. The adapter (step 5) already appended
+    # FillRecorded; read it back for the ts this ThesisActivated carries.
+    fill_event = _fill_event_for_order(ledger, ack.order_id)
+    if fill_event is None:  # pragma: no cover — adapter.submit() always records the fill first
+        raise ValueError(f"no FillRecorded event found for order_id={ack.order_id!r}")
+    _thesis_machine._activate_on_fill(ledger, thesis_id, ack.order_id, fill_event.ts_utc)
+
+    # R-011's live-sequence decrement is a pure read-time derivation
+    # (`policy._context`'s live-tier wiring) over the FillRecorded event the
+    # adapter already appended above — nothing further to do here.
+    return ack
 
 
 def reconcile(account_ref: str) -> None:
-    """STUB — SPRINT P3 batch C dev pass lands this (see module docstring
-    for the pinned broker-fills-vs-ledger + auto-halt algorithm)."""
-    raise NotImplementedError(
-        f"tradekit.broker._pipeline.reconcile({account_ref!r}): SPRINT P3 batch C dev "
-        "pass lands the reconcile -> auto-halt path (see module docstring)"
+    """Broker `fills()` vs this account's own `FillRecorded` ledger history
+    — exact `(order_id, ts_utc, qty)` triple match (§8.2 step 7 / §15). Any
+    unmatched broker fill -> `ReconciliationRun(mismatch)` + automatic
+    `HaltSet`; a clean run -> `ReconciliationRun(ok)`, no halt."""
+    from tradekit import broker as _broker
+
+    ledger = default_ledger()
+    adapter = _broker.get(account_ref)
+
+    ledger_fills = [
+        event
+        for event in ledger.query(EventFilter(types=["FillRecorded"]))
+        if event.payload.get("account_ref") == account_ref
+    ]
+    ledger_keys = {
+        (
+            str(event.payload.get("order_id")),
+            _as_utc(event.payload.get("ts_utc")),
+            str(Decimal(str(event.payload.get("qty")))),
+        )
+        for event in ledger_fills
+    }
+
+    epoch = datetime.fromtimestamp(0, tz=UTC)
+    broker_fills: list[Fill] = adapter.fills(since=epoch)
+
+    mismatches: list[dict[str, Any]] = []
+    for fill in broker_fills:
+        key = (fill.order_id, _as_utc(fill.ts_utc), str(fill.qty))
+        if key not in ledger_keys:
+            mismatches.append(fill.model_dump(mode="json"))
+
+    now = _mae_runtime.clock()
+    result: Literal["ok", "mismatch"] = "mismatch" if mismatches else "ok"
+    run_payload = ReconciliationRunPayload(
+        account_ref=account_ref,
+        result=result,
+        broker_fill_count=len(broker_fills),
+        ledger_fill_count=len(ledger_fills),
+        mismatches=mismatches,
+        ts_utc=now,
     )
+    _append(ledger, "ReconciliationRun", run_payload.model_dump(mode="json"), now)
+
+    if mismatches:
+        order_ids = ", ".join(sorted({str(m.get("order_id")) for m in mismatches}))
+        halt_payload = HaltSetPayload(
+            reason=f"reconcile mismatch for account_ref={account_ref!r}: unmatched broker "
+            f"fill(s) order_id={{{order_ids}}}",
+            scope="all",
+            set_by=_ACTOR,
+        )
+        _append(ledger, "HaltSet", halt_payload.model_dump(mode="json"), now)
+
+
+def _as_utc(value: Any) -> str:
+    """Normalize a `ts_utc` (a `datetime` off a `Fill`, or its ISO string
+    round-trip off a ledgered `FillRecorded` payload) to a canonical
+    comparable string for the exact-triple reconcile match key."""
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return dt.astimezone(UTC).isoformat()
 
 
 def cancel_order(account_ref: str, order_id: str) -> None:
-    """STUB — SPRINT P3 batch C dev pass lands this (see module docstring
-    for the pinned resting-only cancel semantics)."""
-    raise NotImplementedError(
-        f"tradekit.broker._pipeline.cancel_order({account_ref!r}, {order_id!r}): SPRINT P3 "
-        "batch C dev pass lands this (see module docstring)"
-    )
+    """MVP: only a RESTING order (`order_status(...).status == "open"`) may
+    be canceled — any other status refuses with typed `OrderNotCancelable`,
+    zero events appended. A cancelable order appends `OrderCancelled`."""
+    from tradekit import broker as _broker
+
+    ledger = default_ledger()
+    adapter = _broker.get(account_ref)
+    status = adapter.order_status(order_id)
+    if status.status != "open":
+        raise OrderNotCancelable(order_id, status.status)
+
+    now = _mae_runtime.clock()
+    payload = OrderCancelledPayload(order_id=order_id, account_ref=account_ref, ts_utc=now)
+    _append(ledger, "OrderCancelled", payload.model_dump(mode="json"), now)
 
 
 __all__ = ["OrderNotCancelable", "PipelineDenied", "cancel_order", "execute_order", "reconcile"]

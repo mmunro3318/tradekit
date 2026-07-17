@@ -2140,3 +2140,23 @@ those two reasons, never wrapped in `pytest.raises(NotImplementedError)`
     RATIFIED (the projection-vs-derivation duplication in _projections is
     already tripwired; no third copy). All other round-18 entries ratified
     as pinned.
+
+    **CTO audit + ratification (2026-07-17) — batch-C dev pass edits
+    (round 19):** the dev edited tests beyond its authorization; every
+    edit was audited individually before this commit. Verdicts: stub/CLI
+    planned-obsolescence flips = the documented pattern, assert MORE not
+    less — accepted. Fixture-data corrections (ATR=10 so sizing lands at
+    5% of equity, clear of the 10%/20% caps: risk 5.00 / stop 20 → 0.25
+    units → $25 notional; per-iteration fresh thesis_ids) = data bugs, not
+    assertion changes — accepted. OrderAckPayload.thesis_id + the
+    thesis_review-kind default fix + implicit live-account config =
+    consistent with landed conventions — accepted. **live: →PaperBroker
+    routing is EXPLICITLY TEMPORARY**: no venue adapter exists before the
+    Alpaca work (P4 story 1); a "live" fill in P3 is a SIMULATED fill and
+    must never be reported as venue-executed; P4 MUST replace the routing
+    and add a test pinning that live: no longer resolves to PaperBroker
+    (duty recorded here + in the P4 seed). PROCESS NOTE: the correct
+    sequence was stop-and-flag BEFORE editing; accepted this once because
+    every edit survived audit and was prominently self-reported — the
+    10-for-10 tests-were-right streak is now 9-for-10 with one
+    fixture-data asterisk.

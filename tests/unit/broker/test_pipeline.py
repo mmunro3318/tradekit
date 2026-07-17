@@ -57,13 +57,23 @@ _N_SUBMIT_BARS = 20
 _PAPER_EQUITY = Decimal("500")
 
 
-def _flat_atr2_price100_bars(n: int = _N_SUBMIT_BARS) -> BarSeries:
+def _flat_atr10_price100_bars(n: int = _N_SUBMIT_BARS) -> BarSeries:
+    """Flat open=close=100, high=105/low=95 -> constant True Range 10 ->
+    Wilder ATR(14) = 10 (mirrors `tests/replay/test_p2_adversarial.py`'s
+    own proven-safe fixture, same rationale documented there): `mae.
+    size_position(equity=500)` records recommended_size_usd = risk(1% *
+    500 = 5) / stop_pct(2*ATR/price = 20/100 = 0.20) = 25.00 — inside
+    R-005's paper cap (10% * 500 = 50) and R-006's cap (20% * 500 = 100),
+    and above R-008's $10 floor, so the REAL rule catalog's money-path
+    rules clear for an honest order at this notional (a tighter ATR, e.g.
+    2, produces a 25%-of-equity position that trips R-005/R-006 by
+    design — those caps existing to catch exactly that)."""
     bars = [
         Bar(
             ts_open=_SUBMIT_BAR_START + timedelta(days=i),
             open=Decimal("100"),
-            high=Decimal("101"),
-            low=Decimal("99"),
+            high=Decimal("105"),
+            low=Decimal("95"),
             close=Decimal("100"),
             volume=Decimal("1000"),
         )
@@ -73,7 +83,7 @@ def _flat_atr2_price100_bars(n: int = _N_SUBMIT_BARS) -> BarSeries:
 
 
 def _fake_submit_get_closed_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSeries:
-    return _flat_atr2_price100_bars()
+    return _flat_atr10_price100_bars()
 
 
 def _fake_submit_clock() -> datetime:
@@ -319,7 +329,14 @@ def test_execute_order_r011_denies_the_fourth_live_trade_after_three_confirmed_f
     )
 
     thesis_ids = [
-        _build_approved_thesis(thesis_kwargs, monkeypatch, make_event, account_ref=account_ref)
+        _build_approved_thesis(
+            thesis_kwargs,
+            monkeypatch,
+            make_event,
+            account_ref=account_ref,
+            thesis_id=str(ULID()),
+            market_snapshot_id=str(ULID()),
+        )
         for _ in range(4)
     ]
 
@@ -360,6 +377,49 @@ def test_execute_order_submitted_qty_matches_the_recorded_sizing_notional(
     entry_price = Decimal(str(snapshot.payload["last_close"]))
     assert qty * entry_price == recommended_size_usd
     assert fill_price > 0  # the fill happened at a real, friction-adjusted price
+
+
+# ---------------------------------------------------------------------------
+# Limit-entry qty derivation — ADDITIVE coverage closure (CTO-mandated,
+# tests/ASSUMPTIONS.md round-18 entry 124 + ratification: "the dev pass MUST
+# add one limit-entry pipeline test"). A limit order priced far below every
+# fixture bar's low never trades through (G5) -> the single-poll MVP
+# observes a still-resting order, cleanly, with zero fill/activation events.
+# ---------------------------------------------------------------------------
+
+
+def test_execute_order_for_a_limit_entry_thesis_rests_with_no_fill(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    thesis_id = _build_approved_thesis(
+        thesis_kwargs,
+        monkeypatch,
+        make_event,
+        entry={
+            "order_type": "limit",
+            # Far below every fixture bar's low (95) — never trades through.
+            "limit_price": "1.00",
+            "valid_until": "2026-02-01T00:00:00Z",
+        },
+    )
+
+    ack = broker.execute_order(thesis_id)
+
+    assert ack.status == "accepted"
+    order_submitted = _events_of_type(thesis_id, "OrderSubmitted")[0]
+    assert order_submitted.payload["order_type"] == "limit"
+    assert Decimal(str(order_submitted.payload["limit_price"])) == Decimal("1.00")
+
+    status = broker.get(thesis_kwargs["account_ref"]).order_status(ack.order_id)
+    assert status.status == "open", "a resting limit order's single poll must report open"
+
+    assert _events_of_type(thesis_id, "FillRecorded") == [], (
+        "a resting limit order has not moved money — zero FillRecorded events"
+    )
+    assert _events_of_type(thesis_id, "ThesisActivated") == [], (
+        "a resting limit order must not activate the thesis (no fill observed yet)"
+    )
+    assert thesis._machine.derive_state(default_ledger(), thesis_id) == "approved"
 
 
 # ---------------------------------------------------------------------------

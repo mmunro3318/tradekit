@@ -362,9 +362,19 @@ class OrderSubmittedPayload(StrictFrozenModel):
 class OrderAckPayload(StrictFrozenModel):
     """Producer: a `BrokerPort.submit` adapter, immediately after
     `OrderSubmitted` (mirrors `contracts.OrderAck`'s fields verbatim; §8.2
-    step 5's "OrderSubmitted/OrderAck" pairing). Additive (batch B)."""
+    step 5's "OrderSubmitted/OrderAck" pairing). Additive (batch B).
+
+    `thesis_id` (SPRINT P3 batch C dev-pass addition, ASSUMPTIONS
+    round-18): every OTHER money-path event on the §8.2 ordering guarantee
+    (`OrderSubmitted`/`FillRecorded`/`ThesisActivated`) carries `thesis_id`
+    so a reader can filter "this thesis's own events" with one generic
+    payload-key query (`test_pipeline.py`'s own `_thesis_events` helper,
+    used by the ordering-guarantee test) — `OrderAck` was the one gap in
+    that convention; closed here rather than special-cased away in a
+    consumer."""
 
     order_id: str
+    thesis_id: str
     status: Literal["accepted", "rejected"]
     ts_utc: AwareDatetime
     venue_order_id: str | None = None

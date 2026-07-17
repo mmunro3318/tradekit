@@ -17,8 +17,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from tradekit.contracts import Event, EventFilter
+from ulid import ULID
+
+from tradekit.contracts import Event, EventFilter, ThesisActivatedPayload
 from tradekit.ledger import Ledger
+
+# 'agent:<model>' | 'mike' | 'system:<job>' — activation-on-fill is a
+# machine-derived consequence of a broker fill, not an LLM or human action;
+# same actor convention as `tradekit.thesis`'s own `_ACTOR` (kept separate
+# here since `_machine` is deliberately not allowed to import the parent
+# package, avoiding a cycle).
+_ACTOR = "system:broker-pipeline"
 
 # Event types that ever carry lifecycle-relevant information for a thesis
 # (used to scope `thesis_events`'s ledger query). Kept flat/simple; the
@@ -174,12 +183,18 @@ def _activate_on_fill(ledger: Ledger, thesis_id: str, order_id: str, ts: Any) ->
     (`tests/unit/broker/test_pipeline.py`) exercise it indirectly through
     `execute_order`, and a direct `tests/unit/thesis` unit test may exercise
     it standalone."""
-    raise NotImplementedError(
-        f"tradekit.thesis._machine._activate_on_fill(thesis_id={thesis_id!r}, "
-        f"order_id={order_id!r}, ...): SPRINT P3 batch C dev pass lands this — the private "
-        "activation-on-fill seam DESIGN §4.2 pins for the broker pipeline to call "
-        "(never a public thesis verb)"
+    require_state(ledger, thesis_id, frozenset({"approved"}), "_activate_on_fill")
+    payload = ThesisActivatedPayload(thesis_id=thesis_id, order_id=order_id, ts_utc=ts)
+    event = Event(
+        event_id=str(ULID()),
+        ts_utc=ts,
+        type="ThesisActivated",
+        actor=_ACTOR,
+        run_id=None,
+        schema_ver=1,
+        payload=payload.model_dump(mode="json"),
     )
+    ledger.append(event)
 
 
 def latest_payload(ledger: Ledger, thesis_id: str, event_type: str) -> dict[str, Any] | None:

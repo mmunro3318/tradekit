@@ -232,7 +232,7 @@ class PaperBroker:
 
             order_id = str(ULID())
             self._append_order_submitted(order, order_id, now)
-            self._append_order_ack(order_id, now)
+            self._append_order_ack(order_id, order.thesis_id, now)
             self._evaluate_and_record_market_fill(
                 order=order, order_id=order_id, bar=bar, source=bar_series.source, now=now
             )
@@ -242,7 +242,7 @@ class PaperBroker:
         # no test exercises stop orders yet): record intent, evaluate later.
         order_id = str(ULID())
         self._append_order_submitted(order, order_id, now)
-        self._append_order_ack(order_id, now)
+        self._append_order_ack(order_id, order.thesis_id, now)
         return OrderAck(order_id=order_id, status="accepted", ts_utc=now)
 
     def order_status(self, order_id: str) -> OrderStatus:
@@ -369,8 +369,10 @@ class PaperBroker:
         )
         self._append("OrderSubmitted", payload.model_dump(mode="json"), ts)
 
-    def _append_order_ack(self, order_id: str, ts: datetime) -> None:
-        payload = OrderAckPayload(order_id=order_id, status="accepted", ts_utc=ts)
+    def _append_order_ack(self, order_id: str, thesis_id: str, ts: datetime) -> None:
+        payload = OrderAckPayload(
+            order_id=order_id, thesis_id=thesis_id, status="accepted", ts_utc=ts
+        )
         self._append("OrderAck", payload.model_dump(mode="json"), ts)
 
     def _evaluate_and_record_market_fill(

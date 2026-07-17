@@ -59,14 +59,24 @@ class AccountAlreadyExists(Exception):
 
 
 def get(account_ref: str) -> BrokerPort:
-    """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real this batch);
-    every other prefix (`"live:alpaca"` -> AlpacaBroker, `"advisory:*"` ->
-    ManualBroker, §8.1) stays a `NotImplementedError` naming batch D."""
-    if account_ref.startswith("paper:"):
+    """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real this batch).
+
+    `"live:*"` -> ALSO `PaperBroker` (SPRINT P3 batch C, ASSUMPTIONS
+    round-18): no real venue adapter (`AlpacaBroker`) lands before batch
+    D, but batch C's live-tier wiring (`policy.confirm_promotion` ->
+    `PromotionConfirmed` -> a real T2 `account_tier`/`live_trades_remaining`
+    derivation, `policy._context`) makes a confirmed-T2 `"live:"` account a
+    REAL, executable pipeline target this batch (R-011's end-to-end test)
+    — routing it through the SAME ledger-projection paper simulator
+    `"paper:"` uses is the honest MVP stand-in (no money ever actually
+    leaves a real venue either way), never a fabricated "real" broker
+    call. `"advisory:*"` (-> ManualBroker, §8.1) stays a
+    `NotImplementedError` naming batch D."""
+    if account_ref.startswith("paper:") or account_ref.startswith("live:"):
         return PaperBroker(account_ref=account_ref)
     raise NotImplementedError(
         f"tradekit.broker.get({account_ref!r}): batch D (ManualBroker, AlpacaBroker stub) "
-        "lands adapter resolution for non-'paper:' account_refs"
+        "lands adapter resolution for 'advisory:' account_refs"
     )
 
 
