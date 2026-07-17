@@ -166,12 +166,13 @@ def ledger_with_thesis_lifecycle(ledger, make_event):
 
 
 def test_theses_projection_materializes_state_from_event_sequence(
-    ledger_with_thesis_lifecycle,
+    ledger_with_thesis_lifecycle, raw_sql
 ) -> None:
-    ledger, _thesis_id = ledger_with_thesis_lifecycle
-    with pytest.raises(NotImplementedError):
-        ledger.rebuild()
-    # RED by design this batch (see _projections.py's module docstring): once
-    # the P2 dev pass implements state derivation, this test is re-pointed to
-    # assert the `theses` row's `state == "approved"` for `_thesis_id`
-    # instead of `pytest.raises`.
+    ledger, thesis_id = ledger_with_thesis_lifecycle
+    ledger.rebuild()
+    rows = raw_sql("SELECT state FROM theses WHERE thesis_id = ?", thesis_id)
+    assert len(rows) == 1
+    assert rows[0][0] == "approved", (
+        "the theses projection must materialize the FULL draft -> submitted -> "
+        "reviewed -> approved event sequence to state == 'approved' (DESIGN §10.1)"
+    )

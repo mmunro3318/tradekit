@@ -13,24 +13,23 @@ event envelope, never the typed producer-side payload models in
 ``contracts._event_payloads`` (ASSUMPTIONS 10's ratified split — see that
 module's docstring).
 
-Batch-A scope (TDD test-author pass, "stubs + red tests"): the DDL for all
-four tables is real (so `rebuild()`/`ensure_tables()` are green
-infrastructure from birth, same as `runs`/`config_versions`). `ThesisDrafted`
-gets minimal REAL handling (inserts a `state="draft"` row) — deliberately
-NOT a stub, because the pre-existing P0 done-gate replay test
+Batch-A scope: the DDL for all four tables is real (so `rebuild()`/
+`ensure_tables()` are green infrastructure from birth, same as `runs`/
+`config_versions`). `ThesisDrafted` gets minimal handling (inserts a
+`state="draft"` row) — the pre-existing P0 done-gate replay test
 (`tests/replay/test_p0_replay.py`) already appends a bare `ThesisDrafted`
-event and calls `rebuild()`; that baseline test must stay green. Every
-STATE-TRANSITION past `draft` (`ThesisSubmitted` -> `ThesisGraded`) is an
-explicit `NotImplementedError` stub — the `theses`-materializes-state test
-in `tests/unit/ledger/test_rebuild.py` (which appends a full submitted ->
-reviewed -> approved sequence) is therefore deliberately RED until the P2
-dev pass lands it. `pnl_daily` (FillRecorded net-of-fees aggregation) and
-`series`/`promotion_state` (batch D semantics) get NO `_apply` handling at
-all this batch — an unhandled event type is silently skipped by `_apply`,
-same as the existing `LessonRecorded`-is-noise pattern, so those three
-tables stay empty and inert (which is exactly what "empty-ledger rebuild is
-a no-op" and "tables exist after rebuild" require, with no red test
-attached to them yet).
+event and calls `rebuild()`; that baseline test stays green. Every
+STATE-TRANSITION past `draft` (`ThesisSubmitted` -> `ThesisApproved`/
+`ThesisRejected`/`ThesisActivated`) is now implemented (SPRINT P2 batch A dev
+pass) by UPDATEing the existing `theses` row for the event's `thesis_id` —
+`ThesisGraded`'s outcome/pnl population lands with grade() in batch B.
+`pnl_daily` (FillRecorded net-of-fees aggregation) and `series`/
+`promotion_state` (batch D semantics) get NO `_apply` handling at all this
+batch — an unhandled event type is silently skipped by `_apply`, same as the
+existing `LessonRecorded`-is-noise pattern, so those three tables stay empty
+and inert (which is exactly what "empty-ledger rebuild is a no-op" and
+"tables exist after rebuild" require, with no red test attached to them
+yet).
 """
 
 from __future__ import annotations
@@ -107,27 +106,21 @@ _TABLES: dict[str, str] = {
     """,
 }
 
-# ThesisSubmitted..ThesisGraded (DESIGN §10.1 state machine transitions past
-# `draft`, minus grade/void arithmetic which is batch B). State-TRANSITION
-# derivation is a batch-A stub — see module docstring — so any ledger
-# containing one of these event types makes rebuild() raise
-# NotImplementedError rather than silently mis-projecting thesis state.
-# `ThesisDrafted` itself is NOT in this set: it gets real (if minimal)
-# handling below, because a lone ThesisDrafted event with no follow-on
-# lifecycle event is exactly what the pre-existing P0 done-gate replay test
-# (`tests/replay/test_p0_replay.py`) exercises, and that baseline test must
-# stay green — this batch's "stubs + red tests" mandate applies to the NEW
-# behavior it adds, not to breaking an already-green P0 scenario.
-_THESIS_LIFECYCLE_EVENT_TYPES = frozenset(
-    {
-        "ThesisSubmitted",
-        "ReviewCompleted",
-        "ThesisApproved",
-        "ThesisRejected",
-        "ThesisActivated",
-        "ThesisGraded",
-    }
-)
+# ThesisSubmitted..ThesisActivated (DESIGN §10.1 state machine transitions
+# past `draft`; each maps 1:1 to the state name it enters). `ThesisGraded` is
+# handled separately below (batch B populates outcome/pnl; this batch still
+# moves `state` for it defensively). `ThesisDrafted` itself is NOT in this
+# map: it gets its own real handling below, because a lone ThesisDrafted
+# event with no follow-on lifecycle event is exactly what the pre-existing P0
+# done-gate replay test (`tests/replay/test_p0_replay.py`) exercises, and
+# that baseline test must stay green.
+_THESIS_STATE_BY_EVENT_TYPE: dict[str, str] = {
+    "ThesisSubmitted": "submitted",
+    "ReviewCompleted": "reviewed",
+    "ThesisApproved": "approved",
+    "ThesisRejected": "rejected",
+    "ThesisActivated": "active",
+}
 
 
 def ensure_tables(con: sqlite3.Connection) -> None:
@@ -186,14 +179,23 @@ def _apply(con: sqlite3.Connection, event: Event) -> None:
                 None,
             ),
         )
-    elif event.type in _THESIS_LIFECYCLE_EVENT_TYPES:
-        # SPRINT P2 batch B: derive `theses.state` transitions past `draft`
-        # from this event sequence per DESIGN §10.1 (submitted -> reviewed ->
-        # approved -> active -> PASS|FAIL|VOID | rejected). Batch A ships
-        # only the DDL (see `_TABLES["theses"]` above) and this explicit
-        # stub — the `theses`-materializes-state test in test_rebuild.py is
-        # deliberately red until this lands.
-        raise NotImplementedError(
-            "P2 batch B — theses projection state-transition derivation "
-            "(docs/handoff/SPRINT-P2-thesis-policy.md)"
+    elif event.type in _THESIS_STATE_BY_EVENT_TYPE:
+        # DESIGN §10.1: submitted -> reviewed -> approved -> active (|
+        # rejected, terminal). A row for `thesis_id` always already exists
+        # (its ThesisDrafted event replays first in seq order), so this is
+        # always an UPDATE, never an INSERT.
+        con.execute(
+            "UPDATE theses SET state = ? WHERE thesis_id = ?",
+            (_THESIS_STATE_BY_EVENT_TYPE[event.type], payload.get("thesis_id")),
+        )
+    elif event.type == "ThesisGraded":
+        # SPRINT P2 batch B populates `outcome`/`measured`/`pnl_usd` fully via
+        # thesis.grade(); this batch moves `state`/`graded_outcome`/
+        # `graded_ts` defensively so a harness-appended ThesisGraded event
+        # (as some batch-A tests use to probe grade-adjacent illegal
+        # transitions) still rebuilds without raising.
+        outcome = payload.get("outcome")
+        con.execute(
+            "UPDATE theses SET state = ?, graded_outcome = ?, graded_ts = ? WHERE thesis_id = ?",
+            (outcome, outcome, ts, payload.get("thesis_id")),
         )
