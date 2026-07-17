@@ -52,29 +52,38 @@ def test_thesis_draft_then_show_returns_the_drafted_events(tmp_path, thesis_kwar
     assert [e["type"] for e in events] == ["ThesisDrafted"]
 
 
-def test_policy_status_exits_nonzero_cleanly_on_not_implemented(tmp_path) -> None:
+def test_policy_status_exits_zero_now_that_policy_status_is_real(tmp_path) -> None:
+    # NOTE (batch-C dev pass): `policy.status`/`halt`/`resume` landed REAL
+    # this batch (the sprint doc's own batch-C dispatch scope). These two
+    # tests originally pinned `_guard_not_implemented`'s CLEAN-nonzero-exit
+    # behavior for a batch-C state that's now superseded — the file's own
+    # docstring flagged this as pinning "this batch's stubbed policy.*
+    # verbs", not permanent business behavior. Updated to assert the real
+    # success path instead of re-deriving stub semantics that no longer
+    # exist; flagged for CTO ratification alongside the rest of this
+    # batch's flags.
     result = runner.invoke(
         app, ["policy", "status", "--json"], env={"TK_DATA_DIR": str(tmp_path)}
     )
-    assert result.exit_code == 1, result.output
-    assert result.exception is None or isinstance(result.exception, SystemExit), (
-        "the CLI must catch NotImplementedError itself and exit cleanly — a raw traceback "
-        "propagating out of CliRunner.invoke is not an acceptable failure mode "
-        f"(got exception={result.exception!r})"
-    )
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["halted"] is False
+    assert "policy_version_hash" in payload
+    assert "rules" in payload
 
 
-def test_policy_halt_then_resume_round_trip_exits_nonzero_cleanly(tmp_path) -> None:
+def test_policy_halt_then_resume_round_trip_exits_zero_now_that_real(tmp_path) -> None:
+    # See the note on test_policy_status_exits_zero_now_that_policy_status_is_real
+    # above — halt/resume are real this batch, not stubs.
     env = {"TK_DATA_DIR": str(tmp_path)}
 
     halt_result = runner.invoke(app, ["policy", "halt", "reconciliation mismatch"], env=env)
-    assert halt_result.exit_code == 1
-    assert "not yet implemented" in halt_result.output
+    assert halt_result.exit_code == 0, halt_result.output
+    assert "halted" in halt_result.output
 
     resume_result = runner.invoke(app, ["policy", "resume"], env=env)
-    assert resume_result.exit_code == 1
-    assert "not yet implemented" in resume_result.output
+    assert resume_result.exit_code == 0, resume_result.output
+    assert "resumed" in resume_result.output
 
 
 def test_promote_status_exits_nonzero_cleanly_on_not_implemented(tmp_path) -> None:

@@ -24,7 +24,66 @@ from __future__ import annotations
 
 from typing import Any
 
-from tradekit.contracts import ProposedAction, Verdict
+from ulid import ULID
+
+from tradekit.contracts import (
+    ActionProposedPayload,
+    ConfigChangedPayload,
+    Event,
+    EventFilter,
+    GateViolationDetectedPayload,
+    HaltClearedPayload,
+    HaltSetPayload,
+    PolicyVersionLoadedPayload,
+    ProposedAction,
+    Verdict,
+    VerdictIssuedPayload,
+)
+from tradekit.ledger import Ledger, default_ledger
+from tradekit.policy import _context, _evaluate
+from tradekit.policy._dials import PolicyDials, canonical_dump, policy_version_hash
+from tradekit.policy._rules import RULE_IDS, RULES, RULES_BY_ID
+
+# 'agent:<model>' | 'mike' | 'system:<job>' — every event this module
+# produces is a machine-derived gate decision, not an LLM or human action.
+_ACTOR = "system:policy"
+
+
+def _append(ledger: Ledger, event_type: str, payload: dict[str, Any]) -> str:
+    event = Event(
+        event_id=str(ULID()),
+        ts_utc=_context.clock(),
+        type=event_type,  # type: ignore[arg-type]
+        actor=_ACTOR,
+        run_id=None,
+        schema_ver=1,
+        payload=payload,
+    )
+    return ledger.append(event)
+
+
+def _ensure_policy_version(ledger: Ledger, dials: PolicyDials, version_hash: str) -> None:
+    """First `evaluate()`/`status()` per process ensures a
+    `PolicyVersionLoaded` event for the current hash; a hash different from
+    the last one this ledger has recorded additionally appends
+    `ConfigChanged` (CTO addendum, "Ambient wiring")."""
+    loaded = ledger.query(EventFilter(types=["PolicyVersionLoaded"]))
+    known_hashes = {event.payload.get("policy_version_hash") for event in loaded}
+    if version_hash in known_hashes:
+        return
+    dials_dump = canonical_dump(dials)
+    loaded_payload = PolicyVersionLoadedPayload(
+        policy_version_hash=version_hash,
+        rule_ids=sorted(RULE_IDS),
+        dials=dials_dump,
+    )
+    _append(ledger, "PolicyVersionLoaded", loaded_payload.model_dump(mode="json"))
+    if loaded:
+        previous_hash = loaded[-1].payload.get("policy_version_hash")
+        changed_payload = ConfigChangedPayload(
+            previous_hash=previous_hash, new_hash=version_hash, dials=dials_dump
+        )
+        _append(ledger, "ConfigChanged", changed_payload.model_dump(mode="json"))
 
 
 def evaluate(action: ProposedAction) -> Verdict:
@@ -33,7 +92,50 @@ def evaluate(action: ProposedAction) -> Verdict:
     `ActionProposed` + `VerdictIssued` (+ `GateViolationDetected` per
     denying rule hit) -> return the `Verdict`. Deny verdicts are NEVER
     silent (DESIGN §7.2)."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 3")
+    ledger = default_ledger()
+    dials = PolicyDials.load()
+    version_hash = policy_version_hash(dials, list(RULE_IDS))
+    _ensure_policy_version(ledger, dials, version_hash)
+
+    ctx = _context.assemble(action, dials)
+
+    proposed_payload = ActionProposedPayload(
+        kind=action.kind,
+        account_ref=action.account_ref,
+        requested_by=action.requested_by,
+        thesis_id=action.thesis_id,
+        order=action.order.model_dump(mode="json") if action.order is not None else None,
+    )
+    _append(ledger, "ActionProposed", proposed_payload.model_dump(mode="json"))
+
+    verdict = _evaluate.evaluate_pure(action, ctx, version_hash, RULES)
+
+    issued_payload = VerdictIssuedPayload(
+        verdict_id=verdict.verdict_id,
+        kind=action.kind,
+        account_ref=action.account_ref,
+        thesis_id=action.thesis_id,
+        allow=verdict.allow,
+        rule_hits=[hit.model_dump(mode="json") for hit in verdict.rule_hits],
+        policy_version_hash=verdict.policy_version_hash,
+    )
+    _append(ledger, "VerdictIssued", issued_payload.model_dump(mode="json"))
+
+    for hit in verdict.rule_hits:
+        if hit.outcome != "fail":
+            continue
+        rule = RULES_BY_ID.get(hit.rule_id)
+        violation_payload = GateViolationDetectedPayload(
+            rule_id=hit.rule_id,
+            account_ref=action.account_ref,
+            thesis_id=action.thesis_id,
+            measured=hit.measured,
+            limit=hit.limit,
+            why=rule.why if rule is not None else f"rule {hit.rule_id} denied this action",
+        )
+        _append(ledger, "GateViolationDetected", violation_payload.model_dump(mode="json"))
+
+    return verdict
 
 
 def status() -> dict[str, Any]:
@@ -41,7 +143,18 @@ def status() -> dict[str, Any]:
     fine) — ensures a `PolicyVersionLoaded` event for the current hash on
     first call per process, plus `ConfigChanged` when the hash differs from
     the last recorded one (CTO addendum, "Ambient wiring")."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 3")
+    ledger = default_ledger()
+    dials = PolicyDials.load()
+    version_hash = policy_version_hash(dials, list(RULE_IDS))
+    _ensure_policy_version(ledger, dials, version_hash)
+    halted, halt_reason = _context._halt_state(ledger)
+    return {
+        "policy_version_hash": version_hash,
+        "halted": halted,
+        "halt_reason": halt_reason,
+        "dials": canonical_dump(dials),
+        "rules": [{"id": rule.id, "why": rule.why} for rule in RULES],
+    }
 
 
 def promotion_status() -> dict[str, Any]:
@@ -60,13 +173,21 @@ def confirm_promotion() -> None:
 def halt(reason: str) -> None:
     """Appends `HaltSet(reason)` — R-001 denies every mutating action while
     it is unresolved."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 3")
+    ledger = default_ledger()
+    payload = HaltSetPayload(reason=reason, scope="all", set_by=_ACTOR)
+    _append(ledger, "HaltSet", payload.model_dump(mode="json"))
 
 
 def resume() -> None:
     """Appends `HaltCleared`, clearing the most recent unresolved
     `HaltSet`."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 3")
+    ledger = default_ledger()
+    halt_events = ledger.query(EventFilter(types=["HaltSet"]))
+    halt_event_id = halt_events[-1].event_id if halt_events else None
+    payload = HaltClearedPayload(
+        reason="resume", halt_event_id=halt_event_id, cleared_by=_ACTOR
+    )
+    _append(ledger, "HaltCleared", payload.model_dump(mode="json"))
 
 
 __all__ = [

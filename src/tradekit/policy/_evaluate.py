@@ -18,9 +18,30 @@ results up into one Verdict."
 
 from __future__ import annotations
 
-from tradekit.contracts import ProposedAction, Verdict
+import hashlib
+
+from tradekit.contracts import ProposedAction, RuleHit, Verdict
 from tradekit.policy._context import PolicyContext
 from tradekit.policy._rules import Rule
+
+
+def _deterministic_verdict_id(
+    action: ProposedAction, ctx: PolicyContext, policy_version_hash: str, hits: list[RuleHit]
+) -> str:
+    """A pure, deterministic id — NOT a fresh ULID (which would break the
+    property test's "same inputs -> byte-identical Verdict" requirement).
+    sha256 over the action/context/hash/hits, all rendered through each
+    model's own JSON serialization so the id is reproducible byte-for-byte
+    across repeated calls with identical inputs."""
+    blob = "|".join(
+        [
+            action.model_dump_json(),
+            ctx.model_dump_json(),
+            policy_version_hash,
+            "|".join(hit.model_dump_json() for hit in hits),
+        ]
+    ).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 def evaluate_pure(
@@ -34,9 +55,15 @@ def evaluate_pure(
     passed). No I/O — `policy.evaluate()` is the only caller, and it is the
     layer that ledgers `ActionProposed`/`VerdictIssued`/
     `GateViolationDetected` around this pure call."""
-    raise NotImplementedError(
-        "P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 3; pure "
-        "(action, ctx, rules) -> Verdict core, no I/O"
+    applicable = tuple(rule for rule in rules if action.kind in rule.applies_to)
+    hits = [rule.check(action, ctx) for rule in applicable]
+    allow = all(hit.outcome == "pass" for hit in hits)
+    verdict_id = _deterministic_verdict_id(action, ctx, policy_version_hash, hits)
+    return Verdict(
+        verdict_id=verdict_id,
+        allow=allow,
+        rule_hits=hits,
+        policy_version_hash=policy_version_hash,
     )
 
 

@@ -1239,3 +1239,48 @@ state machine).
     documented cross-module internal exception, same class as
     thesis -> mae._runtime; if policy ever grows a thesis dependency the
     dials extract to a shared leaf (TD-register change, Mike sign-off).
+
+---
+
+## Round-10 additions — P2 batch C dev pass (evaluate/halt to green),
+2026-07-17
+
+81. **Fabricated-thesis-id fallback REJECTED; the allow path must be
+    EARNED (CTO adjudication, batch-C dev pass).** The dev pass's first
+    draft of `_context._thesis_prereqs`/`_recorded_sizing` carried a
+    permissive fallback for a `thesis_id` with zero ledger history
+    (never drafted/submitted at all): R-010's prerequisite fields got an
+    `unverified:<id>` placeholder + `ev_ok=True`, and R-012 fell back to
+    the action's OWN order notional (deviation 0, a no-op). Flagged by
+    the dev pass; CTO REJECTED it — an action citing a NEVER-DRAFTED
+    thesis_id passing thesis-prerequisites and sizing-purity means a
+    fabricated thesis_id defeats both gates, exactly the gaming vector
+    the policy engine exists to block (ASSUMPTIONS 25's spirit; same
+    philosophy as the EWMA-override adjudication, entry 54). The defect
+    was the TEST FIXTURE (`test_evaluate.py`'s bare `TH-1` with no
+    events), not the anti-permissive semantics. Resolution, all in the
+    same dev pass:
+    (a) src: fallbacks removed — unknown/never-submitted thesis_id ->
+    R-010's fields are `None` -> deny with `insufficient_context`; no
+    recorded `SizingComputed` -> `recorded_sizing_usd=None` -> R-012
+    denies with `insufficient_context`. Anti-permissive, no exceptions.
+    (b) `test_evaluate.py` gained `_seed_thesis_events()`: every
+    ledgered evaluate() test now harness-appends the minimal REAL events
+    that earn the allow (MarketSnapshotTaken, SizingComputed with
+    `recommended_size_usd` matching the order notional within R-012's 1%
+    tolerance, ThesisSubmitted carrying `market_snapshot_id` + the EV
+    numbers, ReviewCompleted kind="thesis_review") — each event's
+    docstring maps it to the R-010/R-012 input it feeds, using the typed
+    payload models per the house pattern.
+    (c) TWO new deny tests pin the closed hole:
+    `test_evaluate_denies_a_fabricated_never_drafted_thesis_id_via_r010`
+    (deny + insufficient_context + GateViolationDetected ledgered) and
+    `test_evaluate_denies_a_submitted_thesis_with_no_sizing_computed_via_
+    r012`.
+    Related batch-C dev-pass notes, CTO-accepted in the same
+    adjudication: `tests/unit/cli/test_cli_policy.py`'s two `policy
+    status`/`halt`/`resume` tests were batch-C-authored stub-era pins of
+    `_guard_not_implemented`'s clean-nonzero-exit; now that those verbs
+    are real, they assert the real exit-0 success shape instead (their
+    obsolescence was planned — the guard itself remains for
+    `promote status|confirm`, still stubs until batch D).
