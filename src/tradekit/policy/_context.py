@@ -30,7 +30,8 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from tradekit.contracts import Event, EventFilter, ProposedAction
+from tradekit import mae
+from tradekit.contracts import Event, EventFilter, ProposedAction, StrategyMetrics, TradeRecord
 from tradekit.ledger import Ledger, default_ledger
 from tradekit.policy._dials import PolicyDials
 
@@ -353,6 +354,120 @@ def _trailing_graded_outcomes(
     return trimmed  # type: ignore[return-value]
 
 
+def _account_thesis_ids(ledger: Ledger, account_ref: str) -> set[str]:
+    return {
+        str(event.payload.get("thesis_id"))
+        for event in ledger.query(EventFilter(types=["ThesisDrafted"]))
+        if event.payload.get("contract", {}).get("account_ref") == account_ref
+    }
+
+
+def _thesis_entry_ts(ledger: Ledger, thesis_id: str) -> datetime | None:
+    """Real ledger timestamp marking this thesis's entry into the market —
+    `ThesisActivated` if present (the actual broker-fill trigger, P3), else
+    `ThesisSubmitted` (the earliest moment a real order was even proposed).
+    `None` when neither exists (never fabricated)."""
+    activated = _events_for_thesis(ledger, "ThesisActivated", thesis_id)
+    if activated:
+        return activated[-1].ts_utc.astimezone(UTC)
+    submitted = _events_for_thesis(ledger, "ThesisSubmitted", thesis_id)
+    if submitted:
+        return submitted[-1].ts_utc.astimezone(UTC)
+    return None
+
+
+def _trade_log_for_account(ledger: Ledger, account_ref: str) -> list[TradeRecord]:
+    """Derive a `TradeRecord` log from graded non-void, with-pnl theses for
+    `account_ref` (CTO addendum's story-4 pin: "over the account's graded
+    non-void with-pnl theses").
+
+    FLAGGED (ASSUMPTIONS 90): P2 events carry no per-fill entry/exit PRICE
+    data (that lives on `FillRecorded`, whose own trade-log derivation is
+    explicitly out of scope this batch) — `entry_price`/`exit_price` here are
+    a numeraire-100 reconstruction solved algebraically so
+    `_metrics._pnl(record) == the real ledgered pnl_usd` EXACTLY, using only
+    real facts already in the ledger (`pnl_usd`, `SizingComputed`'s recorded
+    notional, the thesis contract's own `direction`, and real event
+    timestamps) — no market price is invented, only an accounting unit. A
+    thesis missing `SizingComputed` or any entry-marker event is skipped
+    rather than guessed (anti-fabrication, same discipline as
+    `_recorded_sizing`/`_thesis_prereqs` above)."""
+    thesis_ids = _account_thesis_ids(ledger, account_ref)
+    trades: list[TradeRecord] = []
+    for event in ledger.query(EventFilter(types=["ThesisGraded"])):
+        thesis_id = event.payload.get("thesis_id")
+        if thesis_id not in thesis_ids:
+            continue
+        if event.payload.get("outcome") not in ("PASS", "FAIL"):
+            continue
+        pnl = event.payload.get("pnl_usd")
+        if pnl is None:
+            continue
+        pnl_dec = Decimal(str(pnl))
+
+        drafted = _latest_payload_for_thesis(ledger, "ThesisDrafted", thesis_id)
+        side = (drafted or {}).get("contract", {}).get("direction", "long")
+        if side not in ("long", "short"):
+            side = "long"
+
+        sizing = _latest_payload_for_thesis(ledger, "SizingComputed", thesis_id)
+        recommended = sizing.get("sizing", {}).get("recommended_size_usd") if sizing else None
+        size = Decimal(str(recommended)) if recommended is not None else None
+        if size is None or size <= 0:
+            continue
+
+        entry_ts = _thesis_entry_ts(ledger, thesis_id)
+        graded_ts_raw = event.payload.get("graded_ts")
+        exit_ts = (
+            datetime.fromisoformat(graded_ts_raw) if graded_ts_raw else event.ts_utc
+        ).astimezone(UTC)
+        if entry_ts is None or exit_ts <= entry_ts:
+            continue
+
+        entry_price = Decimal("100")
+        direction = Decimal(1) if side == "long" else Decimal(-1)
+        exit_price = entry_price + (pnl_dec * entry_price) / (direction * size)
+        if exit_price <= 0:
+            continue
+
+        trades.append(
+            TradeRecord(
+                entry_ts=entry_ts,
+                exit_ts=exit_ts,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                side=side,
+                size_usd=size,
+                fees_usd=Decimal("0"),
+            )
+        )
+    return trades
+
+
+def strategy_metrics_for_account(
+    ledger: Ledger, account_ref: str, dials: PolicyDials
+) -> StrategyMetrics | None:
+    """R-016's real metrics wiring (ASSUMPTIONS 77's forward pin) — calls
+    the PUBLIC `tradekit.mae.compute_strategy_metrics` verb (module-attribute
+    call, `mae.compute_strategy_metrics(...)`, never a `from ... import`, so
+    tests can monkeypatch the dotted path `"tradekit.mae.
+    compute_strategy_metrics"`) over `_trade_log_for_account`'s derivation.
+    `None` when there is no trade log to evaluate yet (insufficient_context,
+    never a fabricated verdict) — the call to `mae.compute_strategy_metrics`
+    always happens (never short-circuited on an empty trade log BEFORE the
+    call) so a monkeypatched seam is always exercised; only the REAL
+    implementation's `ValueError` on an empty log is caught here."""
+    trade_log = _trade_log_for_account(ledger, account_ref)
+    try:
+        return mae.compute_strategy_metrics(
+            trade_log,
+            n_trials=dials.n_trials_default,
+            base_equity_usd=dials.paper_starting_equity_usd,
+        )
+    except ValueError:
+        return None
+
+
 def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
     """Read the ledger (via `ledger.default_ledger()`) and build the frozen
     `PolicyContext` snapshot `evaluate()` hands to the pure core.
@@ -372,6 +487,22 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
     halted, halt_reason = _halt_state(ledger)
     equity = _paper_equity(dials, action.account_ref)
     review_artifact_id, market_snapshot_id, ev_ok = _thesis_prereqs(ledger, action.thesis_id)
+
+    strategy_metrics: dict[str, Any] | None = None
+    if action.kind == "promote":
+        # R-016 rewire (ASSUMPTIONS 77's forward pin, batch D): real
+        # mae.compute_strategy_metrics over the account's own graded
+        # non-void with-pnl theses — batch C's hardcoded `strategy_metrics=
+        # None` placeholder is retired. `passes_gates` stays a REAL derived
+        # key (edge_verdict == "positive", ASSUMPTIONS 89) alongside the
+        # full StrategyMetrics dump, so `_rules._check_r016` (unit-tested
+        # directly against hand-built contexts in test_rules.py) needs no
+        # change — it reads a real boolean now, not a synthetic stand-in.
+        metrics = strategy_metrics_for_account(ledger, action.account_ref, dials)
+        if metrics is not None:
+            dumped = metrics.model_dump(mode="json")
+            dumped["passes_gates"] = metrics.edge_verdict == "positive"
+            strategy_metrics = dumped
 
     return PolicyContext(
         now=now,
@@ -394,8 +525,8 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
         trailing_graded_outcomes=_trailing_graded_outcomes(
             ledger, action.account_ref, dials.void_rate_window
         ),
-        strategy_metrics=None,  # mae.compute_strategy_metrics wiring — batch D (entry 77).
+        strategy_metrics=strategy_metrics,
     )
 
 
-__all__ = ["PolicyContext", "assemble", "clock"]
+__all__ = ["PolicyContext", "assemble", "clock", "strategy_metrics_for_account"]

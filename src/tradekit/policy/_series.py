@@ -67,11 +67,14 @@ DESIGN PINS (CTO addendum, story-4 pins — binding on the dev pass):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from tradekit.contracts import Event, EventFilter
 from tradekit.ledger import Ledger
 from tradekit.policy._dials import PolicyDials
+
+_WINDOW = timedelta(days=30)
 
 
 @dataclass(frozen=True)
@@ -98,11 +101,12 @@ class SeriesStats:
 def series_index(grade_ts: datetime, epoch: datetime) -> int:
     """`floor((grade_ts - epoch) / 30 days)` — pure, no I/O. See module
     docstring's boundary pin (`epoch + 30d` exactly lands in series 1, not
-    0; `epoch - 1s` lands in series -1)."""
-    raise NotImplementedError(
-        "P2 batch D dev pass — docs/handoff/SPRINT-P2-thesis-policy.md story 4, "
-        "CTO addendum 'series_index(grade_ts, epoch) = floor((grade_ts - epoch) / 30d)'"
-    )
+    0; `epoch - 1s` lands in series -1).
+
+    `timedelta // timedelta` is Python's own true floor division (floors
+    toward negative infinity, not toward zero) — exactly the boundary
+    semantics pinned above, including the negative-index case."""
+    return (grade_ts - epoch) // _WINDOW
 
 
 def window_for(series_idx: int, epoch: datetime) -> tuple[datetime, datetime]:
@@ -110,9 +114,30 @@ def window_for(series_idx: int, epoch: datetime) -> tuple[datetime, datetime]:
     `series_index`: `window_start = epoch + 30d * series_idx`,
     `window_end = window_start + 30d` (right-open, matching `series_index`'s
     own boundary convention)."""
-    raise NotImplementedError(
-        "P2 batch D dev pass — docs/handoff/SPRINT-P2-thesis-policy.md story 4"
-    )
+    start = epoch + _WINDOW * series_idx
+    end = start + _WINDOW
+    return start, end
+
+
+def _account_thesis_ids(ledger: Ledger, account_ref: str) -> set[str]:
+    """Every `thesis_id` whose `ThesisDrafted.contract.account_ref` matches
+    (mirrors `policy._context`'s own account-scoping helpers)."""
+    return {
+        str(event.payload.get("thesis_id"))
+        for event in ledger.query(EventFilter(types=["ThesisDrafted"]))
+        if event.payload.get("contract", {}).get("account_ref") == account_ref
+    }
+
+
+def _graded_ts(event: Event) -> datetime:
+    raw = event.payload.get("graded_ts")
+    if raw is not None:
+        ts = datetime.fromisoformat(raw)
+    else:
+        ts = event.ts_utc
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
 
 
 def series_stats(
@@ -126,8 +151,83 @@ def series_stats(
     `ThesisGraded`/`GateViolationDetected` events — see module docstring for
     the full arithmetic pin (graded_count/void_count/expectancy/mdd_pct/
     gate_violations/complete/clean)."""
-    raise NotImplementedError(
-        "P2 batch D dev pass — docs/handoff/SPRINT-P2-thesis-policy.md story 4"
+    epoch = dials.series_epoch
+    window_start, window_end = window_for(series_idx, epoch)
+
+    thesis_ids = _account_thesis_ids(ledger, account_ref)
+    all_graded = [
+        event
+        for event in ledger.query(EventFilter(types=["ThesisGraded"]))
+        if event.payload.get("thesis_id") in thesis_ids
+    ]
+
+    in_window = sorted(
+        (event for event in all_graded if window_start <= _graded_ts(event) < window_end),
+        key=_graded_ts,
+    )
+
+    graded_count = sum(1 for e in in_window if e.payload.get("outcome") in ("PASS", "FAIL"))
+    void_count = sum(1 for e in in_window if e.payload.get("outcome") == "VOID")
+
+    non_void_pnls = [
+        Decimal(str(e.payload.get("pnl_usd")))
+        for e in in_window
+        if e.payload.get("outcome") in ("PASS", "FAIL") and e.payload.get("pnl_usd") is not None
+    ]
+    expectancy = (
+        sum(non_void_pnls, Decimal("0")) / len(non_void_pnls) if non_void_pnls else None
+    )
+
+    # Equity entering the window: paper_starting_equity_usd + realized pnl
+    # from ALL graded theses (any account_ref) strictly BEFORE window_start
+    # (module docstring). None-pnl contributes no cash flow.
+    equity_entering = dials.paper_starting_equity_usd
+    for event in ledger.query(EventFilter(types=["ThesisGraded"])):
+        if _graded_ts(event) < window_start:
+            pnl = event.payload.get("pnl_usd")
+            if pnl is not None:
+                equity_entering += Decimal(str(pnl))
+
+    equity = equity_entering
+    peak = equity
+    mdd_pct_value = 0.0
+    for event in in_window:
+        pnl = event.payload.get("pnl_usd")
+        equity += Decimal(str(pnl)) if pnl is not None else Decimal("0")
+        peak = max(peak, equity)
+        if peak > 0:
+            mdd_pct_value = max(mdd_pct_value, float((peak - equity) / peak))
+    mdd_pct: float | None = mdd_pct_value
+
+    gate_violations = sum(
+        1
+        for event in ledger.query(EventFilter(types=["GateViolationDetected"]))
+        if event.payload.get("account_ref") == account_ref
+        and window_start <= event.ts_utc.astimezone(UTC) < window_end
+    )
+
+    complete = now > window_end and graded_count >= 10
+    clean = (
+        complete
+        and gate_violations == 0
+        and expectancy is not None
+        and expectancy > 0
+        and mdd_pct is not None
+        and mdd_pct < 0.15
+    )
+
+    return SeriesStats(
+        account_ref=account_ref,
+        series_index=series_idx,
+        window_start=window_start,
+        window_end=window_end,
+        graded_count=graded_count,
+        void_count=void_count,
+        expectancy=expectancy,
+        mdd_pct=mdd_pct,
+        gate_violations=gate_violations,
+        complete=complete,
+        clean=clean,
     )
 
 

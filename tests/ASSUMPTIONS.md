@@ -1482,3 +1482,19 @@ failures are `NotImplementedError` (`policy._series.*` stubs or
     completeness definitions ever change. (grade-time pnl attribution,
     SeriesClosed P3 deferral, default_account_ref dial, PromotionRefused,
     demotion-trigger mechanics via promotion_status) all as proposed.
+
+    **CTO ratification (2026-07-17) — batch-D dev flags (round 12):**
+    (last-4 window anchored to the account's most-recent graded series
+    index) RATIFIED — converges with wall-clock anchoring because
+    completeness requires >=10 grades either way, and T2 always passes
+    through Mike's manual confirm_promotion as the staleness backstop;
+    batch E's adversarial suite may add an explicit stale-history scenario.
+    (TradeRecord numeraire-100 reconstruction) RATIFIED — preserves every
+    REAL quantity (pnl_usd, size_usd, side, timestamps) and solves
+    exit_price so _metrics._pnl reproduces the ledgered pnl exactly;
+    fabricates no market claims; TODO-P3: real fill prices replace the
+    reconstruction when the broker pipeline lands. (projection-constant
+    duplication) RATIFIED WITH TRIPWIRE — ledger stays stdlib-only by
+    design, so test_rebuild.py now pins _projections' constants ==
+    PolicyDials defaults (drift fails the suite). (promote-status CLI test
+    update) accepted per the ASSUMPTIONS-81 precedent.

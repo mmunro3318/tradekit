@@ -22,27 +22,37 @@ by a rule's `check` or by these verbs directly.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from ulid import ULID
 
 from tradekit.contracts import (
     ActionProposedPayload,
     ConfigChangedPayload,
+    DemotedPayload,
     Event,
     EventFilter,
     GateViolationDetectedPayload,
     HaltClearedPayload,
     HaltSetPayload,
     PolicyVersionLoadedPayload,
+    PromotionConfirmedPayload,
+    PromotionGrantedPayload,
     ProposedAction,
     Verdict,
     VerdictIssuedPayload,
 )
 from tradekit.ledger import Ledger, default_ledger
-from tradekit.policy import _context, _evaluate
+from tradekit.policy import _context, _evaluate, _series
 from tradekit.policy._dials import PolicyDials, canonical_dump, policy_version_hash
 from tradekit.policy._rules import RULE_IDS, RULES, RULES_BY_ID
+
+
+class PromotionRefused(Exception):
+    """`confirm_promotion()`'s typed refusal (ASSUMPTIONS 88, additive
+    export) — no unconsumed `PromotionGranted` event exists for
+    `PolicyDials.default_account_ref`."""
 
 # 'agent:<model>' | 'mike' | 'system:<job>' — every event this module
 # produces is a machine-derived gate decision, not an LLM or human action.
@@ -183,7 +193,191 @@ def promotion_status() -> dict[str, Any]:
     Batch D — dev pass implements this against `policy._series` +
     `mae.compute_strategy_metrics` (R-016 rewire, ASSUMPTIONS 77's forward
     pin) + the `promotion_state` projection."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 4")
+    ledger = default_ledger()
+    dials = PolicyDials.load()
+    account_ref = dials.default_account_ref
+    now = _context.clock()
+    epoch = dials.series_epoch
+
+    current_idx = _series.series_index(now, epoch)
+    evaluation_idx = _latest_graded_series_index(ledger, account_ref, epoch)
+    if evaluation_idx is None:
+        evaluation_idx = current_idx - 1
+    last_4_indices = [
+        evaluation_idx - 3,
+        evaluation_idx - 2,
+        evaluation_idx - 1,
+        evaluation_idx,
+    ]
+    last_4_stats = [
+        _series.series_stats(ledger, account_ref, idx, dials, now) for idx in last_4_indices
+    ]
+
+    clean_count = sum(1 for stats in last_4_stats if stats.clean)
+    non_void_total = sum(stats.graded_count for stats in last_4_stats)
+
+    metrics = _context.strategy_metrics_for_account(ledger, account_ref, dials)
+    r016_pass = metrics is not None and metrics.edge_verdict == "positive"
+
+    criteria = {
+        "three_of_last_four_clean": clean_count >= 3,
+        "most_recent_complete_clean": last_4_stats[-1].clean,
+        "non_void_total_at_least_30": non_void_total >= 30,
+        "r016_metrics_pass": r016_pass,
+    }
+    eligible = all(criteria.values())
+
+    tier, live_remaining, last_confirmed = _current_tier(ledger, account_ref)
+
+    if eligible and tier != "T2" and not _has_unconsumed_grant(ledger, account_ref):
+        grant_payload = PromotionGrantedPayload(
+            account_ref=account_ref, from_tier="T1", to_tier="T2", criteria=criteria
+        )
+        _append(ledger, "PromotionGranted", grant_payload.model_dump(mode="json"))
+
+    if tier == "T2" and last_confirmed is not None:
+        trigger = _demotion_trigger(ledger, account_ref, last_confirmed.ts_utc)
+        if trigger is not None:
+            kind, detail = trigger
+            demoted_payload = DemotedPayload(
+                account_ref=account_ref,
+                from_tier="T2",
+                to_tier="T1",
+                trigger=kind,  # type: ignore[arg-type]
+                detail=detail,
+            )
+            _append(ledger, "Demoted", demoted_payload.model_dump(mode="json"))
+            tier = "T1"
+            live_remaining = None
+
+    current_series_stats = _series.series_stats(ledger, account_ref, current_idx, dials, now)
+
+    return {
+        "account_ref": account_ref,
+        "tier": tier,
+        "current_series": {
+            "index": current_idx,
+            "window": [
+                current_series_stats.window_start.isoformat(),
+                current_series_stats.window_end.isoformat(),
+            ],
+            "counts": {
+                "graded": current_series_stats.graded_count,
+                "void": current_series_stats.void_count,
+            },
+            "clean_so_far": current_series_stats.clean,
+        },
+        "last_4_series": [
+            {
+                "index": stats.series_index,
+                "complete": stats.complete,
+                "clean": stats.clean,
+                "graded_count": stats.graded_count,
+                "void_count": stats.void_count,
+            }
+            for stats in last_4_stats
+        ],
+        "t2_eligible": {"eligible": eligible, "criteria": criteria},
+        "live_sequence_remaining": live_remaining,
+    }
+
+
+def _latest_graded_series_index(
+    ledger: Ledger, account_ref: str, epoch: datetime
+) -> int | None:
+    """The highest series index this account has ANY `ThesisGraded` history
+    in — the T1->T2 evaluation's own "most recent" series (CTO addendum:
+    "the most recent (series 3) is one of the clean ones", i.e. the
+    evaluation window is anchored to the account's own graded history, not
+    to wall-clock "now" — a fresh account with no grading yet has no
+    evaluation history at all). `None` when the account has never had a
+    thesis graded."""
+    thesis_ids = _series._account_thesis_ids(ledger, account_ref)
+    indices = [
+        _series.series_index(_series._graded_ts(event), epoch)
+        for event in ledger.query(EventFilter(types=["ThesisGraded"]))
+        if event.payload.get("thesis_id") in thesis_ids
+    ]
+    return max(indices) if indices else None
+
+
+def _base_tier(account_ref: str) -> Literal["T0", "T1", "T2"]:
+    """Pre-promotion baseline tier, same convention as `_context._account_
+    tier`: a `"paper:"` account can only exist at T1 (trading paper at all
+    implies the T1 grant already happened)."""
+    if account_ref.startswith("paper:"):
+        return "T1"
+    return "T0"
+
+
+def _current_tier(
+    ledger: Ledger, account_ref: str
+) -> tuple[Literal["T0", "T1", "T2"], int | None, Event | None]:
+    """`(tier, live_sequence_remaining, last_confirmed_event)` derived from
+    `PromotionConfirmed`/`Demoted` history for `account_ref` — T2 iff the
+    latest `PromotionConfirmed` has no LATER `Demoted` (§7.3)."""
+    confirmed = sorted(
+        (
+            event
+            for event in ledger.query(EventFilter(types=["PromotionConfirmed"]))
+            if event.payload.get("account_ref") == account_ref
+        ),
+        key=lambda event: event.ts_utc,
+    )
+    if not confirmed:
+        return _base_tier(account_ref), None, None
+    last_confirmed = confirmed[-1]
+    demoted = [
+        event
+        for event in ledger.query(EventFilter(types=["Demoted"]))
+        if event.payload.get("account_ref") == account_ref
+        and event.ts_utc > last_confirmed.ts_utc
+    ]
+    if demoted:
+        return _base_tier(account_ref), None, last_confirmed
+    remaining = last_confirmed.payload.get("live_sequence_remaining")
+    return "T2", remaining, last_confirmed
+
+
+def _has_unconsumed_grant(ledger: Ledger, account_ref: str) -> bool:
+    grants = [
+        event
+        for event in ledger.query(EventFilter(types=["PromotionGranted"]))
+        if event.payload.get("account_ref") == account_ref
+    ]
+    if not grants:
+        return False
+    confirmed_grant_ids = {
+        event.payload.get("granted_event_id")
+        for event in ledger.query(EventFilter(types=["PromotionConfirmed"]))
+        if event.payload.get("account_ref") == account_ref
+    }
+    return any(grant.event_id not in confirmed_grant_ids for grant in grants)
+
+
+def _demotion_trigger(
+    ledger: Ledger, account_ref: str, since_ts: datetime
+) -> tuple[str, str] | None:
+    """First demotion trigger for `account_ref` strictly since `since_ts`
+    (§7.3's three named triggers). P2 only produces the `GateViolationDetected`
+    trigger end-to-end (ASSUMPTIONS 92: R-009 drawdown-breach and
+    failed-live-grade triggers share the identical mechanics but have no
+    dedicated P2 producer/test this batch — a coverage gap, not a design
+    gap)."""
+    since_ts = since_ts.astimezone(UTC)
+    violations = sorted(
+        (
+            event
+            for event in ledger.query(EventFilter(types=["GateViolationDetected"]))
+            if event.payload.get("account_ref") == account_ref
+            and event.ts_utc.astimezone(UTC) > since_ts
+        ),
+        key=lambda event: event.ts_utc,
+    )
+    if violations:
+        first = violations[0]
+        return "gate_violation", f"{first.payload.get('rule_id')} ({first.event_id})"
+    return None
 
 
 def confirm_promotion() -> None:
@@ -195,7 +389,38 @@ def confirm_promotion() -> None:
     `PromotionRefused`, additive `policy` export, same class of pin as
     `thesis.VoidRefused`) when no grant exists, or the most recent grant is
     already consumed. Story 4 — batch D."""
-    raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 4")
+    ledger = default_ledger()
+    dials = PolicyDials.load()
+    account_ref = dials.default_account_ref
+
+    grants = sorted(
+        (
+            event
+            for event in ledger.query(EventFilter(types=["PromotionGranted"]))
+            if event.payload.get("account_ref") == account_ref
+        ),
+        key=lambda event: event.ts_utc,
+    )
+    confirmed_grant_ids = {
+        event.payload.get("granted_event_id")
+        for event in ledger.query(EventFilter(types=["PromotionConfirmed"]))
+        if event.payload.get("account_ref") == account_ref
+    }
+    unconsumed = [grant for grant in grants if grant.event_id not in confirmed_grant_ids]
+    if not unconsumed:
+        raise PromotionRefused(
+            f"no unconsumed PromotionGranted event for account_ref={account_ref!r}"
+        )
+    grant = unconsumed[-1]
+
+    payload = PromotionConfirmedPayload(
+        account_ref=account_ref,
+        to_tier="T2",
+        granted_event_id=grant.event_id,
+        live_sequence_remaining=3,
+        confirmed_by="mike",
+    )
+    _append(ledger, "PromotionConfirmed", payload.model_dump(mode="json"))
 
 
 def halt(reason: str) -> None:
@@ -219,6 +444,7 @@ def resume() -> None:
 
 
 __all__ = [
+    "PromotionRefused",
     "confirm_promotion",
     "evaluate",
     "halt",

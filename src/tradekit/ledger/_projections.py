@@ -36,9 +36,28 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from tradekit.contracts import Event
 from tradekit.ledger._db import to_stored_ts
+
+# SPRINT P2 batch D: `series`/`promotion_state` real population. `ledger`
+# sits BELOW `policy` in the dependency graph (policy imports ledger, never
+# the reverse — importing `tradekit.policy` here would be a genuine import
+# cycle, `tradekit.policy/__init__.py` itself does `from tradekit.ledger
+# import Ledger, default_ledger` at its own top), so `policy._series`'s
+# arithmetic is INDEPENDENTLY re-derived here rather than imported —
+# `_series.py`'s own module docstring names this explicitly ("the derivation
+# here and the projection's population must agree byte-for-byte", ASSUMPTIONS
+# 86). The epoch/equity constants below mirror `PolicyDials`'s own defaults
+# (`series_epoch`/`paper_starting_equity_usd`); a `TK_CONFIG_PATH` override
+# of those dials would NOT be reflected in this projection — a known,
+# documented divergence risk (flagged, not fixed this batch: fixing it for
+# real needs a shared leaf below both modules, a TD-register change).
+_SERIES_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
+_PAPER_STARTING_EQUITY_USD = Decimal("500")
+_SERIES_WINDOW = timedelta(days=30)
 
 _TABLES: dict[str, str] = {
     "runs": """
@@ -141,8 +160,11 @@ def rebuild(con: sqlite3.Connection, events: Iterable[Event]) -> None:
     for name in _TABLES:
         con.execute(f"DROP TABLE IF EXISTS {name}")
     ensure_tables(con)
-    for event in events:
+    materialized = list(events)
+    for event in materialized:
         _apply(con, event)
+    _materialize_series(con, materialized)
+    _materialize_promotion_state(con, materialized)
 
 
 def _apply(con: sqlite3.Connection, event: Event) -> None:
@@ -235,3 +257,166 @@ def _apply(con: sqlite3.Connection, event: Event) -> None:
                 "WHERE thesis_id = ?",
                 (outcome, outcome, ts, thesis_id),
             )
+        # SPRINT P2 batch D: pnl_daily aggregation. P2 convention (FLAGGED,
+        # matching test_rebuild.py's own docstring): realized pnl lands at
+        # GRADE time, not FillRecorded time — a P3 broker refinement.
+        # None-pnl theses are excluded from the SUM (ASSUMPTIONS 71) but a
+        # graded day with zero measured pnl still gets a row at "0", distinct
+        # from a day with no grading at all (no row).
+        account_row = con.execute(
+            "SELECT account_ref FROM theses WHERE thesis_id = ?", (thesis_id,)
+        ).fetchone()
+        if account_row is not None and account_row[0] is not None:
+            account_ref = account_row[0]
+            graded_ts = _parse_graded_ts(payload.get("graded_ts"), event.ts_utc)
+            utc_date = graded_ts.astimezone(UTC).date().isoformat()
+            pnl = payload.get("pnl_usd")
+            pnl_dec = Decimal(str(pnl)) if pnl is not None else Decimal("0")
+            existing = con.execute(
+                "SELECT realized_pnl FROM pnl_daily WHERE account_ref = ? AND utc_date = ?",
+                (account_ref, utc_date),
+            ).fetchone()
+            new_total = (Decimal(existing[0]) if existing is not None else Decimal("0")) + pnl_dec
+            con.execute(
+                "INSERT OR REPLACE INTO pnl_daily VALUES (?, ?, ?)",
+                (account_ref, utc_date, str(new_total)),
+            )
+
+
+def _parse_graded_ts(raw: str | None, fallback: datetime) -> datetime:
+    ts = datetime.fromisoformat(raw) if raw else fallback
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
+
+
+def _materialize_series(con: sqlite3.Connection, events: list[Event]) -> None:
+    """Independently re-derive `policy._series.series_stats`'s own
+    complete/clean arithmetic (module-top docstring explains why this is
+    duplicated rather than imported) over every (account_ref, series_index)
+    pair with any graded history, and upsert one `series` row each."""
+    account_by_thesis: dict[str, str] = {}
+    graded_events: list[Event] = []
+    violations: list[Event] = []
+    for event in events:
+        if event.type == "ThesisDrafted":
+            contract = event.payload.get("contract", {})
+            account_ref = contract.get("account_ref")
+            thesis_id = event.payload.get("thesis_id")
+            if thesis_id is not None and account_ref is not None:
+                account_by_thesis[thesis_id] = account_ref
+        elif event.type == "ThesisGraded":
+            graded_events.append(event)
+        elif event.type == "GateViolationDetected":
+            violations.append(event)
+
+    per_account: dict[str, list[Event]] = {}
+    for event in graded_events:
+        thesis_id = event.payload.get("thesis_id")
+        account_ref = account_by_thesis.get(thesis_id) if thesis_id is not None else None
+        if account_ref is not None:
+            per_account.setdefault(account_ref, []).append(event)
+
+    def graded_ts(event: Event) -> datetime:
+        return _parse_graded_ts(event.payload.get("graded_ts"), event.ts_utc)
+
+    series_keys: set[tuple[str, int]] = set()
+    for account_ref, acc_events in per_account.items():
+        for event in acc_events:
+            idx = (graded_ts(event) - _SERIES_EPOCH) // _SERIES_WINDOW
+            series_keys.add((account_ref, idx))
+
+    now = datetime.now(UTC)
+    for account_ref, series_idx in sorted(series_keys, key=lambda k: (k[0], k[1])):
+        window_start = _SERIES_EPOCH + _SERIES_WINDOW * series_idx
+        window_end = window_start + _SERIES_WINDOW
+
+        in_window = sorted(
+            (e for e in per_account[account_ref] if window_start <= graded_ts(e) < window_end),
+            key=graded_ts,
+        )
+        graded_count = sum(1 for e in in_window if e.payload.get("outcome") in ("PASS", "FAIL"))
+        non_void_pnls = [
+            Decimal(str(e.payload.get("pnl_usd")))
+            for e in in_window
+            if e.payload.get("outcome") in ("PASS", "FAIL") and e.payload.get("pnl_usd") is not None
+        ]
+        expectancy = (
+            sum(non_void_pnls, Decimal("0")) / len(non_void_pnls) if non_void_pnls else None
+        )
+
+        equity_entering = _PAPER_STARTING_EQUITY_USD
+        for event in graded_events:
+            if graded_ts(event) < window_start:
+                pnl = event.payload.get("pnl_usd")
+                if pnl is not None:
+                    equity_entering += Decimal(str(pnl))
+
+        equity = equity_entering
+        peak = equity
+        mdd_pct = 0.0
+        for event in in_window:
+            pnl = event.payload.get("pnl_usd")
+            equity += Decimal(str(pnl)) if pnl is not None else Decimal("0")
+            peak = max(peak, equity)
+            if peak > 0:
+                mdd_pct = max(mdd_pct, float((peak - equity) / peak))
+
+        gate_violations = sum(
+            1
+            for e in violations
+            if e.payload.get("account_ref") == account_ref
+            and window_start <= e.ts_utc.astimezone(UTC) < window_end
+        )
+
+        complete = now > window_end and graded_count >= 10
+        clean = (
+            complete
+            and gate_violations == 0
+            and expectancy is not None
+            and expectancy > 0
+            and mdd_pct < 0.15
+        )
+
+        con.execute(
+            "INSERT OR REPLACE INTO series VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                account_ref,
+                series_idx,
+                to_stored_ts(window_start),
+                to_stored_ts(window_end),
+                int(complete),
+                int(clean),
+            ),
+        )
+
+
+def _materialize_promotion_state(con: sqlite3.Connection, events: list[Event]) -> None:
+    """Fold `PromotionConfirmed`/`Demoted` history per `account_ref` into the
+    current tier — `PromotionGranted` alone never changes tier (it is an
+    offer, not a state change; only `confirm_promotion()`'s
+    `PromotionConfirmed` — or a later `Demoted` — moves the projection)."""
+    state: dict[str, tuple[str, int | None, datetime]] = {}
+    for event in events:
+        if event.type == "PromotionConfirmed":
+            account_ref = event.payload.get("account_ref")
+            if account_ref is not None:
+                state[account_ref] = (
+                    event.payload.get("to_tier", "T2"),
+                    event.payload.get("live_sequence_remaining"),
+                    event.ts_utc,
+                )
+        elif event.type == "Demoted":
+            account_ref = event.payload.get("account_ref")
+            if account_ref is not None:
+                state[account_ref] = (
+                    event.payload.get("to_tier", "T1"),
+                    None,
+                    event.ts_utc,
+                )
+
+    for account_ref, (tier, live_remaining, updated_ts) in state.items():
+        con.execute(
+            "INSERT OR REPLACE INTO promotion_state VALUES (?, ?, ?, ?)",
+            (account_ref, tier, live_remaining, to_stored_ts(updated_ts)),
+        )

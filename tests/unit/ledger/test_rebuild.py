@@ -443,3 +443,20 @@ def test_promotion_state_and_series_projections_survive_rebuild_idempotently(
         "a second rebuild of the SAME event log must reproduce byte-identical series "
         "rows — projections are disposable caches, the log is the only truth (§6.1)"
     )
+
+
+def test_projection_series_constants_stay_synced_with_policy_dials_defaults() -> None:
+    """Drift tripwire (P2 batch-D CTO gate): ledger/_projections.py re-derives
+    the series arithmetic with its OWN constants because ledger must stay
+    stdlib-only (no pydantic-settings import). If PolicyDials' defaults ever
+    change (config.toml or _dials.py), this test forces the projection
+    constants to be updated in the same commit — the narrow-but-real drift
+    risk flagged by the batch-D dev report."""
+    from tradekit.ledger import (
+        _projections,  # noqa: TID251 — harness tripwire, reads constants only
+    )
+    from tradekit.policy._dials import PolicyDials
+
+    dials = PolicyDials.load()
+    assert _projections._SERIES_EPOCH == dials.series_epoch
+    assert _projections._PAPER_STARTING_EQUITY_USD == dials.paper_starting_equity_usd
