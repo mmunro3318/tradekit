@@ -5,31 +5,37 @@ Deep interface: six verbs, per the §4.2 pins. The grading ARITHMETIC
 with the event-sourced state machine — see
 docs/handoff/SPRINT-P2-thesis-policy.md.
 
-Batch A (this pass) implements draft/submit/approve/reject; grade/void stay
-`NotImplementedError` stubs until batch B. State is DERIVED from the event
-log on every call (never cached in a module variable — DESIGN §10.1,
-`_machine.derive_state`); internals (state derivation/guards, submit's
-snapshot/sizing/EV mechanics) live in `_machine.py`/`_submit.py` per the
-house deep-module style — this module stays thin verb bodies only.
+Batch A implemented draft/submit/approve/reject; batch B (this pass) wires
+grade/void. State is DERIVED from the event log on every call (never cached
+in a module variable — DESIGN §10.1, `_machine.derive_state`); internals
+(state derivation/guards, submit's snapshot/sizing/EV mechanics, grade's
+bar-fetch/pnl arithmetic) live in `_machine.py`/`_submit.py`/
+`_grade_wiring.py` per the house deep-module style — this module stays thin
+verb bodies only.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from ulid import ULID
 
 from tradekit.contracts import (
     Event,
+    EventFilter,
+    InvalidationAttestedPayload,
     ThesisApprovedPayload,
     ThesisContract,
     ThesisDraftedPayload,
+    ThesisGradedPayload,
     ThesisRejectedPayload,
 )
 from tradekit.ledger import Ledger, default_ledger
 from tradekit.mae import _runtime as _mae_runtime
-from tradekit.thesis import _machine, _submit
-from tradekit.thesis._machine import IllegalTransition
+from tradekit.thesis import _grade_wiring, _machine, _submit
+from tradekit.thesis._machine import IllegalTransition, VoidRefused
 
 # 'agent:<model>' | 'mike' | 'system:<job>' — every event this module
 # produces is a machine-derived transition, not an LLM or human action.
@@ -119,13 +125,129 @@ def reject(thesis_id: str, why: str) -> None:
 
 
 def grade(thesis_id: str) -> dict[str, Any]:
-    """Arithmetic grading vs market data; wraps _grading.evaluate_criteria."""
-    raise NotImplementedError("P2 batch B — docs/handoff/SPRINT-P2-thesis-policy.md")
+    """Arithmetic grading vs market data — legal only from `active` (CTO
+    addendum story-2 pins: "active only"). Fetches bars via the sanctioned
+    `mae._runtime` seam over [activation_ts, now] at the thesis's own
+    predicate timeframe, calls the FROZEN `_grading.evaluate_criteria`
+    (never reimplemented), computes pnl net of fees from `FillRecorded`
+    events, and appends `ThesisGraded` carrying every predicate's measured
+    value + bar refs (`outcome.evaluated`, verbatim) plus `ambiguous_bar`.
+
+    Returns the just-appended `ThesisGraded` payload, `model_dump`'d
+    (ASSUMPTIONS 67 — same convention as `draft()` returning the id it just
+    minted: the ledgered event is the source of truth, the return value a
+    convenience mirror of it)."""
+    ledger = default_ledger()
+    _machine.require_state(ledger, thesis_id, frozenset({"active"}), "grade")
+    drafted = _machine.latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:  # pragma: no cover — require_state already proved active exists
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    activated = _machine.latest_payload(ledger, thesis_id, "ThesisActivated")
+    if activated is None:  # pragma: no cover — require_state already proved active
+        raise ValueError(f"no ThesisActivated event found for thesis_id={thesis_id!r}")
+
+    contract = drafted["contract"]
+    asset = contract["asset"]
+    symbol = str(asset["symbol"])
+    tick_size = Decimal(str(asset["tick_size"]))
+    activation_ts = datetime.fromisoformat(str(activated["ts_utc"]))
+    horizon_end = datetime.fromisoformat(str(contract["horizon_end"]))
+
+    outcome = _grade_wiring.evaluate(
+        symbol=symbol,
+        tick_size=tick_size,
+        success=contract["success_criteria"],
+        failure=contract["failure_criteria"],
+        invalidation=contract["invalidation"],
+        horizon_end=horizon_end,
+        activation_ts=activation_ts,
+    )
+    result = outcome.result
+    if result == "PENDING":
+        raise ValueError(
+            f"thesis_id={thesis_id!r} is not yet gradeable — still PENDING "
+            "(horizon not reached, no predicate triggered)"
+        )
+
+    pnl = _grade_wiring.compute_pnl(ledger, thesis_id, str(contract["direction"]))
+    payload = ThesisGradedPayload(
+        thesis_id=thesis_id,
+        outcome=result,
+        measured=outcome.evaluated,
+        ambiguous_bar=outcome.ambiguous_bar,
+        pnl_usd=pnl,
+        graded_ts=_mae_runtime.clock(),
+    )
+    _append(ledger, "ThesisGraded", payload.model_dump(mode="json"))
+    return payload.model_dump(mode="json")
 
 
 def void(thesis_id: str, attestation: str) -> None:
-    """Structural invalidation: needs attestation + reviewer sign-off (§10.4)."""
-    raise NotImplementedError("P2 batch B — docs/handoff/SPRINT-P2-thesis-policy.md")
+    """Discretionary structural-invalidation path (§10.4 guard 2) — legal
+    only from `approved`/`active`. Measurable invalidations are rejected
+    immediately with ZERO appends (they auto-VOID inside `grade()` with zero
+    discretion — this is not that path). Sequence for a structural
+    invalidation: append `InvalidationAttested` FIRST, then check for an
+    existing reviewer sign-off (`ReviewCompleted(kind="void_signoff")`) for
+    this thesis — absent -> raise `VoidRefused` (the attestation event
+    REMAINS, the audit trail of a refused void); present -> append
+    `ThesisGraded(VOID)`."""
+    ledger = default_ledger()
+    _machine.require_state(ledger, thesis_id, frozenset({"approved", "active"}), "void")
+    drafted = _machine.latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:  # pragma: no cover — require_state already proved a real thesis
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    contract = drafted["contract"]
+    invalidation = contract["invalidation"]
+    kind = invalidation["kind"]
+    if kind != "structural":
+        raise VoidRefused(
+            thesis_id,
+            f"invalidation kind={kind!r} is not structural — measurable invalidations "
+            "auto-VOID inside grade() with zero discretion, never through void()",
+        )
+
+    attested_payload = InvalidationAttestedPayload(
+        thesis_id=thesis_id, kind="structural", attestation=attestation
+    )
+    _append(ledger, "InvalidationAttested", attested_payload.model_dump(mode="json"))
+
+    if not _has_void_signoff(ledger, thesis_id):
+        raise VoidRefused(
+            thesis_id,
+            "no reviewer sign-off (ReviewCompleted kind='void_signoff') found for this "
+            "thesis — the attestation above stands as the audit trail of this refusal",
+        )
+
+    graded_payload = ThesisGradedPayload(
+        thesis_id=thesis_id,
+        outcome="VOID",
+        measured=[],
+        ambiguous_bar=False,
+        pnl_usd=_grade_wiring.compute_pnl(ledger, thesis_id, str(contract["direction"])),
+        graded_ts=_mae_runtime.clock(),
+    )
+    _append(ledger, "ThesisGraded", graded_payload.model_dump(mode="json"))
 
 
-__all__ = ["IllegalTransition", "approve", "draft", "grade", "reject", "submit", "void"]
+def _has_void_signoff(ledger: Ledger, thesis_id: str) -> bool:
+    """A `ReviewCompleted(kind="void_signoff")` event exists for `thesis_id`
+    (§10.4 guard 2's reviewer sign-off artifact — CTO adjudication,
+    ASSUMPTIONS 73)."""
+    return any(
+        event.payload.get("thesis_id") == thesis_id
+        and event.payload.get("kind") == "void_signoff"
+        for event in ledger.query(EventFilter(types=["ReviewCompleted"]))
+    )
+
+
+__all__ = [
+    "IllegalTransition",
+    "VoidRefused",
+    "approve",
+    "draft",
+    "grade",
+    "reject",
+    "submit",
+    "void",
+]

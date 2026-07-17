@@ -106,20 +106,26 @@ _TABLES: dict[str, str] = {
     """,
 }
 
-# ThesisSubmitted..ThesisActivated (DESIGN §10.1 state machine transitions
-# past `draft`; each maps 1:1 to the state name it enters). `ThesisGraded` is
-# handled separately below (batch B populates outcome/pnl; this batch still
-# moves `state` for it defensively). `ThesisDrafted` itself is NOT in this
-# map: it gets its own real handling below, because a lone ThesisDrafted
-# event with no follow-on lifecycle event is exactly what the pre-existing P0
-# done-gate replay test (`tests/replay/test_p0_replay.py`) exercises, and
-# that baseline test must stay green.
-_THESIS_STATE_BY_EVENT_TYPE: dict[str, str] = {
-    "ThesisSubmitted": "submitted",
-    "ReviewCompleted": "reviewed",
-    "ThesisApproved": "approved",
-    "ThesisRejected": "rejected",
-    "ThesisActivated": "active",
+# GUARDED (from_state, event_type) -> to_state table for the "simple"
+# one-shot lifecycle markers — each only fires from its single legal source
+# state (DESIGN §10.1's diagram); an event whose current row-state doesn't
+# match its `from_state` is a no-op (state stays unchanged). `ThesisDrafted`
+# gets its own real handling below (a lone ThesisDrafted event with no
+# follow-on lifecycle event is exactly what the pre-existing P0 done-gate
+# replay test, `tests/replay/test_p0_replay.py`, exercises, and that
+# baseline test must stay green). `ReviewCompleted` and `ThesisGraded` are
+# NOT here — both need extra payload-driven logic (`kind` / `outcome`),
+# handled directly in `_apply` (ASSUMPTIONS 73, P2 batch B — the guarded-
+# transition fix; batch A's unguarded `event_type -> state` map let ANY
+# out-of-order lifecycle event, e.g. a stray `ReviewCompleted` while
+# `active`, clobber derived state — this table + the `_apply` branches below
+# are the fix, mirroring `thesis._machine._next_state`'s live-path guard so
+# the two stay in agreement, D15/TD-4).
+_THESIS_TRANSITION_FROM: dict[str, tuple[str, str]] = {
+    "ThesisSubmitted": ("draft", "submitted"),
+    "ThesisApproved": ("reviewed", "approved"),
+    "ThesisRejected": ("reviewed", "rejected"),
+    "ThesisActivated": ("approved", "active"),
 }
 
 
@@ -179,23 +185,53 @@ def _apply(con: sqlite3.Connection, event: Event) -> None:
                 None,
             ),
         )
-    elif event.type in _THESIS_STATE_BY_EVENT_TYPE:
+    elif event.type in _THESIS_TRANSITION_FROM:
         # DESIGN §10.1: submitted -> reviewed -> approved -> active (|
-        # rejected, terminal). A row for `thesis_id` always already exists
-        # (its ThesisDrafted event replays first in seq order), so this is
-        # always an UPDATE, never an INSERT.
-        con.execute(
-            "UPDATE theses SET state = ? WHERE thesis_id = ?",
-            (_THESIS_STATE_BY_EVENT_TYPE[event.type], payload.get("thesis_id")),
-        )
+        # rejected, terminal) — GUARDED: only apply if the row's CURRENT
+        # state matches this event's legal source state, else leave it
+        # unchanged (ASSUMPTIONS 73). Total over any event history: an
+        # absent row (no ThesisDrafted replayed yet — shouldn't happen in a
+        # well-formed log, but projections must never crash) is also a
+        # silent no-op.
+        from_state, to_state = _THESIS_TRANSITION_FROM[event.type]
+        thesis_id = payload.get("thesis_id")
+        row = con.execute(
+            "SELECT state FROM theses WHERE thesis_id = ?", (thesis_id,)
+        ).fetchone()
+        if row is not None and row[0] == from_state:
+            con.execute("UPDATE theses SET state = ? WHERE thesis_id = ?", (to_state, thesis_id))
+    elif event.type == "ReviewCompleted":
+        # Two review artifacts share this event type (ASSUMPTIONS 73):
+        # `kind="thesis_review"` is the ONLY lifecycle edge (submitted ->
+        # reviewed, guarded same as above); `kind="void_signoff"` (default
+        # missing -> "thesis_review" for pre-existing payloads) is a
+        # sign-off ARTIFACT for `thesis.void`'s second guard and NEVER
+        # transitions state, from any row-state.
+        kind = payload.get("kind", "thesis_review")
+        if kind == "thesis_review":
+            thesis_id = payload.get("thesis_id")
+            row = con.execute(
+                "SELECT state FROM theses WHERE thesis_id = ?", (thesis_id,)
+            ).fetchone()
+            if row is not None and row[0] == "submitted":
+                con.execute(
+                    "UPDATE theses SET state = 'reviewed' WHERE thesis_id = ?", (thesis_id,)
+                )
     elif event.type == "ThesisGraded":
-        # SPRINT P2 batch B populates `outcome`/`measured`/`pnl_usd` fully via
-        # thesis.grade(); this batch moves `state`/`graded_outcome`/
-        # `graded_ts` defensively so a harness-appended ThesisGraded event
-        # (as some batch-A tests use to probe grade-adjacent illegal
-        # transitions) still rebuilds without raising.
+        # SPRINT P2 batch B: `thesis.grade`/`thesis.void` populate
+        # `outcome`/`measured`/`pnl_usd` fully, always appending this event
+        # from `active` (their own `require_state` guards enforce that on
+        # the live path). Guarded here too (ASSUMPTIONS 73) so a harness-
+        # appended/out-of-order ThesisGraded can never clobber state from
+        # any other row-state — still never raises either way.
+        thesis_id = payload.get("thesis_id")
         outcome = payload.get("outcome")
-        con.execute(
-            "UPDATE theses SET state = ?, graded_outcome = ?, graded_ts = ? WHERE thesis_id = ?",
-            (outcome, outcome, ts, payload.get("thesis_id")),
-        )
+        row = con.execute(
+            "SELECT state FROM theses WHERE thesis_id = ?", (thesis_id,)
+        ).fetchone()
+        if row is not None and row[0] == "active":
+            con.execute(
+                "UPDATE theses SET state = ?, graded_outcome = ?, graded_ts = ? "
+                "WHERE thesis_id = ?",
+                (outcome, outcome, ts, thesis_id),
+            )

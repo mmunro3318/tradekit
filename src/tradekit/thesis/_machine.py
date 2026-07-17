@@ -20,22 +20,66 @@ from typing import Any
 from tradekit.contracts import Event, EventFilter
 from tradekit.ledger import Ledger
 
-# One state per lifecycle-marker event type (DESIGN §10.1's diagram, minus
-# `ThesisGraded`'s outcome-keyed terminal states — handled separately below).
-_STATE_BY_EVENT_TYPE: dict[str, str] = {
-    "ThesisDrafted": "draft",
-    "ThesisSubmitted": "submitted",
-    "ReviewCompleted": "reviewed",
-    "ThesisApproved": "approved",
-    "ThesisRejected": "rejected",
-    "ThesisActivated": "active",
+# Event types that ever carry lifecycle-relevant information for a thesis
+# (used to scope `thesis_events`'s ledger query). Kept flat/simple; the
+# actual (state, event) -> state GUARD table lives in `_next_state` below —
+# ASSUMPTIONS 73 (P2 batch B, CTO adjudication): batch A's unguarded
+# event-type -> state map let ANY out-of-order lifecycle event (e.g. a stray
+# `ReviewCompleted` appended while `active`) clobber derived state; that is
+# the latent defect this batch fixes.
+THESIS_EVENT_TYPES: tuple[str, ...] = (
+    "ThesisDrafted",
+    "ThesisSubmitted",
+    "ReviewCompleted",
+    "ThesisApproved",
+    "ThesisRejected",
+    "ThesisActivated",
+    "ThesisGraded",
+)
+
+# (from_state, event_type) -> to_state, for the "simple" one-shot lifecycle
+# markers — every one of these ONLY fires from its single legal source state
+# (DESIGN §10.1's diagram); an event whose current state doesn't match its
+# key is a no-op (state stays unchanged). `ReviewCompleted` and
+# `ThesisGraded` are NOT here — both need extra payload-driven logic
+# (`kind` / `outcome`), handled directly in `_next_state`.
+_SIMPLE_TRANSITIONS: dict[tuple[str, str], str] = {
+    ("draft", "ThesisSubmitted"): "submitted",
+    ("reviewed", "ThesisApproved"): "approved",
+    ("reviewed", "ThesisRejected"): "rejected",
+    ("approved", "ThesisActivated"): "active",
 }
 
-# `ThesisGraded` is intentionally excluded from `_STATE_BY_EVENT_TYPE`: batch
-# A/B doesn't grade yet, but `derive_state` below still handles it defensively
-# (via the event's own `outcome` field) so a later batch's grade() doesn't
-# have to touch this module.
-THESIS_EVENT_TYPES: tuple[str, ...] = (*_STATE_BY_EVENT_TYPE, "ThesisGraded")
+
+def _next_state(current: str | None, event: Event) -> str | None:
+    """One step of the GUARDED (state, event) -> state machine (ASSUMPTIONS
+    73). Total: any event, from any current state (including `None` — no
+    `ThesisDrafted` seen yet), either advances state along a legal edge or
+    leaves it unchanged. Never raises — `derive_state` is the layer that
+    turns "no state at all" into a `ValueError`."""
+    event_type = event.type
+    if event_type == "ThesisDrafted":
+        return "draft"
+    if event_type == "ReviewCompleted":
+        kind = event.payload.get("kind", "thesis_review")
+        if kind != "thesis_review":
+            # A `void_signoff` sign-off artifact is NEVER a lifecycle edge,
+            # from any state (ASSUMPTIONS 73 pin 2).
+            return current
+        return "reviewed" if current == "submitted" else current
+    if event_type == "ThesisGraded":
+        # `grade()`/`void()` only ever append this from `active` (their own
+        # `require_state` guards already enforce that live-path); guard it
+        # here too so a harness-appended/out-of-order ThesisGraded can never
+        # clobber state from anywhere else.
+        if current == "active":
+            return str(event.payload.get("outcome", current))
+        return current
+    if current is not None:
+        to_state = _SIMPLE_TRANSITIONS.get((current, event_type))
+        if to_state is not None:
+            return to_state
+    return current
 
 
 class IllegalTransition(Exception):
@@ -54,6 +98,22 @@ class IllegalTransition(Exception):
         self.verb = verb
 
 
+class VoidRefused(Exception):
+    """Raised by `thesis.void` when a structural invalidation is attested
+    but no reviewer sign-off (`ReviewCompleted(kind="void_signoff")`) exists
+    yet for this thesis (DESIGN §10.4 guard 2). Re-exported (unchanged
+    shape) from `tradekit.thesis` (ASSUMPTIONS 72 — additive surface).
+
+    The `InvalidationAttested` event REMAINS ledgered when this is raised —
+    that event IS the audit trail of a refused void, not a rolled-back
+    attempt (CTO addendum, story-2 pins)."""
+
+    def __init__(self, thesis_id: str, reason: str) -> None:
+        super().__init__(f"void refused for thesis_id={thesis_id!r}: {reason}")
+        self.thesis_id = thesis_id
+        self.reason = reason
+
+
 def thesis_events(ledger: Ledger, thesis_id: str) -> list[Event]:
     """This thesis's own lifecycle events, in seq (append) order."""
     events = ledger.query(EventFilter(types=list(THESIS_EVENT_TYPES)))
@@ -61,7 +121,8 @@ def thesis_events(ledger: Ledger, thesis_id: str) -> list[Event]:
 
 
 def derive_state(ledger: Ledger, thesis_id: str) -> str:
-    """Replay `thesis_id`'s own events to the CURRENT state.
+    """Replay `thesis_id`'s own events, through the GUARDED (state, event) ->
+    state machine (`_next_state`), to the CURRENT state.
 
     Raises `ValueError` if no `ThesisDrafted` event exists for `thesis_id`
     (there is no such thesis — a caller bug, not an `IllegalTransition`: the
@@ -69,10 +130,7 @@ def derive_state(ledger: Ledger, thesis_id: str) -> str:
     """
     state: str | None = None
     for event in thesis_events(ledger, thesis_id):
-        if event.type == "ThesisGraded":
-            state = str(event.payload.get("outcome", "graded"))
-        else:
-            state = _STATE_BY_EVENT_TYPE[event.type]
+        state = _next_state(state, event)
     if state is None:
         raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
     return state
