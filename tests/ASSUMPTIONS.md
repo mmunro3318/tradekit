@@ -1666,3 +1666,23 @@ failures are `NotImplementedError` (`policy._series.*` stubs or
     `test_config_changed_p0_shaped_payload_still_inserts_config_versions_row`
     (a P0-shaped payload -> still inserts), both in
     `tests/unit/ledger/test_rebuild.py`.
+
+---
+
+## Round-15 — Mike's P2 rules sign-off, 2026-07-17
+
+98. **Rules catalog + dials SIGNED OFF by Mike (2026-07-17) with directional
+    amendments, recorded as TD-24:** general acceptance of R-001..R-016 and
+    the committed config.toml defaults (incl. the 20% void cap he took on
+    trust). Amendments: (a) position/exposure dials move to FRACTIONS of
+    account principal (R-005 live 5%, R-006 20%, R-014 scaling) — R-008's
+    $10 min notional deliberately STAYS absolute (fee-noise floor; CTO
+    exception, explained to Mike); (b) accounts get an AccountConfig
+    contract (principal_usd Decimal @ 2dp; prop-style slots
+    max_lifetime_drawdown / max_daily_drawdown / max_daily_profit /
+    consistency_rule, None = disabled — NOT +/-Infinity) with config.toml
+    as the defaults layer; (c) create_new_account lands with P3's
+    multi-account PaperBroker; (d) Mike expects dial values to change once
+    simulations run — the ConfigChanged event trail is the mechanism.
+    P2's DoD is now fully closed; the P2-era dollar dials remain the
+    default-account values until TD-24's migration lands in P3.

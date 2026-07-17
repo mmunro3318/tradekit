@@ -60,6 +60,7 @@ Cited throughout as TD-n. SCOPE decisions remain D-n; SME flags F-n.
 | TD-21 | **Adversarial review via `LLMReviewerPort`**: subprocess adapters to Codex/Gemini CLIs; rubric scoring deterministic in Python; artifacts ledgered | §12 |
 | TD-22 | **Ledger DB and cache DB are separate files** (`ledger.db` sacred, `cache.db` disposable) | §6.1 |
 | TD-23 | **Tick-size quantization boundary** (G2): every float→Decimal conversion at the MAE boundary goes through `contracts.quantize(value, asset.tick_size)` — float noise can never flip a grading predicate | §13 |
+| TD-24 | **Per-account dial layering** (Mike, 2026-07-17 rules sign-off): position/exposure dials are expressed as FRACTIONS of account principal, not global dollars (R-005 live = 5%, R-006 = 20%, R-014 threshold scales); fee-floor dials stay ABSOLUTE (R-008 $10 min notional — fees are absolute, a % floor would drown small accounts in fee noise). Accounts are created from an `AccountConfig` contract (`principal_usd` Decimal @ 2dp; prop-style slots `max_lifetime_drawdown` / `max_daily_drawdown` / `max_daily_profit` / `consistency_rule`, each `None` = rule disabled); global `config.toml` supplies defaults, per-account config overrides. Lands with P3's multi-account PaperBroker (`create_new_account`); §7.2's dollar defaults remain valid for the P2 default account until then | §7.2 |
 
 ---
 
