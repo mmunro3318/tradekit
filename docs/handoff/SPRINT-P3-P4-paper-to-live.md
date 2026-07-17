@@ -42,3 +42,86 @@ End-to-end replay: scan → thesis → review (fake adapter) → gates → order
 - Reviewer subprocesses: timeouts + max-token caps + treat stdout as untrusted data (parse JSON strictly; a chatty model must not crash the pipeline).
 - `tk brief` token budget is a hard cap — truncate by salience, never silently overflow (it's every agent's first read).
 - P4 live keys: if anything reconciles wrong, HALT stays set until Mike manually clears — no auto-resume on the live path, ever.
+
+## Addendum — CTO design pins (session P3, 2026-07-17)
+
+Binding on TDD/dev agents. DESIGN wins on conflict — flag, don't improvise.
+All P2 standing rules apply (freeze gate, path seams, module-attribute calls
+for monkeypatchable deps, flag-for-ratification, typed payloads, strict mypy
+for broker/ too — add to the pyproject override).
+
+### TD-24 lands in batch A (Mike-signed 2026-07-17)
+
+- `AccountConfig` contract (contracts, additive): `account_ref`,
+  `principal_usd` (Decimal, quantized to cents), `max_trades_per_day`
+  (int; 0 = paper/sim only per Mike's sketch), `max_daily_drawdown` /
+  `max_lifetime_drawdown` / `max_daily_profit` (fraction Decimals or None),
+  `consistency_rule` (opaque str or None). **None = rule DISABLED** (never
+  ±Infinity). `AccountCreated` event + `accounts` projection;
+  `tk account create-paper --config file.json` (defaults from config.toml
+  when fields absent).
+- Dial resolution order: AccountConfig field → config.toml default → code
+  default. R-005 live → 5% of principal; R-006 → 20% of principal; R-014
+  threshold → 40% of principal (was $200/$500); **R-008 stays absolute $10**
+  (fee-noise floor — CTO exception Mike accepted).
+- New rules (additive IDs, enforced ONLY when configured, disabled=None
+  passes without a RuleHit... NO — emits a RuleHit with outcome "not_configured"
+  so audit shows the rule was consulted): **R-017 max_daily_drawdown**,
+  **R-018 max_lifetime_drawdown** (both vs principal, from pnl_daily).
+  `max_daily_profit`/`consistency_rule` are ACCEPTED config slots with NO
+  enforcement rule in P3 (Mike undecided) — document in RULES.md footer.
+- P2's default account (`paper:alpha`) gets an implicit AccountConfig from
+  config.toml defaults — existing tests must keep passing unchanged except
+  where a dial's VALUE legitimately moved (enumerate every such test in the
+  red report; the percent values are chosen to keep $500-account behavior
+  IDENTICAL: 10% paper position cap unchanged, etc.).
+
+### Batch plan (four-stage per batch; pre-registered Opus review focus in caps)
+
+- **A:** BrokerPort protocol + AccountState/Position/OrderStatus contracts +
+  conformance suite skeleton + TD-24 (AccountConfig, R-017/R-018, dial
+  migration, create-paper verb).
+- **B:** PaperBroker (OPUS FOCUS: FILL MODEL) — named accounts; market fills
+  = latest CLOSED cached bar close mid ± half-spread from tradekit.costs +
+  fee, quote snapshot ON the Fill (typed FillRecordedPayload lands here,
+  replacing P2's harness convention — includes fill-time pnl attribution
+  migration per ASSUMPTIONS round-9); limit fills = through by ≥1 tick,
+  exact touch is NOT a fill (G5), no partials; deterministic replay.
+- **C:** execute_order two-phase pipeline + reconcile→auto-halt (OPUS FOCUS:
+  TOKEN GATE + HALT PATH) — adapters refuse without allow-VerdictToken
+  (structural: submit REQUIRES the token argument and validates hash/ttl);
+  ThesisActivated emitted on first fill; live-tier context wiring
+  (promotion_state tier + live_sequence_remaining into _context — the P2
+  fail-closed carve-out ends here); R-011 decrement on live fills.
+- **D:** review module (LLMReviewerPort, subprocess adapters Codex/Gemini,
+  deterministic rubric, auto-fail short-circuits, ReviewCompleted emission
+  incl. void_signoff via verify_claim) + ManualBroker/advisory + `tk fill
+  record`. Tests use FAKE adapters only (canned JSON; subprocess boundary
+  tested with a stub executable via tmp_path).
+- **E:** memory + report (tk brief hard token cap, salience truncation;
+  tk search — PIN multi-word semantics: implicit AND of terms, phrase via
+  quotes, record in ASSUMPTIONS; wiki add; daily memo/readiness/pnl
+  templates) + the 3.7 end-to-end replay done-gate + SeriesClosed event +
+  ledger.models read accessors + strategy-tag registry (ASSUMPTIONS 57f)
+  + close-out (ROADMAP P3, dev-log, agent-metrics, Mike primer, P4 seed).
+- Deferred WITH Mike flags: research-loop prompts tone (Sonnet drafts, Mike
+  approves); rubric-thesis-v1.md shape (draft for his edit).
+
+### Cross-cutting pins
+
+- broker/ layout: __init__ verbs exactly per §4.2 (get, execute_order,
+  reconcile, record_manual_fill) + internals _pipeline.py/_paper.py/
+  _manual.py/_alpaca.py (alpaca adapter = P4, stub now).
+- VerdictToken: policy.evaluate's allow Verdict carries a token =
+  sha256(verdict_id + policy hash); broker.submit validates token against
+  the ledgered VerdictIssued event (existence + thesis match + no newer
+  deny) — out-of-band submission impossible through the verb surface.
+- Quotes: PaperBroker reads bars ONLY via mae._runtime.get_closed_bars
+  (extend the sanctioned-consumer note: thesis + broker are the two
+  permitted cross-module internal consumers until the marketdata leaf
+  extraction — still a Mike-signoff TD change, still deferred).
+- Reviewer subprocess: hard timeout dial (default 120s), max-output cap,
+  strict JSON parse with schema (a chatty model = ReviewFailed artifact,
+  never a crash); adapter binaries resolved from dials, tests NEVER invoke
+  real CLIs.
+- All new file-writers get path seams; all clocks via existing seams.
