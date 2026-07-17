@@ -176,3 +176,270 @@ def test_theses_projection_materializes_state_from_event_sequence(
         "the theses projection must materialize the FULL draft -> submitted -> "
         "reviewed -> approved event sequence to state == 'approved' (DESIGN §10.1)"
     )
+
+
+# ---------------------------------------------------------------------------
+# SPRINT P2 batch D: pnl_daily / series / promotion_state real population
+# (DESIGN §6.2; CTO addendum story-4 pins). RED this batch — `_apply()` has
+# no handling for `pnl_daily`'s ThesisGraded aggregation nor for `series`/
+# `promotion_state`'s PromotionGranted/Confirmed/Demoted-driven rows yet
+# (same "unhandled event type is silently skipped, table stays empty"
+# behavior as batch A's own `series`/`promotion_state` no-op — see
+# `_projections.py`'s module docstring); every assertion below describes
+# the REAL population the dev pass wires next.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def ledger_with_graded_theses(ledger, make_event):
+    """Two theses for `paper:alpha`, graded on DIFFERENT UTC calendar days,
+    plus one None-pnl grade (ASSUMPTIONS 71: excluded from any pnl SUM, same
+    as it's excluded from series expectancy) — exercises pnl_daily's
+    per-(account_ref, utc_date) aggregation and its None-pnl exclusion in one
+    fixture."""
+    from datetime import UTC, datetime
+
+    day1 = datetime(2026, 1, 5, 10, 0, 0, tzinfo=UTC)
+    day1_later = datetime(2026, 1, 5, 18, 0, 0, tzinfo=UTC)
+    day2 = datetime(2026, 1, 6, 9, 0, 0, tzinfo=UTC)
+
+    for thesis_id in ("th-pnl-1", "th-pnl-2", "th-pnl-3"):
+        ledger.append(
+            make_event(
+                type="ThesisDrafted",
+                payload={
+                    "thesis_id": thesis_id,
+                    "contract": {"account_ref": "paper:alpha"},
+                    "supersedes": None,
+                },
+            )
+        )
+    ledger.append(
+        make_event(
+            type="ThesisGraded",
+            ts=day1,
+            payload={
+                "thesis_id": "th-pnl-1",
+                "outcome": "PASS",
+                "measured": [],
+                "ambiguous_bar": False,
+                "pnl_usd": "12.50",
+                "graded_ts": day1.isoformat(),
+            },
+        )
+    )
+    ledger.append(
+        make_event(
+            type="ThesisGraded",
+            ts=day1_later,
+            payload={
+                "thesis_id": "th-pnl-2",
+                "outcome": "FAIL",
+                "measured": [],
+                "ambiguous_bar": False,
+                "pnl_usd": "-3.25",
+                "graded_ts": day1_later.isoformat(),
+            },
+        )
+    )
+    ledger.append(
+        make_event(
+            type="ThesisGraded",
+            ts=day2,
+            payload={
+                "thesis_id": "th-pnl-3",
+                "outcome": "FAIL",
+                "measured": [],
+                "ambiguous_bar": False,
+                "pnl_usd": None,
+                "graded_ts": day2.isoformat(),
+            },
+        )
+    )
+    return ledger
+
+
+def test_pnl_daily_aggregates_thesis_graded_pnl_by_account_and_utc_date(
+    ledger_with_graded_theses, raw_sql
+) -> None:
+    ledger_with_graded_theses.rebuild()
+    rows = raw_sql(
+        "SELECT account_ref, utc_date, realized_pnl FROM pnl_daily ORDER BY utc_date"
+    )
+    assert rows == [
+        ("paper:alpha", "2026-01-05", "9.25"),
+        ("paper:alpha", "2026-01-06", "0"),
+    ], (
+        f"got {rows}: day 1 sums the two same-day grades (12.50 + -3.25 = 9.25, "
+        "P2 convention: realized pnl lands at GRADE time, not FillRecorded time — "
+        "FLAGGED, a P3 broker refinement); day 2's lone grade is None-pnl, excluded "
+        "from the sum (ASSUMPTIONS 71) — the row still exists at 0, not absent, because "
+        "a graded day with zero MEASURED pnl is a real fact worth a row, distinct from "
+        "a day with no grading at all (no row)"
+    )
+
+
+def test_pnl_daily_rebuild_is_idempotent(ledger_with_graded_theses, read_model_snapshot) -> None:
+    ledger_with_graded_theses.rebuild()
+    first = read_model_snapshot()["pnl_daily"]
+    ledger_with_graded_theses.rebuild()
+    second = read_model_snapshot()["pnl_daily"]
+    assert second == first
+
+
+@pytest.fixture
+def ledger_with_one_clean_series(ledger, make_event):
+    """Ten graded non-void theses for `paper:alpha`, spanning series_index 0
+    under the `series_epoch` dial default (2026-01-01T00:00:00Z) — the exact
+    CLEAN fixture from `tests/unit/policy/test_series.py`
+    (`test_series_stats_clean_ten_graded_positive_expectancy_low_mdd`):
+    pnls 5.874, -2.10, 1.00, then seven 0.00 — expectancy 0.4774, mdd_pct
+    ~0.415%, zero gate violations -> complete AND clean."""
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    pnls = ["5.874", "-2.10", "1.00", "0", "0", "0", "0", "0", "0", "0"]
+    for i, pnl in enumerate(pnls):
+        thesis_id = f"th-clean-series-{i}"
+        ts = start + timedelta(days=i)
+        ledger.append(
+            make_event(
+                type="ThesisDrafted",
+                ts=start,
+                payload={
+                    "thesis_id": thesis_id,
+                    "contract": {"account_ref": "paper:alpha"},
+                    "supersedes": None,
+                },
+            )
+        )
+        ledger.append(
+            make_event(
+                type="ThesisGraded",
+                ts=ts,
+                payload={
+                    "thesis_id": thesis_id,
+                    "outcome": "PASS",
+                    "measured": [],
+                    "ambiguous_bar": False,
+                    "pnl_usd": pnl,
+                    "graded_ts": ts.isoformat(),
+                },
+            )
+        )
+    return ledger
+
+
+def test_series_projection_materializes_a_complete_clean_series_row(
+    ledger_with_one_clean_series, raw_sql
+) -> None:
+    """The `series` projection table materializes per-series rows for
+    CLI/report reads (CTO addendum story-4 pins: 'the series projection
+    table materializes per-series rows on rebuild ... a SeriesClosed event
+    is NOT emitted in P2' — no producer event; the row is derived the SAME
+    way `policy._series.series_stats` derives it at read time, both from
+    ThesisGraded/GateViolationDetected directly)."""
+    ledger_with_one_clean_series.rebuild()
+    rows = raw_sql(
+        "SELECT account_ref, series_index, complete, clean FROM series "
+        "WHERE account_ref = 'paper:alpha' AND series_index = 0"
+    )
+    assert len(rows) == 1, (
+        f"expected exactly one series row for (paper:alpha, 0), got {rows} — the "
+        "projection must derive series membership from ThesisGraded's own graded_ts "
+        "via series_index(), the same arithmetic as policy._series.series_index"
+    )
+    assert rows[0][2] == 1, "complete: 10 graded non-void, window closed by rebuild time"
+    assert rows[0][3] == 1, "clean: expectancy 0.4774 > 0, mdd ~0.415% < 15%, 0 violations"
+
+
+def test_promotion_state_projection_materializes_from_confirmed_event(
+    ledger, make_event, raw_sql
+) -> None:
+    """`promotion_state` materializes from PromotionGranted/Confirmed/Demoted
+    events (CTO addendum story-4 pins) — a bare harness-appended
+    `PromotionConfirmed` must be enough to see `tier == 'T2'`,
+    `live_sequence_remaining == 3` in the projection after rebuild (D15/
+    TD-4: promotion state must survive ONLY via `tk ledger rebuild`, never a
+    side table)."""
+    ledger.append(
+        make_event(
+            type="PromotionGranted",
+            payload={
+                "account_ref": "paper:alpha",
+                "from_tier": "T1",
+                "to_tier": "T2",
+                "criteria": {"three_of_last_four_clean": True},
+            },
+        )
+    )
+    ledger.append(
+        make_event(
+            type="PromotionConfirmed",
+            payload={
+                "account_ref": "paper:alpha",
+                "to_tier": "T2",
+                "granted_event_id": "evt-grant-1",
+                "live_sequence_remaining": 3,
+                "confirmed_by": "mike",
+            },
+        )
+    )
+    ledger.rebuild()
+    rows = raw_sql(
+        "SELECT account_ref, tier, live_sequence_remaining FROM promotion_state "
+        "WHERE account_ref = 'paper:alpha'"
+    )
+    assert rows == [("paper:alpha", "T2", 3)]
+
+
+def test_promotion_state_projection_reflects_demoted_event(ledger, make_event, raw_sql) -> None:
+    for event_type, payload in [
+        (
+            "PromotionGranted",
+            {
+                "account_ref": "paper:alpha",
+                "from_tier": "T1",
+                "to_tier": "T2",
+                "criteria": {},
+            },
+        ),
+        (
+            "PromotionConfirmed",
+            {
+                "account_ref": "paper:alpha",
+                "to_tier": "T2",
+                "granted_event_id": "evt-grant-1",
+                "live_sequence_remaining": 3,
+                "confirmed_by": "mike",
+            },
+        ),
+        (
+            "Demoted",
+            {
+                "account_ref": "paper:alpha",
+                "from_tier": "T2",
+                "to_tier": "T1",
+                "trigger": "drawdown_breach",
+                "detail": "R-009 trip",
+            },
+        ),
+    ]:
+        ledger.append(make_event(type=event_type, payload=payload))
+    ledger.rebuild()
+    rows = raw_sql(
+        "SELECT account_ref, tier FROM promotion_state WHERE account_ref = 'paper:alpha'"
+    )
+    assert rows == [("paper:alpha", "T1")], "a Demoted event must roll the tier back to T1"
+
+
+def test_promotion_state_and_series_projections_survive_rebuild_idempotently(
+    ledger_with_one_clean_series, raw_sql
+) -> None:
+    ledger_with_one_clean_series.rebuild()
+    first_series = raw_sql("SELECT * FROM series ORDER BY series_index")
+    ledger_with_one_clean_series.rebuild()
+    second_series = raw_sql("SELECT * FROM series ORDER BY series_index")
+    assert second_series == first_series, (
+        "a second rebuild of the SAME event log must reproduce byte-identical series "
+        "rows — projections are disposable caches, the log is the only truth (§6.1)"
+    )

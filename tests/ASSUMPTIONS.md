@@ -1284,3 +1284,201 @@ state machine).
     are real, they assert the real exit-0 success shape instead (their
     obsolescence was planned — the guard itself remains for
     `promote status|confirm`, still stubs until batch D).
+
+---
+
+## Round-11 additions — P2 batch D TDD session (series accounting +
+promotion machine), 2026-07-17
+
+Story 4: `policy._series` (new module), `policy.promotion_status()`/
+`confirm_promotion()`, and the `series`/`promotion_state`/`pnl_daily`
+projections' real semantics. `tests/unit/policy/test_series.py`,
+`tests/unit/policy/test_promotion.py` (new), `tests/unit/ledger/
+test_rebuild.py` (extended), `tests/unit/contracts/test_event_payloads.py`
+(extended), `tests/unit/policy/test_dials.py` (extended). Verified: `uv run
+pytest` — 577 collected (524 baseline + 20 new green + 33 new red), all 33
+failures are `NotImplementedError` (`policy._series.*` stubs or
+`policy.promotion_status`/`confirm_promotion`, unchanged from batch C);
+`uv run ruff check .` and `uv run mypy` both clean.
+
+82. **`policy._series.py` is a BRAND-NEW module, entirely unconditional
+    `NotImplementedError` stubs this batch — no CTO call landed it "real"
+    (unlike `_dials.py`/`_rules.py` in batch C's own red/green split).**
+    `series_index`/`window_for`/`series_stats` all raise; every design pin
+    (the CTO addendum's story-4 arithmetic: `series_index = floor((grade_ts
+    - epoch)/30d)`, expectancy = mean of non-None pnl over graded non-void,
+    None-pnl exclusion, intra-series MDD walk convention, complete/clean
+    boundary) is encoded VERBATIM in the module's docstrings per the batch
+    dispatch's own instruction ("encode in stub docstrings"), so the dev
+    pass has a single source of truth to implement against. This mirrors
+    `thesis.grade()`/`void()`'s own red-phase treatment (batch B): the
+    arithmetic these wrap can be "obviously pure" and still stay stubbed,
+    because the dispatch's blanket instruction for the WHOLE batch is
+    "Failing tests + minimal stubs," not a per-function judgment call left
+    to the test author.
+
+83. **A `SeriesStats` return-shape `dataclass` IS defined in `_series.py`
+    (FLAGGED — a test-authoring pass narrowly touching "shape, not logic"),
+    even though every function that would populate it is a stub.** Same
+    class of exception as `PolicyContext` (batch C, ASSUMPTIONS 75): a
+    frozen shape declaration is not "implementation work" in the sense the
+    red-phase discipline guards against — it exists so `test_series.py`'s
+    assertions (`stats.graded_count`, `stats.expectancy`, ...) have a named
+    target to describe, the same way `_context.PolicyContext`'s fields let
+    `test_rules.py` construct synthetic contexts against a real shape while
+    `assemble()` itself stayed a stub through its own red phase. Never
+    ledgered, never cross-boundary — not a `contracts` model (same
+    rationale as `PolicyContext`'s own deviation).
+
+84. **`policy._dials.PolicyDials.default_account_ref = "paper:alpha"` is a
+    NEW dial, added this batch (FLAGGED, per the batch dispatch's own
+    explicit instruction: "if argless, pin default account from dials...
+    and FLAG").** `policy.promotion_status()`'s pinned §4.2 signature takes
+    NO `account_ref` argument — confirmed by reading `policy/__init__.py`
+    directly (not inferred) — so a P2 MVP single-account promotion ladder
+    needs a default from somewhere. Added as an ordinary additive dial field
+    (same declarative-data character as every other `PolicyDials` field,
+    same class of in-scope-for-a-test-pass edit as ASSUMPTIONS 71's
+    `contracts` nullable-field change) plus the matching `config.toml` key.
+    Multi-account promotion ladders (a real `account_ref` argument, or
+    per-account iteration) are explicitly out of scope — P3, Mike's call.
+
+85. **`PromotionGrantedPayload`/`PromotionConfirmedPayload`/`DemotedPayload`
+    land as REAL, additive `contracts` payload models this batch (same
+    precedent as ASSUMPTIONS 71's `ThesisGradedPayload.pnl_usd` nullability
+    fix — "contracts is the one fully-implemented module, so the edit is
+    in-scope for a test pass").** `EventType`'s taxonomy already reserved
+    `PromotionGranted`/`PromotionConfirmed`/`Demoted`/`SeriesClosed` (§6.3,
+    landed at P0) but none had a typed payload model until now; `SeriesClosed`
+    is deliberately NOT given one — see entry 86. `DemotedPayload.trigger`
+    is a closed `Literal["drawdown_breach", "gate_violation",
+    "failed_live_grade"]` mirroring §7.3's three named triggers exactly (R-009
+    trip / gate violation / failed live grading) — a new trigger kind is a
+    contracts change, not a silent string.
+
+86. **`SeriesClosed` gets NO payload model and NO producer in P2 — flagged
+    as a P3-deferred taxonomy row (CTO addendum, story-4 pins, explicit:**
+    "series stats are DERIVED at read time... a SeriesClosed event is NOT
+    emitted in P2"). Both `policy._series.series_stats` (read-time
+    derivation) and the `series` projection's eventual `_apply` population
+    must independently re-derive the SAME stats from `ThesisGraded`/
+    `GateViolationDetected` history — there is no producer event to key off
+    of. `test_rebuild.py::test_series_projection_materializes_a_complete_
+    clean_series_row`'s own docstring states this explicitly so the dev pass
+    doesn't go looking for a `SeriesClosed` handler that was never meant to
+    exist this sprint.
+
+87. **`promotion_status()` is a READ VERB THAT MAY WRITE — FLAGGED for CTO
+    ratification, per the addendum's own proposal (not self-adjudicated
+    here).** When T1->T2's full conjunction passes AND no unconsumed
+    `PromotionGranted` already exists for the account, `promotion_status()`
+    appends exactly one `PromotionGranted`; when the account is T2 and a
+    demotion trigger has fired since the last `PromotionConfirmed`, it
+    ALSO appends `Demoted` — the SAME read verb evaluates both directions.
+    The CTO addendum offers this as the intentional alternative to widening
+    the six-verb policy surface with a dedicated `evaluate_promotion`/
+    `evaluate_demotion` verb; `tests/unit/policy/test_promotion.py`'s
+    idempotency test (`test_promotion_granted_is_idempotent_on_repeated_
+    eligible_calls`) and the demotion test
+    (`test_promotion_status_demotes_a_t2_account_on_gate_violation_since_
+    confirmation`) pin this shape but do NOT constitute ratification —
+    flagged exactly as instructed, not improvised beyond the given proposal.
+
+88. **`PromotionRefused` does NOT exist in `tradekit.policy` yet (same
+    discipline as ASSUMPTIONS 72's `VoidRefused` precedent) — adding a new
+    exception class is dev-pass implementation work, not a test-authoring
+    concern.** `test_promotion.py`'s two `confirm_promotion` refusal tests
+    use the identical `_assert_raises_named` indirection `test_void_verb.py`
+    used before `thesis.void`/`VoidRefused` existed for real: catch broad
+    `Exception`, assert `type(exc).__name__ == "PromotionRefused"`. Today
+    that assertion fails cleanly against `NotImplementedError` (since
+    `confirm_promotion()` is unconditionally stubbed), the same red-phase
+    shape as every other test in this file. Additive export, name pinned
+    verbatim from the CTO addendum's own suggestion ("a typed exception,
+    e.g. PromotionRefused").
+
+89. **§9.4 gate mapping for R-016 — FLAGGED, the "simplest honest mapping"
+    named in the CTO addendum, not independently derived.** The addendum
+    says "use the metrics' own edge_verdict/G1 regime output — pin the
+    simplest honest mapping (edge_verdict acceptable set) and FLAG it."
+    This batch's tests (`test_t2_ineligible_when_r016_metrics_gate_fails`/
+    the ALLOW test) pin `edge_verdict == "positive"` as the ONLY passing
+    value — `"marginal"`, `"negative"`, and `"insufficient"` all deny. This
+    is a stricter reading than §9.4's own per-metric table (Sharpe/Sortino/
+    PF/expectancy/MDD/DSR thresholds individually) — `edge_verdict` already
+    folds all of those into one four-way verdict (`_metrics._verdict`), so
+    gating on `"positive"` alone is equivalent to requiring EVERY §9.4
+    threshold simultaneously, never a partial pass. Flagged for CTO
+    ratification: an alternative (accept `"marginal"` too, e.g. for the
+    provisional 10<=n<30 regime) is defensible but not what these tests pin.
+
+90. **R-016's real trade-log derivation from ledger `FillRecorded` history
+    is NOT attempted this batch (FLAGGED, same class of gap as ASSUMPTIONS
+    69/70's fill-ordering/typed-payload deferrals).** The sprint doc's own
+    TESTS section offers an escape hatch: "use a REAL tiny trade log for one
+    allow case if feasible, else flag." `test_promotion.py`'s ALLOW case
+    (`test_t2_eligible_when_three_of_four_clean_and_most_recent_clean`)
+    takes a middle path: it monkeypatches the `mae.compute_strategy_metrics`
+    SEAM (dotted path `"tradekit.mae.compute_strategy_metrics"`) to return a
+    `StrategyMetrics` instance whose numbers are the REAL, independently
+    verified output of calling the actual function against a real (tiny,
+    40-trade, hand-derivable) `TradeRecord` log — so the arithmetic is real,
+    but `promotion_status()` itself is never asked to DERIVE that trade log
+    from the ledger's `FillRecorded`/`ThesisGraded` history (there is no
+    pinned convention yet for turning graded theses into `TradeRecord`s —
+    entry/exit price and size live on `Fill` events, which this batch's
+    series histories never construct). Flagged: the dev pass needs its own
+    derivation (entry Fill -> exit Fill -> TradeRecord, per thesis) before
+    R-016 can run on REAL account history rather than a monkeypatched seam.
+
+91. **The T1->T2 ">=30 non-void graded theses across those 4 series"
+    conjunct is ARITHMETICALLY SUBSUMED by "3 of last 4 COMPLETE series
+    clean," given completeness's own >=10-per-series floor (FLAGGED,
+    discovered during test authoring, not previously noted anywhere in the
+    sprint doc or CTO addendum).** Three genuinely complete series each
+    need >=10 graded non-void by definition, so their sum is >=30 by
+    construction — it is mathematically IMPOSSIBLE to satisfy "3 of 4
+    complete clean" while the aggregate falls below 30. `test_promotion.py::
+    test_t2_ineligible_when_non_void_total_below_30`'s own docstring
+    documents this finding in place of an isolated pass/fail pair (which
+    cannot exist) and instead demonstrates the counting arithmetic via a
+    construction where the third "supposed to be complete" series is
+    deliberately short (9, not 10) — a compound/degenerate case, not a pure
+    isolation. Flagged for CTO review: either the two thresholds should be
+    decoupled (e.g., a rolling non-void count over a longer window
+    independent of series completeness) or the redundancy is accepted as
+    intentional defense-in-depth (a redundant conjunct is still correct,
+    simply not independently testable) — no unilateral fix applied here.
+
+92. **Demotion-trigger mechanics — CTO adjudication already proposed in the
+    batch dispatch, restated here as the binding test pin (not
+    self-adjudicated further).** `promotion_status()` machine-evaluates
+    demotion the same way it evaluates promotion: if the account is
+    currently T2 (its latest `PromotionConfirmed` has no LATER `Demoted`)
+    AND a trigger event (R-009 drawdown breach / any `GateViolationDetected`
+    / a failed live grading) has occurred SINCE that confirmation, it
+    appends `Demoted`. This batch's one policy-side trigger test
+    (`test_promotion_status_demotes_a_t2_account_on_gate_violation_since_
+    confirmation`, per the batch dispatch's explicit "one policy-side
+    trigger test" instruction) exercises the `GateViolationDetected` trigger
+    only — R-009 drawdown-breach and failed-live-grading triggers are named
+    in `DemotedPayload.trigger`'s `Literal` but have no dedicated test this
+    batch (flagged as a coverage gap, not a design gap: the mechanics are
+    identical, only the SOURCE event differs).
+
+    **CTO ratification (2026-07-17) — batch-D flags (82-92):** ALL RATIFIED
+    as pinned. Specifics: (read-verb-that-writes) promotion_status is the
+    machine-evaluation point per §7.3's "All machine-evaluated ->
+    PromotionGranted"; a separate verb would widen the six-verb surface —
+    the appends are limited to PromotionGranted/Demoted, idempotent
+    (unconsumed-grant guard), and fully event-sourced. (R-016 mapping)
+    edge_verdict == "positive" ONLY passes — verified against
+    mae._metrics._verdict's actual vocabulary {positive, marginal,
+    negative, insufficient}; marginal edge does not earn live money, and
+    at the >=30-trade promotion floor "positive" is DSR-gated (G1), which
+    is precisely §9.4's intent. (>=30-non-void redundancy) confirmed
+    arithmetically subsumed by 4x-complete-series; the conjunct stays
+    explicitly evaluated anyway — spec fidelity + defense in depth if
+    completeness definitions ever change. (grade-time pnl attribution,
+    SeriesClosed P3 deferral, default_account_ref dial, PromotionRefused,
+    demotion-trigger mechanics via promotion_status) all as proposed.

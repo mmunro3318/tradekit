@@ -22,12 +22,15 @@ from pydantic import ValidationError
 from ulid import ULID
 
 from tradekit.contracts import (
+    DemotedPayload,
     Event,
     GateViolationDetectedPayload,
     HaltClearedPayload,
     HaltSetPayload,
     InvalidationAttestedPayload,
     MarketSnapshotTakenPayload,
+    PromotionConfirmedPayload,
+    PromotionGrantedPayload,
     ReviewCompletedPayload,
     SizingComputedPayload,
     ThesisActivatedPayload,
@@ -99,6 +102,27 @@ _VALID_KWARGS: dict[type, dict] = {
     HaltClearedPayload: dict(
         reason="mismatch resolved", halt_event_id="evt-1", cleared_by="mike"
     ),
+    # SPRINT P2 batch D (§7.3 promotion machine).
+    PromotionGrantedPayload: dict(
+        account_ref="paper:alpha",
+        from_tier="T1",
+        to_tier="T2",
+        criteria={"three_of_last_four_clean": True},
+    ),
+    PromotionConfirmedPayload: dict(
+        account_ref="paper:alpha",
+        to_tier="T2",
+        granted_event_id="evt-grant-1",
+        live_sequence_remaining=3,
+        confirmed_by="mike",
+    ),
+    DemotedPayload: dict(
+        account_ref="paper:alpha",
+        from_tier="T2",
+        to_tier="T1",
+        trigger="gate_violation",
+        detail="evt-violation-1",
+    ),
 }
 
 _ALL_MODELS = list(_VALID_KWARGS)
@@ -152,6 +176,11 @@ def test_extra_field_rejected(model_cls) -> None:
         (GateViolationDetectedPayload, "rule_id"),
         (HaltSetPayload, "set_by"),
         (HaltClearedPayload, "cleared_by"),
+        (PromotionGrantedPayload, "account_ref"),
+        (PromotionGrantedPayload, "criteria"),
+        (PromotionConfirmedPayload, "granted_event_id"),
+        (DemotedPayload, "trigger"),
+        (DemotedPayload, "detail"),
     ],
     ids=lambda v: v if isinstance(v, str) else v.__name__,
 )
@@ -259,6 +288,37 @@ def test_review_completed_kind_accepts_void_signoff_and_rejects_junk() -> None:
 def test_invalidation_attested_kind_restricted_to_enum() -> None:
     with pytest.raises(ValidationError):
         InvalidationAttestedPayload(thesis_id="th-1", kind="vibes", attestation="nope")
+
+
+def test_promotion_granted_tier_literals_restricted() -> None:
+    with pytest.raises(ValidationError):
+        PromotionGrantedPayload(
+            account_ref="paper:alpha", from_tier="T2", to_tier="T2", criteria={}
+        )
+    with pytest.raises(ValidationError):
+        PromotionGrantedPayload(
+            account_ref="paper:alpha", from_tier="T1", to_tier="T0", criteria={}
+        )
+
+
+def test_promotion_confirmed_live_sequence_remaining_defaults_to_three() -> None:
+    kwargs = dict(_VALID_KWARGS[PromotionConfirmedPayload])
+    del kwargs["live_sequence_remaining"]
+    payload = PromotionConfirmedPayload(**kwargs)
+    assert payload.live_sequence_remaining == 3, (
+        "§7.3/R-011: a fresh live-trade budget is always 3 at confirmation"
+    )
+
+
+def test_demoted_trigger_restricted_to_enum() -> None:
+    with pytest.raises(ValidationError):
+        DemotedPayload(
+            account_ref="paper:alpha",
+            from_tier="T2",
+            to_tier="T1",
+            trigger="mike_felt_like_it",
+            detail="n/a",
+        )
 
 
 def test_producer_round_trip_pattern_thesis_submitted() -> None:

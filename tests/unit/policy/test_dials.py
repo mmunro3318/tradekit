@@ -53,6 +53,15 @@ def test_defaults_include_the_cto_addendum_series_promotion_knobs(monkeypatch) -
     assert dials.n_trials_default == 1
 
 
+def test_default_account_ref_dial_batch_d(monkeypatch) -> None:
+    """FLAGGED, ASSUMPTIONS (batch D): `policy.promotion_status()`'s pinned
+    §4.2 signature takes no `account_ref` argument, so this dial supplies
+    the single-account P2 MVP default it reports on."""
+    monkeypatch.delenv("TK_CONFIG_PATH", raising=False)
+    dials = PolicyDials.load()
+    assert dials.default_account_ref == "paper:alpha"
+
+
 def test_default_allowlist_is_liquid_large_caps_plus_btc_eth(monkeypatch) -> None:
     monkeypatch.delenv("TK_CONFIG_PATH", raising=False)
     dials = PolicyDials.load()

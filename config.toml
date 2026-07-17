@@ -52,3 +52,7 @@ void_rate_cap_pct = "0.20"
 series_epoch = "2026-01-01T00:00:00Z"
 paper_starting_equity_usd = "500"
 n_trials_default = 1
+
+# Batch D: default account_ref for the argless promotion_status()/
+# confirm_promotion() verbs (P2 MVP is single-account; FLAGGED, ASSUMPTIONS).
+default_account_ref = "paper:alpha"

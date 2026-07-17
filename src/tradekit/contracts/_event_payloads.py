@@ -256,6 +256,56 @@ class PolicyVersionLoadedPayload(StrictFrozenModel):
     dials: dict[str, Any]
 
 
+class PromotionGrantedPayload(StrictFrozenModel):
+    """Producer: `policy.promotion_status()` (SPRINT P2 batch D, §7.3 T1->T2)
+    — the READ verb that may append exactly this one event type when the
+    machine-evaluated T1->T2 criteria are met AND no unconsumed
+    `PromotionGranted` already exists for this `account_ref` (ASSUMPTIONS,
+    batch D: "read-verb-that-writes", flagged for ratification — the
+    alternative, a dedicated `evaluate_promotion` verb, would widen the
+    six-verb policy surface the CTO addendum pins closed).
+
+    `criteria` carries the per-conjunct pass/fail breakdown that earned the
+    grant (3-of-4-clean / most-recent-clean / >=30 non-void / R-016 metrics
+    gate) so the ledgered event is self-auditing without re-deriving the
+    evaluation."""
+
+    account_ref: str
+    from_tier: Literal["T0", "T1"]
+    to_tier: Literal["T1", "T2"]
+    criteria: dict[str, Any]
+
+
+class PromotionConfirmedPayload(StrictFrozenModel):
+    """Producer: `policy.confirm_promotion()` (Mike-only verb, §7.3, R-011).
+    Consumes the unconsumed `PromotionGranted` named by `granted_event_id`;
+    `live_sequence_remaining` is always `3` at confirmation (the fresh
+    live-trade budget the sprint doc pins)."""
+
+    account_ref: str
+    to_tier: Literal["T2"]
+    granted_event_id: str
+    live_sequence_remaining: int = 3
+    confirmed_by: str
+
+
+class DemotedPayload(StrictFrozenModel):
+    """Producer: `policy.promotion_status()` (SPRINT P2 batch D — CTO
+    adjudication: the machine evaluates demotion triggers the SAME way it
+    evaluates promotion, inside the one read-verb-that-writes, rather than a
+    separate demotion verb; flagged for ratification, same class of call as
+    `PromotionGrantedPayload`'s). §7.3 triggers: R-009 drawdown-breaker trip,
+    a `GateViolationDetected` while T2, or a failed live grading — `trigger`
+    names which one fired; `detail` carries the triggering event's own id/
+    rule_id for audit linkage."""
+
+    account_ref: str
+    from_tier: Literal["T2"]
+    to_tier: Literal["T1"]
+    trigger: Literal["drawdown_breach", "gate_violation", "failed_live_grade"]
+    detail: str
+
+
 class ConfigChangedPayload(StrictFrozenModel):
     """Producer: `policy.evaluate`/`policy.status` — appended IN ADDITION to
     `PolicyVersionLoaded` when the freshly-computed hash differs from the
@@ -274,12 +324,15 @@ class ConfigChangedPayload(StrictFrozenModel):
 __all__ = [
     "ActionProposedPayload",
     "ConfigChangedPayload",
+    "DemotedPayload",
     "GateViolationDetectedPayload",
     "HaltClearedPayload",
     "HaltSetPayload",
     "InvalidationAttestedPayload",
     "MarketSnapshotTakenPayload",
     "PolicyVersionLoadedPayload",
+    "PromotionConfirmedPayload",
+    "PromotionGrantedPayload",
     "ReviewCompletedPayload",
     "SizingComputedPayload",
     "ThesisActivatedPayload",

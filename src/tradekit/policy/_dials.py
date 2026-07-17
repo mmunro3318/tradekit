@@ -91,6 +91,12 @@ class PolicyDials(BaseSettings):
     series_epoch: AwareDatetime = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
     paper_starting_equity_usd: Decimal = Decimal("500")
     n_trials_default: int = 1
+    # Batch D addition (FLAGGED, ASSUMPTIONS): `policy.promotion_status()`'s
+    # pinned signature takes NO account_ref argument (§4.2/CTO addendum), so
+    # a default account must come from somewhere for the single-account P2
+    # MVP (multi-account promotion ladders are a P3 concern) — this dial is
+    # that default, read by `promotion_status()`/`confirm_promotion()`.
+    default_account_ref: str = "paper:alpha"
 
     @classmethod
     def settings_customise_sources(

@@ -158,15 +158,43 @@ def status() -> dict[str, Any]:
 
 
 def promotion_status() -> dict[str, Any]:
-    """Series/promotion-ladder readiness snapshot (§7.3). Story 4 — NOT this
-    sprint's scope for this batch; deferred whole to batch D."""
+    """Series/promotion-ladder readiness snapshot (§7.3, story 4 — CTO
+    addendum). Argless (the pinned §4.2 signature — FLAGGED, ASSUMPTIONS:
+    the account it reports on is `PolicyDials.default_account_ref`, a P2 MVP
+    single-account convention).
+
+    Returns `{tier, current_series, last_4_series, t2_eligible,
+    live_sequence_remaining}` — `t2_eligible` carries a per-criterion
+    breakdown (3-of-4-clean / most-recent-clean / >=30 non-void /
+    R-016 metrics gate).
+
+    READ VERB THAT MAY WRITE (FLAGGED, ASSUMPTIONS — the CTO addendum's own
+    proposal, offered as ratifiable rather than a dedicated
+    `evaluate_promotion` verb, which would widen the six-verb surface):
+    when every T1->T2 conjunct passes AND no unconsumed `PromotionGranted`
+    event already exists for this account, this call appends EXACTLY ONE
+    `PromotionGranted` event (idempotent — a second call with the same
+    ledger state does not duplicate the grant). It also machine-evaluates
+    demotion the SAME way (FLAGGED, ASSUMPTIONS): if the account is
+    currently T2 and a demotion trigger (R-009 drawdown trip / a
+    `GateViolationDetected` while T2 / a failed live grading) has occurred
+    since the last `PromotionConfirmed`, this call appends `Demoted`.
+
+    Batch D — dev pass implements this against `policy._series` +
+    `mae.compute_strategy_metrics` (R-016 rewire, ASSUMPTIONS 77's forward
+    pin) + the `promotion_state` projection."""
     raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 4")
 
 
 def confirm_promotion() -> None:
-    """Mike-only verb: consumes an unconsumed `PromotionGranted` and appends
-    `PromotionConfirmed` with `live_sequence_remaining=3` (§7.3, R-011).
-    Story 4 — batch D."""
+    """Mike-only verb (CLI `tk promote confirm`): requires an unconsumed
+    `PromotionGranted` event for `PolicyDials.default_account_ref` (no later
+    `PromotionConfirmed`/`Demoted` for that same grant) — consumes it and
+    appends `PromotionConfirmed` with `live_sequence_remaining=3` (§7.3,
+    R-011). Refuses (typed exception — FLAGGED, ASSUMPTIONS: name
+    `PromotionRefused`, additive `policy` export, same class of pin as
+    `thesis.VoidRefused`) when no grant exists, or the most recent grant is
+    already consumed. Story 4 — batch D."""
     raise NotImplementedError("P2 batch D — docs/handoff/SPRINT-P2-thesis-policy.md story 4")
 
 
