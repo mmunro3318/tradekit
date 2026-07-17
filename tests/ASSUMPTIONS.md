@@ -1498,3 +1498,62 @@ failures are `NotImplementedError` (`policy._series.*` stubs or
     design, so test_rebuild.py now pins _projections' constants ==
     PolicyDials defaults (drift fails the suite). (promote-status CLI test
     update) accepted per the ASSUMPTIONS-81 precedent.
+
+---
+
+## Round-13 additions — P2 batch E (adversarial replay done-gate), 2026-07-17
+
+93. **Adversarial replay suite = the sprint done-gate
+    (`tests/replay/test_p2_adversarial.py`, Opus-authored, ring 3).** One
+    scenario per §15 gaming vector, driven through REAL verbs (draft/submit/
+    approve/grade/void/policy.evaluate/halt/resume) with harness appends
+    reserved for the P3-owned emissions only (ReviewCompleted /
+    ThesisActivated / FillRecorded) and the sanctioned clock/bars seams
+    (`tradekit.mae._runtime._clock`/`get_closed_bars`,
+    `tradekit.policy._context._clock`). Every scenario PASSES against the
+    current implementation — **no gate hole was found; all §15 mitigations
+    that P2 owns hold.** Coverage map (§15 row -> test):
+
+    | §15 vector | Gate | Test |
+    |---|---|---|
+    | VOID abuse | R-015 (>20% trailing void-rate) | `test_void_farm_25pct_voids_blocks_new_submission_via_r015` + boundary control `test_void_farm_boundary_20pct_voids_passes_r015` |
+    | Micro-trade series gaming | R-008 ($10 min notional) | `test_micro_series_ten_two_dollar_orders_each_denied_by_r008` |
+    | Window cherry-picking | fixed calendar series (arith + no mutating verb) | `test_window_cherry_picking_series_assignment_is_pure_timestamp_arithmetic` |
+    | Revenge-sizing after losses | R-012 (sizing purity, 1% tol) | `test_revenge_sizing_2x_denied_by_r012_control_within_tolerance_passes` |
+    | Drawdown lockout (F7 advisory) | R-009 (10% 30d peak) | `test_drawdown_breach_locks_out_new_paper_position_via_r009` + `..._advisory_account_too_f7` |
+    | Agent bypasses gates in-process | R-001 (kill switch) | `test_kill_switch_halt_denies_every_mutating_action_resume_restores` |
+    | Thesis prerequisites (ASSUMPTIONS 81 closed hole) | R-010 | `test_fabricated_never_drafted_thesis_id_denied_by_r010` |
+    | VOID sign-off leg (§10.4 leg 2) | void() refusal + audit trail | `test_void_without_reviewer_signoff_refused_attestation_kept_grade_still_works` |
+    | Tampered history | hash chain / verify_chain() | `test_tampered_event_row_is_detected_by_verify_chain` |
+
+    **Freeze-gate arithmetic** is inline at every threshold (void-rate 5/20 =
+    0.25 > 0.20; drawdown 60/500 = 0.12 >= 0.10; sizing deviation 50/25 = 1.0
+    > 0.01; series floor((grade_ts - epoch)/30d) boundary cases). The honest
+    control in each scenario asserts the SOLE failing rule id
+    (`_failing_rule_ids == {"R-0xx"}`) so a scenario proves the named gate is
+    both necessary and sufficient, not merely one denial among many.
+
+    **§15 rows NOT covered in P2 (coverage honesty, not padding) — each is a
+    P3 concern with no P2 producer to attack:**
+    - **Out-of-band trades (stolen keys / manual UI) -> reconcile + auto-halt
+      (§8.2):** `tk account reconcile`, broker fills, and the
+      ReconciliationRun(mismatch)->HaltSet path are all `tradekit.broker`
+      (P3). P2 ships no fill pipeline, so there is nothing to reconcile
+      against — deferred to the P3 broker sprint's own replay scenario.
+    - **Prompt injection via fetched market/news text:** structurally
+      mitigated (MAE returns numbers/enums, not scraped prose; gates are
+      deterministic regardless of wiki content) — nothing executable to
+      assert at ring 3 in P2; the guarantee is the absence of a text->policy
+      path, which the module boundaries (TID251: policy imports no mae
+      internals) already pin.
+    - **Rules drift -> policy version hash / generated RULES.md:** covered by
+      batch-C unit + RULES.md drift tests, not re-pinned here (not a runtime
+      gaming vector an agent exercises through the verb surface).
+    - **Key hygiene (.env gitignored, live keys at promotion):** operational/
+      deployment posture, no code surface to replay.
+    - **Failed-live-grading and R-009-drawdown DEMOTION triggers
+      (ASSUMPTIONS 92):** the batch-D `promotion_status()` demotion path only
+      has an end-to-end producer for the `GateViolationDetected` trigger in
+      P2; the other two triggers share identical mechanics but need the P3
+      broker/live-grading producers to exercise — the batch-D coverage gap
+      (not a design gap) is unchanged by batch E.
