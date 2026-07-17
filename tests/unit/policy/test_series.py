@@ -354,6 +354,28 @@ def _seed_two_account_pooling_bug_fixture(ledger) -> None:
             "900",
         )
     )
+    # Marker event at window_end (inert for series-0's own arithmetic — a
+    # bare ThesisDrafted for an unrelated, never-graded thesis) so the
+    # `series` projection's LOG-DERIVED completeness (review round-14
+    # MEDIUM: max ts_utc across the log, not wall-clock) agrees with
+    # `series_stats`'s seam-clocked `now=NOW_WINDOW_CLOSED` in the agreement
+    # test below — without it the two would legitimately (and correctly)
+    # diverge on `complete` alone, for a reason unrelated to the HIGH
+    # pooling bug this fixture targets.
+    ledger.append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=EPOCH + timedelta(days=30),
+            type="ThesisDrafted",  # type: ignore[arg-type]
+            actor="test:harness",
+            run_id=None,
+            schema_ver=1,
+            payload={
+                "thesis_id": "th-log-clock-marker",
+                "contract": {"account_ref": "paper:marker"},
+            },
+        )
+    )
 
 
 def test_series_stats_mdd_base_is_per_account_not_pooled_across_siblings(ledger) -> None:

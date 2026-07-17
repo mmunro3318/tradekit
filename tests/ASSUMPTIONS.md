@@ -1557,3 +1557,112 @@ failures are `NotImplementedError` (`policy._series.*` stubs or
       P2; the other two triggers share identical mechanics but need the P3
       broker/live-grading producers to exercise — the batch-D coverage gap
       (not a design gap) is unchanged by batch E.
+
+---
+
+## Round-14 additions — P2 post-sprint review fixes, 2026-07-17
+
+94. **HIGH — `equity_entering` was pooled across accounts, not scoped to the
+    account whose MDD it bases.** `policy._series.series_stats` and its
+    byte-for-byte twin `ledger._projections._materialize_series` both
+    computed the MDD walk's starting equity as
+    `paper_starting_equity_usd + sum(pnl_usd for every ThesisGraded of ANY
+    account_ref strictly before window_start)`, while the in-window MDD walk
+    itself is explicitly per-account (§7.3). Dangerous direction: a WINNING
+    sibling account's pre-window pnl inflates the pooled base, which shrinks
+    `mdd_pct` (same numerator, bigger denominator) and can launder a
+    genuinely dirty series into a falsely clean one — clean series feed
+    `promotion_status()`'s "3-of-last-4-clean" gate (§7.3/§9.4), so this was
+    a real T1->T2 promotion-integrity hole, not a cosmetic drift.
+
+    **Discriminating fixture** (`tests/unit/policy/test_series.py`'s
+    `_seed_two_account_pooling_bug_fixture`, equivalent in spirit to the
+    reviewer's own probe numbers): account `paper:alpha`'s own in-window
+    graded pnls are the pre-existing dirty-MDD freeze fixture (+250, -130,
+    +40, then seven 0.00 — graded_count=10, expectancy = 160/10 = 16 > 0).
+    Walked against A's OWN entering equity (500, the `paper_starting_
+    equity_usd` dial default, no prior A history): 500 -> 750 (peak) -> 620
+    -> 660 -> flat; mdd_usd = 750 - 620 = 130; **mdd_pct = 130 / 750 =
+    0.17333333333333334 (>= 0.15, DIRTY)**. Sibling account `paper:beta` has
+    one graded thesis, pnl +900, timestamped one day BEFORE the window
+    starts. Under the bug this pnl pools into A's `equity_entering` (500 +
+    900 = 1400); walked against THAT base: 1400 -> 1650 (peak) -> 1520 ->
+    1560 -> flat; mdd_usd is still 130 (A's own walk is unchanged), but
+    **mdd_pct = 130 / 1650 = 0.0787878787878788 (< 0.15, falsely CLEAN)**.
+    expectancy (16) and gate_violations (0) are identical either way, so the
+    fixture isolates the pooling bug alone — the ONLY thing that can flip
+    `clean` between the two computations is which base the MDD walk starts
+    from.
+
+    **Fix (both files, identically):** scope the pre-window pnl sum to the
+    account's own graded theses — `policy._series.series_stats` iterates
+    `all_graded` (already filtered by `_account_thesis_ids(ledger,
+    account_ref)`) instead of an unfiltered `ledger.query(...)`;
+    `ledger._projections._materialize_series` iterates
+    `per_account[account_ref]` (the same list `in_window` is filtered from)
+    instead of the module-wide `graded_events`. New tests:
+    `test_series_stats_mdd_base_is_per_account_not_pooled_across_siblings`
+    (RED before the fix: asserted `mdd_pct` ~0.17333... and `clean=False`,
+    the current buggy code produced `mdd_pct` ~0.07879 and `clean=True`) and
+    `test_series_projection_and_series_stats_agree_on_two_account_pooling_fixture`
+    (both derivations must independently reach `clean=False` on the same
+    fixture — before the fix they "agreed" only by sharing the bug).
+
+95. **MEDIUM — `series.complete` was wall-clock-derived, breaking rebuild
+    purity.** `ledger._projections._materialize_series` used
+    `datetime.now(UTC)` for the `complete` flag, contradicting `rebuild()`'s
+    own interface promise ("output depends on the event log alone") — two
+    rebuilds of the identical log, run on two different wall-clock days,
+    could disagree. **CTO-pinned fix:** `now_for_completeness` is the MAX
+    `ts_utc` across the whole event log (a cached read model can only know
+    what the log knows); `complete = window_end <= now_for_completeness`,
+    a pure function of the events, so repeat rebuilds of the same log agree
+    forever. `policy._series` (seam-clocked via `policy._context.clock()`,
+    injectable in tests) remains the actual DECISION authority for
+    anti-permissive policy checks — this projection is a read-only CLI/
+    report cache, and its log-relative `complete` can legitimately read
+    `False` for a window a wall-clock-aware caller would call closed, if the
+    log itself has no event past that window's end. Documented in the
+    module docstring and pinned by
+    `test_series_complete_is_derived_from_the_event_logs_own_max_ts_not_wall_clock`
+    (`tests/unit/ledger/test_rebuild.py`): ten `paper:alpha` graded theses
+    spanning Jan 1-10 2026 (series 0's `window_end` = Jan 31 2026) with no
+    later event anywhere in the log — real wall-clock `now` when the suite
+    runs (2026-07-17) is already far past Jan 31 2026, so this test only
+    passes under the log-derived rule; a wall-clock-derived `complete` would
+    read `True` here and fail it. The pre-existing
+    `ledger_with_one_clean_series` fixture (whose own complete/clean
+    assertions predate this fix) gets one inert marker event — a bare,
+    never-graded `ThesisDrafted` timestamped exactly at series 0's
+    `window_end` — so the log itself now has evidence the window closed,
+    keeping that test's `complete=1`/`clean=1` assertions meaningful under
+    the new rule without weakening them.
+
+96. **LOW-1 — stale "promotion_state unwired — batch D" comments in
+    `policy._context.py`.** The comments (on `_account_tier`'s `"live:"`
+    branch and `assemble()`'s `live_trades_remaining=None`) read as if
+    wiring the live tier were merely undone-yet, when the fail-closed
+    behavior is INTENTIONAL: P2 never grants the live tier at all (no P2
+    producer ever appends an account into `"live:"`), a P3-deferred-by-
+    design scope cut already ratified in ASSUMPTIONS 92 ("the batch-D
+    `promotion_status()` demotion path only has an end-to-end producer for
+    the `GateViolationDetected` trigger in P2 ... the batch-D coverage gap
+    ... is unchanged by batch E"). Comments updated to say so explicitly and
+    cite ASSUMPTIONS 92 — no behavior change, no test (per the review
+    dispatch's own instruction).
+
+97. **LOW-2 — `ConfigChanged` shape collision in `ledger._projections._apply`.**
+    Two producers share the `ConfigChanged` event type with DIFFERENT
+    payload shapes (ASSUMPTIONS 10's ratified split): the P0 shape carries a
+    `config_version` int; `policy`'s own `ConfigChangedPayload`
+    (`previous_hash`/`new_hash`/`dials`) never has that key at all. `_apply`
+    unconditionally inserted `payload.get("config_version")` into
+    `config_versions`, producing a NULL-junk row for every policy-shaped
+    `ConfigChanged` event. **Fix:** guard the insert on `"config_version" in
+    payload` — skip the table entirely when the key is absent, insert
+    exactly as before when it is present. Pinned by
+    `test_config_changed_policy_shaped_payload_inserts_no_config_versions_row`
+    (a policy-shaped payload -> zero `config_versions` rows) and its control,
+    `test_config_changed_p0_shaped_payload_still_inserts_config_versions_row`
+    (a P0-shaped payload -> still inserts), both in
+    `tests/unit/ledger/test_rebuild.py`.

@@ -166,14 +166,17 @@ def _halt_state(ledger: Ledger) -> tuple[bool, str | None]:
 
 
 def _account_tier(account_ref: str) -> Literal["T0", "T1", "T2"] | None:
-    """MVP tier-by-construction (P2 has no `promotion_state` projection
-    yet, batch D): a `"paper:"` account_ref can only exist at T1 (the
-    promotion ladder's own diagram: T0 research -> T1 paper -> T2 live —
-    trading paper AT ALL implies the T1 grant already happened), an
+    """MVP tier-by-construction: a `"paper:"` account_ref can only exist at
+    T1 (the promotion ladder's own diagram: T0 research -> T1 paper -> T2
+    live — trading paper AT ALL implies the T1 grant already happened), an
     `"advisory:"` account_ref is T0 research/manual. A `"live:"`
-    account_ref's real tier lives in `promotion_state` (unwired this
-    batch) -> `None` -> R-002 correctly denies every live action until
-    batch D, same anti-permissive shape as R-011's live-sequence budget."""
+    account_ref's real tier lives in the `promotion_state` projection,
+    which this helper deliberately does NOT read: P2 never grants the live
+    tier (P3-deferred by design, ASSUMPTIONS 92 — the promotion machine's
+    `PromotionConfirmed`/T2 path exists, but no P2 producer ever moves an
+    account to `"live:"`), so returning `None` here -> R-002 correctly
+    denies every live action, same anti-permissive shape as R-011's
+    live-sequence budget."""
     if account_ref.startswith("paper:"):
         return "T1"
     if account_ref.startswith("advisory:"):
@@ -518,7 +521,11 @@ def assemble(action: ProposedAction, dials: PolicyDials) -> PolicyContext:
         thesis_review_artifact_id=review_artifact_id,
         thesis_market_snapshot_id=market_snapshot_id,
         thesis_ev_ok=ev_ok,
-        live_trades_remaining=None,  # promotion_state unwired — batch D.
+        # P3-deferred by design (ASSUMPTIONS 92): P2 never grants the live
+        # tier, so no account ever needs a real live-sequence budget here —
+        # `None` -> R-011 correctly denies, same fail-closed shape as
+        # `_account_tier`'s own `"live:"` handling above.
+        live_trades_remaining=None,
         recorded_sizing_usd=_recorded_sizing(ledger, action),
         open_position_correlations={},
         thesis_age_hours=_thesis_age_hours(ledger, action.thesis_id, now),

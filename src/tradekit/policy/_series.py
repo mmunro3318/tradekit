@@ -179,10 +179,15 @@ def series_stats(
     )
 
     # Equity entering the window: paper_starting_equity_usd + realized pnl
-    # from ALL graded theses (any account_ref) strictly BEFORE window_start
-    # (module docstring). None-pnl contributes no cash flow.
+    # from THIS account's own graded theses strictly BEFORE window_start
+    # (module docstring — the MDD walk itself is per-account, so its base
+    # must be too; review round-14 HIGH: pooling every account's pnl here
+    # let a winning sibling account's pre-window pnl inflate this account's
+    # base and launder a genuinely dirty MDD into a falsely clean one).
+    # None-pnl contributes no cash flow. Scoped via the same
+    # `_account_thesis_ids` set used for `all_graded`/`in_window` above.
     equity_entering = dials.paper_starting_equity_usd
-    for event in ledger.query(EventFilter(types=["ThesisGraded"])):
+    for event in all_graded:
         if _graded_ts(event) < window_start:
             pnl = event.payload.get("pnl_usd")
             if pnl is not None:

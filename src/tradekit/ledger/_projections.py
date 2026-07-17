@@ -30,6 +30,21 @@ existing `LessonRecorded`-is-noise pattern, so those three tables stay empty
 and inert (which is exactly what "empty-ledger rebuild is a no-op" and
 "tables exist after rebuild" require, with no red test attached to them
 yet).
+
+ASSUMPTIONS (review round-14 MEDIUM): the `series` projection's `complete`
+flag is LOG-RELATIVE, not wall-clock-relative — `_materialize_series` derives
+"now" as the MAX `ts_utc` across the whole event log, never
+`datetime.now(UTC)`, so `complete = window_end <= now_for_completeness`. This
+is a deliberate corollary of `rebuild()`'s own promise ("output depends on
+the event log alone"): a disposable read-model cache can only know what its
+source log knows, and two rebuilds of the same log run on two different
+wall-clock days must produce byte-identical rows forever. `policy._series`
+(seam-clocked via `policy._context.clock()`, injectable in tests) remains the
+actual DECISION authority for anti-permissive policy checks (promotion
+gates, etc.) — this projection exists for CLI/report reads only, and its
+log-relative `complete` can legitimately read `False` for a window a
+wall-clock-aware caller would consider closed, if the log itself has no
+event past that window's end.
 """
 
 from __future__ import annotations
@@ -183,10 +198,18 @@ def _apply(con: sqlite3.Connection, event: Event) -> None:
             ),
         )
     elif event.type == "ConfigChanged":
-        con.execute(
-            "INSERT INTO config_versions VALUES (?, ?, ?)",
-            (payload.get("config_version"), ts, event.actor),
-        )
+        # LOW-2 (review round-14): two producers share this event type with
+        # DIFFERENT payload shapes (ASSUMPTIONS 10's ratified split) — the P0
+        # shape (`RunStarted`-adjacent config bumps) carries `config_version`;
+        # `policy`'s own `ConfigChangedPayload` (`previous_hash`/`new_hash`/
+        # `dials`) never does. Only insert when the key is actually PRESENT —
+        # unconditionally inserting `payload.get("config_version")` produced
+        # a NULL-junk row for every policy-shaped ConfigChanged event.
+        if "config_version" in payload:
+            con.execute(
+                "INSERT INTO config_versions VALUES (?, ?, ?)",
+                (payload.get("config_version"), ts, event.actor),
+            )
     elif event.type == "ThesisDrafted":
         # Minimal, real handling (NOT a stub): a fresh thesis starts life in
         # `draft`. Deliberately defensive about payload shape — the
@@ -326,7 +349,19 @@ def _materialize_series(con: sqlite3.Connection, events: list[Event]) -> None:
             idx = (graded_ts(event) - _SERIES_EPOCH) // _SERIES_WINDOW
             series_keys.add((account_ref, idx))
 
-    now = datetime.now(UTC)
+    # Review round-14 MEDIUM: `complete` must be a pure function of the
+    # event log, not wall-clock `datetime.now(UTC)` — rebuild()'s own
+    # interface docstring promises "output depends on the event log alone",
+    # and two rebuilds of the same log on two different days must agree
+    # forever. A cached read model can only know what the log knows, so
+    # "now" here is the MAX ts_utc across the whole event log (the latest
+    # instant the log has any evidence of) — `complete` asks whether the
+    # window's own end has been reached by that log-relative clock, not by
+    # the wall clock the rebuild happens to run on. `policy._series`
+    # (seam-clocked via `policy._context.clock()`, injectable in tests)
+    # remains the actual decision authority for anti-permissive checks —
+    # this projection is a read-only cache for CLI/report reads.
+    now_for_completeness = max((event.ts_utc for event in events), default=_SERIES_EPOCH)
     for account_ref, series_idx in sorted(series_keys, key=lambda k: (k[0], k[1])):
         window_start = _SERIES_EPOCH + _SERIES_WINDOW * series_idx
         window_end = window_start + _SERIES_WINDOW
@@ -345,8 +380,15 @@ def _materialize_series(con: sqlite3.Connection, events: list[Event]) -> None:
             sum(non_void_pnls, Decimal("0")) / len(non_void_pnls) if non_void_pnls else None
         )
 
+        # Review round-14 HIGH: scope to THIS account's own graded theses
+        # only (`per_account[account_ref]`, the same list `in_window` is
+        # filtered from), not every account's `graded_events` — pooling let
+        # a winning sibling's pre-window pnl inflate this account's base and
+        # launder a dirty MDD into a falsely clean one (identical bug to,
+        # and must be fixed identically alongside, `policy._series
+        # .series_stats`'s own `equity_entering` derivation above it).
         equity_entering = _PAPER_STARTING_EQUITY_USD
-        for event in graded_events:
+        for event in per_account[account_ref]:
             if graded_ts(event) < window_start:
                 pnl = event.payload.get("pnl_usd")
                 if pnl is not None:
@@ -369,7 +411,7 @@ def _materialize_series(con: sqlite3.Connection, events: list[Event]) -> None:
             and window_start <= e.ts_utc.astimezone(UTC) < window_end
         )
 
-        complete = now > window_end and graded_count >= 10
+        complete = window_end <= now_for_completeness and graded_count >= 10
         clean = (
             complete
             and gate_violations == 0
