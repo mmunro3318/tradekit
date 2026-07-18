@@ -101,6 +101,39 @@ class BrokerCredentialsMissing(ProviderRequestError):
     "stop and flag anything not resolvable within scope" rule."""
 
 
+class VenueError(Exception):
+    """Base for the `AlpacaBroker` HTTP-error taxonomy (P4-PAPER review
+    MEDIUM-1, round-25 pin) -- mirrors the P1A `ProviderError` taxonomy
+    semantics (`mae._data.errors`) but broker-native (round-23's "never
+    import mae._data.errors across the module boundary for `_alpaca.py`
+    itself" still holds; this is the broker's OWN hierarchy). Every
+    `AlpacaBroker` method raises one of this base's two subclasses on a
+    non-2xx/malformed response -- never a fabricated status, zero balance,
+    empty list, or bare `KeyError`/`TypeError`/httpx exception leaking
+    through."""
+
+
+class VenueRejected(VenueError):
+    """A 4xx that is a REAL venue answer (round-25 pin): the venue looked at
+    the request and rejected it -- 404 unknown order, 422 rejected params,
+    etc. `order_status` is the ONE method that maps a specific case of this
+    (404, order-confirmed-unknown) to a domain value
+    (`OrderStatus(status="rejected")`) rather than raising, because a
+    venue-confirmed "this order does not exist" IS a real, terminal answer
+    -- pinned explicitly there, not generalized to every 4xx or every
+    method. Everywhere else (and every other 4xx), this raises."""
+
+
+class VenueUnavailable(VenueError):
+    """5xx, 429, timeouts, or a malformed 200 (missing expected fields,
+    non-JSON body, wrong top-level shape) -- the venue did NOT give a real
+    answer, so nothing may be inferred from it (round-25 pin, mirrors P1A's
+    `ProviderUnavailable`: primary data/trading state never degrades
+    silently). A transient 503 on `order_status` must never misreport a
+    possibly-live order as terminal `"rejected"` -- the exact fabrication
+    this class exists to kill."""
+
+
 class NoQuoteAvailable(Exception):
     """Raised by an adapter's fill evaluation when the order's symbol has NO
     cached closed bars to price against (CTO adjudication, SPRINT P3 batch B
@@ -143,4 +176,7 @@ __all__ = [
     "BrokerTokenRequired",
     "LiveTradingDisabled",
     "NoQuoteAvailable",
+    "VenueError",
+    "VenueRejected",
+    "VenueUnavailable",
 ]

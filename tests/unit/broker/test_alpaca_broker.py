@@ -40,7 +40,7 @@ from tradekit.broker._alpaca import (
     ALPACA_STATUS_MAP,
     AlpacaBroker,
 )
-from tradekit.broker._port import BrokerTokenRequired
+from tradekit.broker._port import BrokerTokenRequired, VenueRejected, VenueUnavailable
 from tradekit.contracts import (
     AssetRef,
     Event,
@@ -491,3 +491,110 @@ def test_submit_refuses_with_reason_halted_when_an_unresolved_halt_set_exists(
 
     with pytest.raises(BrokerTokenRequired, match="halted"):
         adapter.submit(order, token)
+
+
+# ---------------------------------------------------------------------------
+# Venue error taxonomy (P4-PAPER review MEDIUM-1, round-25): 5xx/429/
+# timeouts/malformed-200/decode failures RAISE `VenueUnavailable` — never a
+# fabricated status/zero/empty result. A REAL venue answer that happens to
+# be a 4xx (404 unknown order) is the ONE case allowed to map to a domain
+# value (`OrderStatus(status="rejected")`), pinned explicitly below; every
+# other 4xx (422 etc.) raises `VenueRejected`, also never fabricated.
+#
+# RED at time of writing: `VenueRejected`/`VenueUnavailable` do not exist
+# yet in `tradekit.broker._port` (the import above itself fails collection),
+# and even once stubbed in, `_alpaca.py`'s five methods do not distinguish
+# HTTP status at all — a 503/429/malformed-200 flows straight into
+# `response.json()`/dict access, either fabricating `OrderStatus(status=
+# "rejected")` (order_status, via the ALPACA_STATUS_MAP catch-all on an
+# empty/absent `status` field) or raising a bare `KeyError`/`TypeError`
+# (account/positions/fills) instead of the typed venue error.
+# ---------------------------------------------------------------------------
+
+
+def test_order_status_raises_venue_unavailable_on_503(respx_mock: object) -> None:
+    """A transient 503 must never misreport a possibly-live order as
+    terminal `"rejected"` — the exact fabrication round-23/round-25 exist to
+    kill. Before this fix, `order_status` parsed the (empty/malformed) body
+    unconditionally and the ALPACA_STATUS_MAP catch-all mapped the missing
+    `status` key to `"rejected"` — a fabricated terminal status for a
+    request the venue never actually answered."""
+    order_id = "order-transient-503"
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/{order_id}").mock(
+        return_value=httpx.Response(503, text="upstream unavailable")
+    )
+
+    adapter = _paper_broker()
+    with pytest.raises(VenueUnavailable):
+        adapter.order_status(order_id)
+
+
+def test_order_status_maps_404_to_rejected_pinned_legitimate_case(
+    respx_mock: object,
+) -> None:
+    """The ONE pinned case where a 4xx maps to a domain status rather than
+    raising: a venue-confirmed 404 (order genuinely does not exist) is a
+    REAL answer, not a transient failure — `order_status` returns
+    `OrderStatus(status="rejected")` without raising. Mirrors the
+    conformance builder's `order-does-not-exist` route
+    (tests/contract/test_broker_port.py's `_build_alpaca_paper_case`),
+    pinned here directly against the unit-level adapter too."""
+    order_id = "order-does-not-exist"
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/{order_id}").mock(
+        return_value=httpx.Response(404, json={"code": 40410000, "message": "order not found"})
+    )
+
+    adapter = _paper_broker()
+    status = adapter.order_status(order_id)
+
+    assert status.status == "rejected"
+
+
+def test_account_raises_venue_unavailable_on_malformed_200(respx_mock: object) -> None:
+    """A 200 response missing the `equity` field (malformed/truncated venue
+    body) must raise `VenueUnavailable`, never a bare `KeyError` — the
+    caller should never have to know this adapter parses JSON internally."""
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account").mock(
+        return_value=httpx.Response(200, json={"cash": "500.00", "buying_power": "500.00"})
+    )
+
+    adapter = _paper_broker()
+    with pytest.raises(VenueUnavailable):
+        adapter.account()
+
+
+def test_fills_raises_venue_unavailable_on_error_dict_body(respx_mock: object) -> None:
+    """An error-shaped JSON body (`{"code": ..., "message": ...}`) returned
+    with a 200 status (or any status that reaches this deep) must raise
+    `VenueUnavailable`, never silently iterate the dict's keys as if they
+    were activity rows (which would previously raise an opaque `TypeError`
+    deep inside the loop, or in the worst case produce a garbage `Fill`)."""
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account/activities").mock(
+        return_value=httpx.Response(200, json={"code": 40010001, "message": "bad request"})
+    )
+
+    adapter = _paper_broker()
+    with pytest.raises(VenueUnavailable):
+        adapter.fills(datetime(2026, 1, 1, tzinfo=UTC))
+
+
+def test_submit_raises_venue_unavailable_on_500_and_appends_zero_events(
+    respx_mock: object,
+) -> None:
+    """A 500 from `POST /orders` must raise `VenueUnavailable` and append
+    ZERO `OrderSubmitted`/`OrderAck` events — validate-before-append
+    discipline (round-25 pin): an order that was never actually confirmed by
+    the venue must never leave a ledger trace claiming otherwise."""
+    _seed_allow_verdict(thesis_id="TH-alpaca-buy")
+    respx_mock.post(f"{ALPACA_PAPER_BASE_URL}/orders").mock(
+        return_value=httpx.Response(500, text="internal error")
+    )
+
+    adapter = _paper_broker()
+    before = list(default_ledger().query(EventFilter(types=["OrderSubmitted", "OrderAck"])))
+
+    with pytest.raises(VenueUnavailable):
+        adapter.submit(_order(), _VERDICT)
+
+    after = list(default_ledger().query(EventFilter(types=["OrderSubmitted", "OrderAck"])))
+    assert after == before, "a failed venue submit must append zero OrderSubmitted/OrderAck events"
