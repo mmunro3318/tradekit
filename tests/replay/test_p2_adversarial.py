@@ -380,9 +380,18 @@ def test_window_cherry_picking_series_assignment_is_pure_timestamp_arithmetic(
 
     # No series-mutating verb exists on the public surfaces (freeze the sets:
     # a future `reassign_series`/`set_series` would break these).
+    #
+    # UPDATED (SPRINT P4-PAPER batch B, addendum 2, "No-auto-resume on the
+    # live path, structurally" — pre-authorized by the sprint doc, flagged
+    # here per this test's own freeze intent): `LiveHaltRequiresManualConfirm`
+    # is a NEW typed exception, additive to policy.__all__ exactly like
+    # `PromotionRefused` already is — it is not a series-mutating verb (the
+    # six-verb surface + `PromotionRefused` are otherwise byte-for-byte
+    # unchanged; `resume()` itself gained only a keyword-only `confirm_live`
+    # parameter, not a new callable name).
     assert set(policy.__all__) == {
-        "PromotionRefused", "confirm_promotion", "evaluate", "halt",
-        "promotion_status", "resume", "status",
+        "LiveHaltRequiresManualConfirm", "PromotionRefused", "confirm_promotion",
+        "evaluate", "halt", "promotion_status", "resume", "status",
     }
     assert set(thesis.__all__) == {
         "IllegalTransition", "VoidRefused", "approve", "draft", "grade",

@@ -15,8 +15,10 @@ themselves (those are never invoked anywhere in this test suite).
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 from tradekit.policy._dials import PolicyDials
@@ -102,4 +104,92 @@ def test_real_subprocess_stub_executable_enforces_max_output_bytes(tmp_path) -> 
     assert raised, (
         "a subprocess whose stdout exceeds max_output_bytes must raise "
         "review._port.ReviewOutputTooLarge -- never a silent truncation"
+    )
+
+
+def _process_alive(pid: int) -> bool:
+    """Portable "is this pid still running" check (no psutil dependency).
+    Windows: `tasklist` filtered by PID; POSIX: `os.kill(pid, 0)` (raises if
+    the process is gone)."""
+    if sys.platform == "win32":
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        return str(pid) in out
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def test_real_subprocess_stub_executable_kills_a_flooding_process_early(tmp_path) -> None:
+    """SPRINT P4-PAPER batch B, addendum 2 round-22 LOW ("Streaming
+    subprocess caps"): a FLOOD stub -- prints far more than the cap IN A
+    LOOP, never exiting on its own -- proves the adapter enforces
+    `max_output_bytes` via an INCREMENTAL Popen read with a running byte
+    budget, not the prior post-hoc `subprocess.run(...)` collect-then-check
+    shape (which could only ever discover the overage AFTER the whole
+    unbounded stream had been collected, or after the full timeout_s had
+    elapsed -- whichever came first). Three assertions distinguish "killed
+    early" from "just timed out waiting the full budget":
+
+      (i) `ReviewOutputTooLarge` is raised (not `ReviewTimeout`);
+      (ii) elapsed wall-clock time is well under `timeout_s` (30s) --
+           proving the kill happened as soon as the running total crossed
+           the cap, not because the timeout also happened to fire;
+      (iii) the flooding process is actually DEAD afterward (not merely
+            un-awaited) -- proving this is a real `proc.kill()`, not a
+            silently-abandoned subprocess still writing into a pipe nobody
+            reads anymore.
+    """
+    pid_file = tmp_path / "flood.pid"
+    script = _write_script(
+        tmp_path,
+        "flood.py",
+        f"""\
+        import os, sys
+        with open(r"{pid_file}", "w") as f:
+            f.write(str(os.getpid()))
+        while True:
+            sys.stdout.write("x" * 4096)
+            sys.stdout.flush()
+        """,
+    )
+    adapter = SubprocessReviewerAdapter(sys.executable, (str(script),))
+
+    start = time.monotonic()
+    try:
+        adapter.review("attack this thesis", timeout_s=30, max_output_bytes=200)
+        raised = False
+    except ReviewOutputTooLarge:
+        raised = True
+    elapsed = time.monotonic() - start
+
+    assert raised, (
+        "a flooding subprocess must raise review._port.ReviewOutputTooLarge -- never hang "
+        "until the caller gives up, and never a silent truncation"
+    )
+    assert elapsed < 10, (
+        f"elapsed={elapsed!r}s must be well under timeout_s=30 -- proving an early kill on "
+        "byte-budget breach, not a fall-through to the timeout path"
+    )
+
+    # The stub writes its own pid before flooding -- give the OS a brief
+    # moment to finish reaping (proc.wait() already ran inside review()),
+    # then confirm the process is actually gone, not merely un-awaited.
+    deadline = time.monotonic() + 5
+    pid = int(pid_file.read_text().strip()) if pid_file.exists() else None
+    still_alive = pid is not None and _process_alive(pid)
+    while still_alive and time.monotonic() < deadline:
+        time.sleep(0.1)
+        still_alive = _process_alive(pid)  # type: ignore[arg-type]
+    assert not still_alive, (
+        f"the flooding subprocess (pid={pid}) must be killed, not left running after "
+        "ReviewOutputTooLarge is raised"
     )

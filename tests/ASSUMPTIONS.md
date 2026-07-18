@@ -2700,3 +2700,16 @@ proven red against the pre-fix code, then green).
       assertions of what it always pinned — both reconcile directions run
       over the real adapter, the seeded-vs-fixture triples match, result
       is "ok" with zero mismatches, no auto-halt.
+
+    **CTO ratification (2026-07-18) — batch-B/P4-paper (round 24):**
+    collapsed red/green split for mechanical changes: accepted (batch-A
+    precedent; every change followed a pinned algorithm). live_path scope:
+    the NARROW reading is RATIFIED per the agent's recommendation — a
+    manual scope-all halt is not "about" a live account, and the dangerous
+    class (halts CAUSED by live-path anomalies) is exactly the
+    reconcile-produced set; the residual (an agent resuming a manual halt
+    mid-live-sequence) is closed PROCEDURALLY in SESSION-SEED-P4's live
+    sequence (no agent resumes ANY halt during the 3-trade sequence) and
+    bounded by the two-man rule + 3x$25 budget. The policy.__all__
+    surface-freeze edit (additive exception export) audited: the frozen
+    test guards series-mutating VERBS; an exception class is not a verb.

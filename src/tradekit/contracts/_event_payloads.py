@@ -218,11 +218,25 @@ class GateViolationDetectedPayload(StrictFrozenModel):
 class HaltSetPayload(StrictFrozenModel):
     """Producer: `policy.halt` / an automatic reconcile-mismatch halt (§8.2
     step 7, R-001). `scope="all"` is the MVP default — per-account halts are
-    an open extension, not pinned this batch."""
+    an open extension, not pinned this batch.
+
+    `live_path` (additive, SPRINT P4-PAPER batch B, addendum 2 "No-auto-
+    resume on the live path, structurally"): `True` when this halt traces
+    to a live-tier (`"live:"`-prefixed) account. `broker._pipeline.reconcile`
+    sets it when `account_ref.startswith("live:")` (the addendum's own pinned
+    producer-side rule — the ONLY producer this batch sets it true; `policy.
+    halt`'s own manual kill switch has no `account_ref` to key off of, so a
+    manual `tk policy halt` always carries `live_path=False`, even against a
+    live account — FLAGGED, ASSUMPTIONS: a broader reading exists, see
+    `policy.resume`'s docstring). `policy.resume()` refuses to clear a
+    currently-unresolved `live_path=True` halt unless called with
+    `confirm_live=True` (Mike-manual step, CLI `tk policy resume
+    --live-confirm`) — no auto-resume on the live path, ever."""
 
     reason: str = Field(min_length=1)
     scope: str = "all"
     set_by: str
+    live_path: bool = False
 
 
 class HaltClearedPayload(StrictFrozenModel):

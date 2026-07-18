@@ -54,6 +54,17 @@ class PromotionRefused(Exception):
     export) — no unconsumed `PromotionGranted` event exists for
     `PolicyDials.default_account_ref`."""
 
+
+class LiveHaltRequiresManualConfirm(Exception):
+    """`resume()`'s typed refusal (SPRINT P4-PAPER batch B, addendum 2,
+    "No-auto-resume on the live path, structurally") — the CURRENT
+    unresolved halt (the last `HaltSet` with no later `HaltCleared`) carries
+    `live_path=True` and `resume()` was called without `confirm_live=True`.
+    No `HaltCleared` is appended on this path — the halt STANDS, R-001 keeps
+    denying every mutating action, exactly as if `resume()` had never been
+    called. The CLI's manual escape hatch is `tk policy resume
+    --live-confirm`."""
+
 # 'agent:<model>' | 'mike' | 'system:<job>' — every event this module
 # produces is a machine-derived gate decision, not an LLM or human action.
 _ACTOR = "system:policy"
@@ -439,12 +450,38 @@ def halt(reason: str) -> None:
     _append(ledger, "HaltSet", payload.model_dump(mode="json"))
 
 
-def resume() -> None:
+def resume(*, confirm_live: bool = False) -> None:
     """Appends `HaltCleared`, clearing the most recent unresolved
-    `HaltSet`."""
+    `HaltSet`.
+
+    Signature ADDITION (SPRINT P4-PAPER batch B, addendum 2 — FLAGGED,
+    ASSUMPTIONS: additive keyword-only parameter on an existing verb; the
+    §4.2 "exactly six verbs" depth rule is untouched, this only widens one
+    verb's own call signature, same class of change as `confirm_promotion`'s
+    prior additions): when the CURRENT unresolved halt (the last `HaltSet`
+    with no later `HaltCleared`) carries `live_path=True`, `resume()`
+    REFUSES — raises `LiveHaltRequiresManualConfirm`, appends NOTHING, the
+    halt stands — unless called with `confirm_live=True` (the CLI's
+    `tk policy resume --live-confirm`, a deliberate Mike-manual step; "no
+    auto-resume on the live path, ever," sprint doc traps). A halt with
+    `live_path=False` (every manual `policy.halt()`, and any reconcile
+    mismatch on a non-"live:" account) resumes exactly as before —
+    regression-pinned, unaffected by this addition."""
     ledger = default_ledger()
+    halted, _reason = _context._halt_state(ledger)
     halt_events = ledger.query(EventFilter(types=["HaltSet"]))
     halt_event_id = halt_events[-1].event_id if halt_events else None
+
+    if halted and not confirm_live:
+        last_halt = halt_events[-1]
+        if last_halt.payload.get("live_path"):
+            raise LiveHaltRequiresManualConfirm(
+                f"resume(): the current unresolved HaltSet (event_id={last_halt.event_id!r}, "
+                f"reason={last_halt.payload.get('reason')!r}) carries live_path=True — no "
+                "auto-resume on the live path; call resume(confirm_live=True) "
+                "(CLI: tk policy resume --live-confirm) once Mike has manually confirmed"
+            )
+
     payload = HaltClearedPayload(
         reason="resume", halt_event_id=halt_event_id, cleared_by=_ACTOR
     )
@@ -452,6 +489,7 @@ def resume() -> None:
 
 
 __all__ = [
+    "LiveHaltRequiresManualConfirm",
     "PromotionRefused",
     "confirm_promotion",
     "evaluate",

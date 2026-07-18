@@ -262,9 +262,27 @@ def policy_halt(reason: str) -> None:
 
 
 @policy_app.command("resume")
-def policy_resume() -> None:
-    """`policy.resume` — clears the kill switch (thin dispatch)."""
-    _guard_not_implemented(policy.resume)
+def policy_resume(
+    live_confirm: Annotated[
+        bool,
+        typer.Option(
+            "--live-confirm",
+            help=(
+                "Required to clear a live_path halt (SPRINT P4-PAPER batch B, addendum 2 — "
+                "'no auto-resume on the live path, ever'). Mike-manual confirmation."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """`policy.resume` — clears the kill switch (thin dispatch). A halt
+    traced to a live-tier account refuses cleanly (`policy.
+    LiveHaltRequiresManualConfirm`) without `--live-confirm`, never a raw
+    traceback."""
+    try:
+        _guard_not_implemented(policy.resume, confirm_live=live_confirm)
+    except policy.LiveHaltRequiresManualConfirm as exc:
+        typer.echo(f"refused: {exc}")
+        raise typer.Exit(code=1) from exc
     typer.echo("resumed")
 
 

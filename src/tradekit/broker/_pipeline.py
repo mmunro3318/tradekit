@@ -466,6 +466,11 @@ def reconcile(account_ref: str) -> None:
             reason=f"reconcile mismatch for account_ref={account_ref!r}: " + "; ".join(reasons),
             scope="all",
             set_by=_ACTOR,
+            # SPRINT P4-PAPER batch B, addendum 2: no-auto-resume on the live
+            # path, structurally — a reconcile-mismatch halt on a "live:"
+            # account is marked so policy.resume() refuses it without a
+            # manual confirm_live=True (Mike-manual step).
+            live_path=account_ref.startswith("live:"),
         )
         _append(ledger, "HaltSet", halt_payload.model_dump(mode="json"), now)
 

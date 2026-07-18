@@ -90,6 +90,65 @@ def test_policy_halt_then_resume_round_trip_exits_zero_now_that_real(tmp_path) -
     assert "resumed" in resume_result.output
 
 
+def test_policy_resume_refuses_a_live_path_halt_without_live_confirm(
+    tmp_path, monkeypatch
+) -> None:
+    """SPRINT P4-PAPER batch B, addendum 2 — `tk policy resume` refuses
+    cleanly (nonzero exit, no raw traceback) when the current halt carries
+    `live_path=True` and `--live-confirm` was not passed; `--live-confirm`
+    is the escape hatch. `CliRunner.invoke` runs in-process (Typer/Click
+    testing), so a `monkeypatch`-patched `tradekit.broker.get` here is
+    visible to the invoked CLI command, same as any other in-process test —
+    driving the live_path halt through the REAL `broker.reconcile` verb
+    (the addendum's own pinned producer), not a hand-built ledger row."""
+    from decimal import Decimal
+
+    from tradekit import broker
+    from tradekit.contracts import Fill
+
+    monkeypatch.setenv("TK_DATA_DIR", str(tmp_path))
+    account_ref = "live:cli-resume-refuse"
+
+    class _FakeBrokerPort:
+        def account(self):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        def positions(self):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        def submit(self, order, verdict):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        def order_status(self, order_id):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        def fills(self, since):
+            from datetime import UTC, datetime
+
+            return [
+                Fill(
+                    order_id="O-cli-live-1",
+                    thesis_id="TH-cli-live-1",
+                    ts_utc=datetime(2026, 4, 1, tzinfo=UTC),
+                    price=Decimal("100"),
+                    qty=Decimal("0.01"),
+                    fees_usd=Decimal("0.10"),
+                )
+            ]
+
+    monkeypatch.setattr("tradekit.broker.get", lambda ref: _FakeBrokerPort())
+    broker.reconcile(account_ref)
+
+    env = {"TK_DATA_DIR": str(tmp_path)}
+    refuse_result = runner.invoke(app, ["policy", "resume"], env=env)
+    assert refuse_result.exit_code == 1, refuse_result.output
+    assert "refused" in refuse_result.output.lower()
+
+    confirm_result = runner.invoke(app, ["policy", "resume", "--live-confirm"], env=env)
+    assert confirm_result.exit_code == 0, confirm_result.output
+    assert "resumed" in confirm_result.output
+
+
 def test_promote_status_exits_zero_now_that_promotion_status_is_real(tmp_path) -> None:
     # NOTE (batch-D dev pass): `policy.promotion_status` landed REAL this
     # batch (story 4) — same obsolescence-update pattern already applied to

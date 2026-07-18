@@ -21,8 +21,10 @@ P4 CODE DEBTS (from P3, all pinned in ASSUMPTIONS rounds 16-22):
 - AlpacaBroker adapter (live) passing the SAME conformance suite; replace
   the TEMPORARY live:→PaperBroker routing + add the pinned test that live:
   no longer resolves to PaperBroker (round-19 duty).
-- Alpaca PAPER dress rehearsal through the real API (story 1) — order
-  lifecycle parity vs PaperBroker conformance.
+- ~~Alpaca PAPER dress rehearsal (story 1)~~ DONE 2026-07-18: AlpacaBroker
+  adapter green vs the conformance suite; live paper rehearsal PASSED
+  (submit->filled->fill->account; two ~$10 BTC probe positions remain in
+  the paper account).
 - Streaming subprocess output caps (round-22 LOW deferral) if reviewer use
   scales; kraken read-only balance tracking for advisory reconcile.
 - Ring-3 seam-interaction scenarios (review round 6 process note): halt ×
@@ -33,6 +35,8 @@ P4 CODE DEBTS (from P3, all pinned in ASSUMPTIONS rounds 16-22):
   the first live order; add the pin if it lives only in prose).
 
 THE LIVE SEQUENCE (story 3-5, every step logged + paired):
+**During the sequence NO agent resumes ANY halt — live_path or not; every
+resume in that window is Mike, by hand (round-24 procedural pin).**
 readiness report → Mike's `tk promote confirm` (two-man rule) → 3 trades
 max, long-only, R-004 allowlist, ≤$25 each → `tk account reconcile` green
 after EACH → auto-revert to T1 (R-011) → `tk report snapshot` →
