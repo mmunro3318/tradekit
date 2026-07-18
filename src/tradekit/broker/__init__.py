@@ -124,10 +124,8 @@ def get(account_ref: str) -> BrokerPort:
             secret_env=ALPACA_LIVE_SECRET_ENV,
         )
     if account_ref.startswith("advisory:"):
-        # SPRINT P3 batch D: ManualBroker is real -- every method on it is a
-        # real implementation now (see _manual.py's module docstring), not
-        # a NotImplementedError stub (that split ended with batch D's own
-        # dev pass; this comment was stale, SPRINT P4-PAPER batch A cleanup).
+        # ManualBroker is fully implemented (SPRINT P3 batch D dev pass) --
+        # see _manual.py's module docstring.
         return ManualBroker(account_ref=account_ref)
     raise NotImplementedError(
         f"tradekit.broker.get({account_ref!r}): no adapter resolves this account_ref prefix"
