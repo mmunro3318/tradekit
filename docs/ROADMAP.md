@@ -150,8 +150,8 @@
 
 **Done-gate:** 3 live trades execute, settle, reconcile vs ledger; P&L snapshot verified by a non-Anthropic model.
 
-- [ ] Alpaca paper dress rehearsal: full pipeline against real Alpaca API (order lifecycle parity)
-- [ ] Mike's hands: live keys + fund $50–100 (D12)
+- [X] Alpaca paper dress rehearsal: full pipeline against real Alpaca API (order lifecycle parity) — DONE 2026-07-18: AlpacaBroker green vs the shared conformance suite; live paper rehearsal PASSED (submit→filled→fill→account); venue error taxonomy (5xx/429/malformed RAISE, never fabricate) landed same-day per review round 7; live trading structurally fail-closed (dial + live-key env + two-man rule); live_path halts refuse non-manual resume
+- [ ] Mike's hands: live keys + fund $50–100 (D12) + rotate BOTH chat-pasted key pairs + approve prompts/rubric-thesis-v1.md
 - [ ] Promotion flow exercised for real: readiness report → `tk promote confirm` → 3-trade budget (R-011)
 - [ ] 3-trade live sequence + `reconcile` green + auto-revert
 - [ ] `verify_claim` second-model verification of the snapshot (D4) — MVP COMPLETE

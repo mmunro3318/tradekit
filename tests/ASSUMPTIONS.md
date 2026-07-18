@@ -2782,3 +2782,8 @@ bodies instead of a typed error.
 - Verified: `uv run pytest` 824 passed (818 baseline + 6 new: order_status
   503/404, account malformed-200, fills error-dict, submit 500 and 422),
   `uv run ruff check .` clean, `uv run mypy` clean (73 source files).
+
+    **CTO ratification (2026-07-18) — round-25: RATIFIED as implemented.**
+    404-on-order_status is the one venue answer that maps to a typed
+    OrderStatus; everything else non-2xx/malformed RAISES. The
+    live-promotion blocker from review round 7 is closed pre-live.

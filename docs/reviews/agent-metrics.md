@@ -173,3 +173,29 @@ catches; extend ring-3 scenarios to seam interactions in P4. (2) Dev
 stop-and-flag discipline is now reliably good; the batch-C overstep was the
 exception and its process note landed. (3) 11 usage-cap deaths across the
 project to date; all recovered without loss.
+
+## Round 7 — 2026-07-18 — P4-paper (AlpacaBroker + seam hardening, commits 4f749a4..9b513fc)
+
+Reviewer: code-reviewer agent (Opus). Probes: per-method credential deletion,
+flood-kill timing, secret-value scan of the tracked tree (zero hits),
+fixture-vs-capture byte comparison, mutation-reasoning on the seam
+scenarios. Verdict: **PASS** (1 MED fixed same-day pre-live, 2 LOW).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tdd-p4a (Sonnet) | batch A tests (AlpacaBroker) | 0 | 0 | 1 | A- | Fixtures byte-faithful to the CTO capture; honest regression accounting on the routing change. LOW: stale red-phase docstrings. |
+| dev-p4a (Sonnet) | batch A src | 0 | 1* | 0 | B+ | Excellent stop-and-flag on the reconcile-test hole; the fabricated-defaults degradation was REJECTED at the CTO gate (no-creds = loud everywhere) — the conformance harness was the real culprit and got fixed instead. *MED-1 (HTTP taxonomy) originates here; also its live rehearsal claim was env-blocked, CTO ran it (PASSED). |
+| tdd-p4b (Sonnet) | batch B seams | 0 | 0 | 0 | A | Won the live_path adjudication with a better argument than the CTO's initial lean (narrow reading); collapsed split flagged honestly; flood-kill test empirically strong. |
+| fix-p4a (Sonnet) | review fixes | — | — | — | A | Venue taxonomy with per-failure-mode proven reds (bare JSONDecodeError/KeyError/TypeError each caught). |
+
+CTO-gate catches: fabricated read-verb defaults (rejected pre-review); the
+conformance-builder ownership rule; the pre-captured-shapes discipline
+(probe BEFORE fixtures — zero fixture-vs-reality divergences all sprint,
+the first sprint with none).
+
+Process notes: (1) Mike's background-agent + wakeup-ladder orchestration
+pattern used for every dispatch this sprint — no blocking waits; adjudication
+rounds turn in ~15-20 min. (2) The pre-registered-focus rule keeps paying:
+MED-1 sat exactly in the named focus area. (3) Live remains structurally
+unreachable: dial default-false + live-key env absent + two-man promotion +
+live_path manual-resume — four independent locks.

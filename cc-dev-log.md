@@ -2,6 +2,41 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-18 (Fable) — P4-PAPER COMPLETE: AlpacaBroker dress rehearsal + seam hardening
+
+- Scope per Mike: "P4, paper only." Live remains structurally unreachable
+  behind FOUR independent locks: live_trading_enabled dial (default false) +
+  ALPACA_LIVE_KEY env absence + two-man promotion + live_path manual-resume.
+- **AlpacaBroker** (real trading API, paper base): five port methods, shared
+  _tokens verifier FIRST (submit-time halt seam closed for every adapter),
+  no-creds = LOUD everywhere (fabricated read-verb defaults REJECTED at the
+  CTO gate — the conformance harness owns its environmental setup instead),
+  venue error taxonomy (404-on-order_status is the one typed venue answer;
+  5xx/429/timeout/malformed RAISE VenueUnavailable — never fabricate a
+  status; landed same-day off review round 7's MED, pre-live).
+- **Process upgrade (Mike's note): fixtures from REALITY FIRST** — CTO
+  probed the live paper API before any test authoring (docs/research/
+  alpaca-paper-shapes-2026-07-18.json); zero fixture-vs-reality divergences
+  all sprint (first sprint with none). Two ~$10 BTC probe/rehearsal
+  positions remain in Mike's Alpaca paper account.
+- **Live dress rehearsal PASSED via the real adapter**: submit→open→filled→
+  activity-fill (costs-model fees)→account state, scripts/smoke_alpaca_paper.py.
+- **Seam hardening**: HaltSetPayload.live_path (narrow reading — agent's
+  argument beat the CTO's initial lean; procedural pin covers the residual),
+  resume(confirm_live)/`tk policy resume --live-confirm`, Popen streaming
+  flood-kill (proven early, not timeout), ring-3 seam scenarios (submit-time
+  halt + token×demotion new-green against batch-A machinery).
+- Orchestration per Mike's note: every dispatch backgrounded + wakeup
+  ladder; no blocking waits; Codex fallback doc refreshed evergreen
+  (CODEX-HANDOFF-CURRENT.md).
+- **Review round 7 (Opus): PASS** (probes incl. secret-scan of the tracked
+  tree — zero hits; flood-kill timed; mutation-reasoning on scenarios). The
+  MED (HTTP taxonomy) fixed same-day with per-failure-mode proven reds.
+- **Final: 824 tests green, ruff clean, mypy clean.** agent-metrics round 7.
+- P4-LIVE remains Mike-gated: rotate BOTH chat-pasted key pairs, create live
+  keys + fund $50-100, approve prompts/rubric-thesis-v1.md. SESSION-SEED-P4
+  updated (rehearsal marked done; procedural no-agent-resume pin).
+
 ## 2026-07-17/18 (Fable) — P3 paper trading/review/reporting COMPLETE (M3.1-M3.3*)
 
 - *Open deferrals, all Mike-paired or Mike-blocked: rubric-thesis-v1.md DRAFT
