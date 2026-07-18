@@ -32,6 +32,14 @@ Batch B status: `PaperBroker`'s methods are `NotImplementedError` stubs
 `submit()` doesn't reach even a shape-only token check yet (see
 `tests/unit/broker/test_paper_fills.py` for the token-required pin that
 prescribes the dev pass's real behavior).
+
+SPRINT P4-PAPER batch A adds the "alpaca-paper" case (`_build_alpaca_
+paper_case`, TD-18's "one factory entry" property — the ONLY change this
+suite itself needs for a new adapter). `AlpacaBroker`'s five methods are
+`NotImplementedError` stubs this batch (`src/tradekit/broker/_alpaca.py`'s
+own module docstring — batch B lands the real bodies), so every "alpaca-
+paper" case below is expected RED this batch, same status "paper" cases
+had in SPRINT P3 batch A before PaperBroker's own dev pass landed.
 """
 
 from __future__ import annotations
@@ -83,10 +91,38 @@ def _build_paper_case() -> BrokerPort:
     return PaperBroker(account_ref=account_ref)
 
 
+def _build_alpaca_paper_case() -> BrokerPort:
+    """SPRINT P4-PAPER batch A's `CASE_BUILDERS` entry for the dress-
+    rehearsal adapter: a fresh `account_ref` per call (ULID suffix, same
+    "fresh instance per test" discipline as `_build_paper_case`), bound to
+    Alpaca's PAPER base URL + the paper env key names. No `AccountCreated`
+    seed needed here (unlike `PaperBroker`'s ledger-projection `account()`,
+    `AlpacaBroker`'s real body will read Alpaca's own `/account` endpoint,
+    not a ledger event) — irrelevant anyway this batch since every method
+    is a `NotImplementedError` stub."""
+    from ulid import ULID
+
+    from tradekit.broker._alpaca import (
+        ALPACA_PAPER_BASE_URL,
+        ALPACA_PAPER_KEY_ID_ENV,
+        ALPACA_PAPER_SECRET_ENV,
+        AlpacaBroker,
+    )
+
+    account_ref = f"alpaca-paper:conformance-suite-{ULID()}"
+    return AlpacaBroker(
+        account_ref=account_ref,
+        base_url=ALPACA_PAPER_BASE_URL,
+        key_id_env=ALPACA_PAPER_KEY_ID_ENV,
+        secret_env=ALPACA_PAPER_SECRET_ENV,
+    )
+
+
 # One entry per BrokerPort adapter this suite conforms — the ONLY place a
 # future adapter needs to be added (TD-18 "one factory entry" property).
 CASE_BUILDERS: dict[str, Callable[[], BrokerPort]] = {
     "paper": _build_paper_case,
+    "alpaca-paper": _build_alpaca_paper_case,
 }
 
 

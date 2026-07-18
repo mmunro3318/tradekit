@@ -51,6 +51,21 @@ class AdvisoryOnly(Exception):
     suite and `_manual.py` must import the SAME class object)."""
 
 
+class LiveTradingDisabled(Exception):
+    """Raised by `broker.get("live:*")` (SPRINT P4-PAPER batch A, addendum
+    2) when the live-venue routing's fail-closed conjunction is not
+    satisfied: EITHER the `PolicyDials.live_trading_enabled` dial is
+    `False` (the default, `config.toml`) OR the live env keys
+    (`ALPACA_LIVE_KEY_ID`/`ALPACA_LIVE_SECRET`) are absent from the
+    environment -- BOTH conditions (dial true AND keys present) are
+    required before `"live:"` resolves to a real `AlpacaBroker` pointed at
+    Alpaca's live trading base URL. This REPLACES the SPRINT P3 batch C
+    temporary routing (`"live:"` -> `PaperBroker`, ASSUMPTIONS round-18) --
+    `"live:"` never again resolves to `PaperBroker` (the round-19 pin,
+    re-pointed this batch). Canonical home alongside `BrokerTokenRequired`/
+    `NoQuoteAvailable`/`AdvisoryOnly` for the same identity-match reason."""
+
+
 class NoQuoteAvailable(Exception):
     """Raised by an adapter's fill evaluation when the order's symbol has NO
     cached closed bars to price against (CTO adjudication, SPRINT P3 batch B
@@ -86,4 +101,10 @@ class BrokerPort(Protocol):
         ...
 
 
-__all__ = ["AdvisoryOnly", "BrokerPort", "BrokerTokenRequired", "NoQuoteAvailable"]
+__all__ = [
+    "AdvisoryOnly",
+    "BrokerPort",
+    "BrokerTokenRequired",
+    "LiveTradingDisabled",
+    "NoQuoteAvailable",
+]

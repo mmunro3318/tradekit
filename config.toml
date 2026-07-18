@@ -83,3 +83,10 @@ reviewer_timeout_s = 120
 reviewer_max_output_bytes = 1048576
 # R-review: unresolved-attack threshold that blocks approval (§12.1).
 unresolved_attack_threshold = 1
+
+# SPRINT P4-PAPER batch A (addendum 2): fail-closed live-venue routing gate.
+# broker.get("live:*") requires BOTH this dial true AND the live env keys
+# (ALPACA_LIVE_KEY_ID/ALPACA_LIVE_SECRET) present, else LiveTradingDisabled.
+# Live keys/rotations remain Mike-blocked (sprint doc Addendum 2) — stays
+# false until Mike flips it by hand alongside rotating in the live keys.
+live_trading_enabled = false

@@ -142,6 +142,15 @@ class PolicyDials(BaseSettings):
     # deferred, not needed this batch).
     brief_max_tokens: int = 1500
     wiki_dir: str = "docs/wiki"
+    # SPRINT P4-PAPER batch A (addendum 2): fail-closed live-venue routing
+    # gate. `broker.get("live:*")` requires BOTH this dial True AND the live
+    # env keys (ALPACA_LIVE_KEY_ID/ALPACA_LIVE_SECRET) present before it
+    # resolves to a real AlpacaBroker pointed at the live trading base URL —
+    # either condition failing raises `LiveTradingDisabled` (`broker._port`).
+    # Defaults False (Mike's live keys/rotation remain blocked, per the
+    # sprint doc's Addendum 2 scope note: "Live keys/rotations remain
+    # Mike-blocked").
+    live_trading_enabled: bool = False
 
     @classmethod
     def settings_customise_sources(

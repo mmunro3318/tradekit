@@ -2521,3 +2521,130 @@ proven red against the pre-fix code, then green).
     log, not the poll timing). Token thesis-binding fails closed on
     legacy None. Phantom-ledger-fill reconcile direction closes the §15
     asymmetry ahead of P4. Streaming subprocess caps deferred to P4.
+
+142. **Round-23 (SPRINT P4-PAPER batch A, addendum 2) — routing table,
+     fail-closed conjunction, fees-from-costs provisional convention,
+     shared-verifier extraction + halt addition, fixture provenance.**
+     TDD red-phase session; every item below is either declarative/real
+     this batch (routing, dials, the shared verifier + its halt addition)
+     or a PIN for the batch-B dev pass (AlpacaBroker's method bodies).
+
+     - **Routing table** (`broker/__init__.py.get()`, real this batch):
+       `"paper:*"` -> `PaperBroker`; `"alpaca-paper:*"` -> `AlpacaBroker`
+       bound to `ALPACA_PAPER_BASE_URL` + `ALPACA_API_KEY_ID`/
+       `ALPACA_API_SECRET` (the SAME env names `mae._data.alpaca_data`
+       already uses — one Alpaca paper credential pair for both
+       market-data and trading this sprint); `"live:*"` -> the fail-closed
+       gate (below); `"advisory:*"` -> `ManualBroker` (unchanged).
+     - **Fail-closed conjunction** (`LiveTradingDisabled`, `broker._port`):
+       `"live:"` resolves to a real `AlpacaBroker` (live base URL +
+       `ALPACA_LIVE_KEY_ID`/`ALPACA_LIVE_SECRET`) iff BOTH
+       `PolicyDials.live_trading_enabled` is `True` (new dial, default
+       `False` in `config.toml` and the `PolicyDials` code default) AND
+       both live env keys are present — EITHER alone is insufficient,
+       matching the addendum's own "requires dial `live_trading_enabled`
+       ... AND env ALPACA_LIVE_KEY_ID/SECRET" wording literally as an AND,
+       not an OR of independent guards. This REPLACES SPRINT P3 batch C's
+       temporary `"live:"` -> `PaperBroker` routing (round-18) — the
+       round-19 pin (`"live:"` never resolves to `PaperBroker` again) is
+       re-pointed onto this batch's real gate in
+       `tests/unit/broker/test_broker_stubs.py::
+       test_get_never_resolves_a_live_prefixed_account_ref_to_a_paper_broker`,
+       replacing that file's own SPRINT P3 batch C test of the same
+       family (`test_get_resolves_a_live_prefixed_account_ref_to_a_paper_
+       broker`, now deleted — its own docstring said as much would happen).
+     - **Fees-from-costs provisional convention** (worked arithmetic,
+       `_alpaca.py`'s module docstring + `test_alpaca_broker.py::
+       test_fees_from_costs_arithmetic_for_the_captured_10_dollar_order`):
+       the CTO's captured `activities` fixture
+       (`docs/research/alpaca-paper-shapes-2026-07-18.json`) confirms
+       Alpaca's paper crypto FILL activity carries NO fee/commission field
+       at all — not an omission in our fixture, the REAL response has none.
+       `FillRecordedPayload.fees_usd` at fill-recording time (batch B pin)
+       therefore comes from `tradekit.costs.price_friction("alpaca",
+       "crypto", notional_usd, side).fee_usd` — `_TABLE[("alpaca",
+       "crypto")]` = (fee_rate=Decimal("0.0025"),
+       half_spread_rate=Decimal("0.0010")), so at the captured $10
+       notional: `fee_usd = Decimal("0.0025") * Decimal("10") =
+       Decimal("0.025")`. PROVISIONAL (ASSUMPTIONS-26 spirit — a modeled
+       estimate standing in for a real per-fill number Alpaca's paper API
+       simply does not report), not to be treated as ground truth once
+       live fills exist to measure against.
+     - **Shared-verifier extraction + halt addition**
+       (`src/tradekit/broker/_tokens.py`, new module): `PaperBroker.
+       _verify_token`'s existence/allow/hash + thesis-binding (MED-2a) +
+       no-newer-deny (MED-2b) algorithm moved VERBATIM into
+       `_tokens.verify_token(ledger, verdict, thesis_id, caller_repr=...)`
+       — `_paper.py` now delegates to it (mechanical extraction, zero
+       PaperBroker test changes needed), and `AlpacaBroker`'s batch-B
+       `submit()` will run through the SAME function object, never a
+       second copy. PLUS the deliberate new behavior this batch adds:
+       `verify_token` refuses (`BrokerTokenRequired`, message contains
+       "halted") when `_tokens.is_halted(ledger)` finds an unresolved
+       `HaltSet` — checked FIRST, before even the missing-token check.
+       This is a genuine BEHAVIOR CHANGE for `PaperBroker` (before this
+       batch, `submit()` never checked halt state at all; only
+       `order_status`'s resting-limit poll did, MED-1) — the ONE
+       deliberately red-then-green case this batch:
+       `tests/unit/broker/test_alpaca_broker.py::
+       test_submit_refuses_with_reason_halted_when_an_unresolved_halt_set_exists[paper]`
+       is GREEN this batch (real code, not a stub) precisely because the
+       extraction ships working code; the `[alpaca-paper]` parametrize
+       case stays RED (stub). No existing `test_paper_fills.py` test seeds
+       a `HaltSet` before calling `submit()`, so this addition changes
+       ZERO existing green tests (audited by grep before writing the
+       extraction).
+     - **Fixture provenance**: every JSON shape embedded in
+       `tests/unit/broker/test_alpaca_broker.py` (`ORDER_SUBMIT_FIXTURE`,
+       `ORDER_GET_FILLED_FIXTURE`, `ACTIVITIES_FIXTURE`) is copied verbatim
+       (field names/types unchanged, a few obviously-null optional keys
+       trimmed for length — `legs`/`hwm`/`subtag`/`source`/`trail_*`/
+       `replaced_*`/`replaces`/`position_intent`/`extended_hours` etc. —
+       never a value that participates in any test assertion) from
+       `docs/research/alpaca-paper-shapes-2026-07-18.json`, the CTO's own
+       2026-07-18 UTC probe (a real $10 BTC/USD Alpaca PAPER order's full
+       lifecycle). The P1A lesson stands as law (a fixture diverging from
+       captured reality is a HIGH defect) — no field was invented or
+       reshaped to make a test easier to write.
+
+     **Flagged ambiguities (NOT improvised, left for the batch-B dev pass
+     or CTO adjudication):**
+     - `AlpacaBroker.positions()`'s real source is genuinely undecided —
+       `GET {base}/positions` (Alpaca's own venue truth) vs. deriving from
+       this account's own `FillRecorded` ledger history (the
+       `PaperBroker`/`ManualBroker` convention). `_alpaca.py`'s stub
+       docstring flags both options rather than picking one.
+     - The pre-HTTP credential guard's exception TYPE is pinned
+       provisionally to `tradekit.mae._data.errors.ProviderRequestError`
+       (reusing the data-provider's own type, since `broker` has no
+       existing typed-refusal-for-missing-env-var precedent of its own) —
+       CTO may prefer a broker-native exception instead; not asserted as
+       final.
+     - `partially_filled` order status maps to our `"open"` (module
+       docstring: "MVP: no synthetic partially_filled status"), which
+       means a caller polling `order_status()` cannot distinguish "nothing
+       filled yet" from "half filled" without separately calling
+       `fills()` — acceptable for MVP per the addendum's own "cum_qty
+       tracked" phrasing, but not a design position we're claiming is
+       final for P5.
+     - `AlpacaBroker`'s stub `submit()`/`order_status()`/`fills()` do NOT
+       yet call the pre-HTTP credential guard, token verifier, or any HTTP
+       client — they are unconditional `NotImplementedError` raises. This
+       means several `test_alpaca_broker.py` tests are red for a
+       DIFFERENT proximate reason than their docstring's pinned target
+       behavior (e.g. `test_submit_refuses_without_a_valid_verdict_token`
+       expects `BrokerTokenRequired` but currently gets
+       `NotImplementedError`) — intentional per the batch's "stub now, pin
+       the target, implement batch B" split, called out explicitly here so
+       nobody mistakes the mismatch for an authoring error.
+
+    **CTO ratification (2026-07-18) — batch-A/P4-paper flags:**
+    positions() reads the VENUE (GET /v2/positions) — ledger-derived
+    positions would make reconcile circular; venue-truth is the dress
+    rehearsal's purpose. Pre-HTTP credential guard = broker-local typed
+    `BrokerCredentialsMissing` in _port.py (never import mae._data.errors
+    across the module boundary). partially_filled -> "open" MVP: ratified.
+    The R-011 pipeline test's re-wire (respx-driven AlpacaBroker fills
+    replacing the removed temporary routing) is PRE-AUTHORIZED for the dev
+    pass — fixture mechanism only, assertions unchanged. Stale advisory
+    comment in broker/__init__: dev pass fixes.

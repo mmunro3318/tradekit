@@ -312,11 +312,24 @@ def test_execute_order_r011_denies_the_fourth_live_trade_after_three_confirmed_f
     """FLAGGED (ASSUMPTIONS round-18): this test exercises the FULL
     live-tier wiring end-to-end (policy._context.assemble's account_tier +
     live_trades_remaining derivation for "live:" refs, batch C's own
-    pin — see `_context.py`'s RED-PHASE PIN docstring) — it is RED for
-    TWO independent reasons this batch (execute_order itself is a stub,
-    AND the live-tier context wiring it depends on is still the P2
-    fail-closed carve-out), not just the pipeline stub. The dev pass must
-    land BOTH before this test goes green."""
+    pin — see `_context.py`'s RED-PHASE PIN docstring). It went GREEN in
+    SPRINT P3 batch C (both prior red reasons resolved) by riding SPRINT
+    P3 batch C's temporary `"live:"` -> `PaperBroker` routing (ASSUMPTIONS
+    round-18) as its fill simulator.
+
+    RE-RED this batch (SPRINT P4-PAPER batch A, addendum 2, ASSUMPTIONS
+    round-23): that temporary routing is GONE — `"live:"` now hits the
+    fail-closed `LiveTradingDisabled` gate (`broker.get`'s new routing
+    table) before `execute_order` ever reaches a fillable adapter, since
+    neither the `live_trading_enabled` dial nor the live env keys are set
+    in this test. This is EXPECTED and ACCOUNTED (not a regression this
+    batch introduced silently) — R-011's own live-sequence-decrement
+    semantics have no real fillable "live:" adapter to exercise
+    end-to-end until SPRINT P4-PAPER batch B lands `AlpacaBroker`'s real
+    body; re-wiring this test (dial+live-keys monkeypatch + respx
+    fixtures matching `test_alpaca_broker.py`'s captured shapes) is batch
+    B/C scope, flagged here rather than silently left green-but-lying via
+    a bypass."""
     account_ref = "live:r011-boundary"
     default_ledger().append(
         make_event(

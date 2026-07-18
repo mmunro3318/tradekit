@@ -32,9 +32,24 @@ test_manual.py` carries its exhaustive real-behavior coverage) — this
 file's own `test_record_manual_fill_is_not_yet_implemented_and_names_its_
 batch` pin is definitionally obsolete once the verb it describes ships,
 same as `get()`'s batch-A/B/C pins above; removed rather than left to
-bit-rot into a false assertion."""
+bit-rot into a false assertion.
+
+SPRINT P4-PAPER batch A (addendum 2, obsolescence update, same pattern
+again): `get("live:*")` no longer routes to `PaperBroker` AT ALL —
+`test_get_resolves_a_live_prefixed_account_ref_to_a_paper_broker` above
+(SPRINT P3 batch C's own ASSUMPTIONS round-18 pin) is REPLACED by
+`test_get_never_resolves_a_live_prefixed_account_ref_to_a_paper_broker`
+below (the round-19 pin this docstring note promised): `"live:"` now hits
+the fail-closed `LiveTradingDisabled` gate (both dial AND live env keys
+required) unless both conditions are met, in which case it resolves to a
+real `AlpacaBroker` — see `tests/unit/broker/test_alpaca_broker.py` for the
+full routing-matrix coverage (alpaca-paper:*, live: dial-false, live:
+keys-absent, live: both-satisfied). `AlpacaBroker`'s own METHODS stay
+`NotImplementedError` stubs this batch (`_alpaca.py`'s module docstring)."""
 
 from __future__ import annotations
+
+import pytest
 
 from tradekit import broker
 from tradekit.contracts import VerdictToken
@@ -48,17 +63,33 @@ def test_get_resolves_a_paper_prefixed_account_ref_to_a_paper_broker() -> None:
     assert adapter.account_ref == "paper:alpha"
 
 
-def test_get_resolves_a_live_prefixed_account_ref_to_a_paper_broker() -> None:
-    """SPRINT P3 batch C (ASSUMPTIONS round-18): no real venue adapter
-    lands before batch D — a `"live:"` account_ref routes through the SAME
-    `PaperBroker` simulator `"paper:"` uses, so a confirmed-T2 live account
-    (`policy.confirm_promotion`'s own `PromotionConfirmed`) is a real,
-    executable `execute_order` target this batch."""
+def test_get_never_resolves_a_live_prefixed_account_ref_to_a_paper_broker() -> None:
+    """The round-19 pin (SPRINT P4-PAPER batch A, addendum 2): a `"live:"`
+    account_ref must NEVER resolve to `PaperBroker` again, regardless of
+    the fail-closed gate's outcome. With the dial at its `config.toml`
+    default (`live_trading_enabled = false`) and no live env keys present,
+    `get("live:alpaca")` raises `LiveTradingDisabled` — it does not fall
+    back to ANY adapter, paper or otherwise (this replaces SPRINT P3 batch
+    C's temporary `"live:"` -> `PaperBroker` routing, ASSUMPTIONS
+    round-18)."""
     from tradekit.broker._paper import PaperBroker
+    from tradekit.broker._port import LiveTradingDisabled
 
-    adapter = broker.get("live:alpaca")
-    assert isinstance(adapter, PaperBroker)
-    assert adapter.account_ref == "live:alpaca"
+    with pytest.raises(LiveTradingDisabled):
+        broker.get("live:alpaca")
+
+    # Belt-and-suspenders: even if some future change made the gate lenient
+    # by accident, the resolved adapter (if any) must never be a
+    # PaperBroker — this is the property the round-19 pin actually cares
+    # about, independent of which specific exception fires.
+    try:
+        adapter = broker.get("live:alpaca")
+    except LiveTradingDisabled:
+        pass
+    else:
+        assert not isinstance(adapter, PaperBroker), (
+            "a 'live:' account_ref must never resolve to PaperBroker (round-19 pin)"
+        )
 
 
 def test_get_resolves_an_advisory_prefixed_account_ref_to_a_manual_broker() -> None:

@@ -16,12 +16,22 @@ status as `policy._rules.RULES`/`policy._dials.PolicyDials`: it validates an
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
 from ulid import ULID
 
+from tradekit.broker._alpaca import (
+    ALPACA_LIVE_BASE_URL,
+    ALPACA_LIVE_KEY_ID_ENV,
+    ALPACA_LIVE_SECRET_ENV,
+    ALPACA_PAPER_BASE_URL,
+    ALPACA_PAPER_KEY_ID_ENV,
+    ALPACA_PAPER_SECRET_ENV,
+    AlpacaBroker,
+)
 from tradekit.broker._manual import ManualBroker
 from tradekit.broker._manual import record_manual_fill as _manual_record_manual_fill
 from tradekit.broker._paper import PaperBroker
@@ -32,7 +42,7 @@ from tradekit.broker._pipeline import (
 from tradekit.broker._pipeline import cancel_order as _pipeline_cancel_order
 from tradekit.broker._pipeline import execute_order as _pipeline_execute_order
 from tradekit.broker._pipeline import reconcile as _pipeline_reconcile
-from tradekit.broker._port import AdvisoryOnly, BrokerPort
+from tradekit.broker._port import AdvisoryOnly, BrokerPort, LiveTradingDisabled
 from tradekit.contracts import (
     AccountConfig,
     AccountCreatedPayload,
@@ -43,6 +53,7 @@ from tradekit.contracts import (
 )
 from tradekit.ledger import Ledger, default_ledger
 from tradekit.mae import _runtime as _mae_runtime
+from tradekit.policy._dials import PolicyDials
 
 # 'agent:<model>' | 'mike' | 'system:<job>' — account creation is a machine-
 # derived ledger append, same actor convention as tradekit.thesis's _ACTOR.
@@ -61,22 +72,59 @@ class AccountAlreadyExists(Exception):
 
 
 def get(account_ref: str) -> BrokerPort:
-    """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real this batch).
+    """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real).
 
-    `"live:*"` -> ALSO `PaperBroker` (SPRINT P3 batch C, ASSUMPTIONS
-    round-18): no real venue adapter (`AlpacaBroker`) lands before batch
-    D, but batch C's live-tier wiring (`policy.confirm_promotion` ->
-    `PromotionConfirmed` -> a real T2 `account_tier`/`live_trades_remaining`
-    derivation, `policy._context`) makes a confirmed-T2 `"live:"` account a
-    REAL, executable pipeline target this batch (R-011's end-to-end test)
-    — routing it through the SAME ledger-projection paper simulator
-    `"paper:"` uses is the honest MVP stand-in (no money ever actually
-    leaves a real venue either way), never a fabricated "real" broker
-    call. `"advisory:*"` (-> ManualBroker, §8.1, SPRINT P3 batch D) now
-    resolves to a real `ManualBroker` instance — every METHOD on it is
-    still a `NotImplementedError` stub this batch (`_manual.py`)."""
-    if account_ref.startswith("paper:") or account_ref.startswith("live:"):
+    `"alpaca-paper:*"` -> `AlpacaBroker` bound to Alpaca's PAPER trading
+    base URL + the paper env key names (SPRINT P4-PAPER batch A, addendum
+    2) -- the dress-rehearsal adapter; every METHOD on it is still a
+    `NotImplementedError` stub this batch (`_alpaca.py`'s own module
+    docstring), so calling any of them still fails red until the batch-B
+    dev pass lands the real bodies -- same "declarative routing is real,
+    methods stay red" split `ManualBroker` went through in SPRINT P3
+    batch D.
+
+    `"live:*"` -> the FAIL-CLOSED live-venue gate (SPRINT P4-PAPER batch A,
+    addendum 2 -- REPLACES the SPRINT P3 batch C temporary routing to
+    `PaperBroker`, ASSUMPTIONS round-18/round-19; `"live:"` never again
+    resolves to `PaperBroker`). Requires BOTH `PolicyDials.
+    live_trading_enabled` true AND the live env keys (`ALPACA_LIVE_KEY_ID`/
+    `ALPACA_LIVE_SECRET`) present -- either missing raises
+    `LiveTradingDisabled` (typed, `broker._port`) before an `AlpacaBroker`
+    is ever constructed for a live account_ref. Mike's live keys/rotation
+    remain blocked per the sprint doc's Addendum 2 scope note, so this
+    path is exercised in tests via `monkeypatch`, never for real.
+
+    `"advisory:*"` (-> `ManualBroker`, §8.1, SPRINT P3 batch D) resolves to
+    a real `ManualBroker` instance -- every method on IT is real (batch D
+    dev pass)."""
+    if account_ref.startswith("paper:"):
         return PaperBroker(account_ref=account_ref)
+    if account_ref.startswith("alpaca-paper:"):
+        return AlpacaBroker(
+            account_ref=account_ref,
+            base_url=ALPACA_PAPER_BASE_URL,
+            key_id_env=ALPACA_PAPER_KEY_ID_ENV,
+            secret_env=ALPACA_PAPER_SECRET_ENV,
+        )
+    if account_ref.startswith("live:"):
+        dials = PolicyDials.load()
+        has_live_keys = bool(
+            os.environ.get(ALPACA_LIVE_KEY_ID_ENV) and os.environ.get(ALPACA_LIVE_SECRET_ENV)
+        )
+        if not (dials.live_trading_enabled and has_live_keys):
+            raise LiveTradingDisabled(
+                f"tradekit.broker.get({account_ref!r}): live trading is disabled -- requires "
+                f"BOTH PolicyDials.live_trading_enabled=True (got "
+                f"{dials.live_trading_enabled!r}) AND {ALPACA_LIVE_KEY_ID_ENV}/"
+                f"{ALPACA_LIVE_SECRET_ENV} present in the environment (got "
+                f"has_live_keys={has_live_keys!r}) -- fail-closed conjunction, addendum 2"
+            )
+        return AlpacaBroker(
+            account_ref=account_ref,
+            base_url=ALPACA_LIVE_BASE_URL,
+            key_id_env=ALPACA_LIVE_KEY_ID_ENV,
+            secret_env=ALPACA_LIVE_SECRET_ENV,
+        )
     if account_ref.startswith("advisory:"):
         # SPRINT P3 batch D: ManualBroker is instantiable now (declarative
         # resolution, same "cheap" status as PaperBroker's own routing) --
@@ -85,8 +133,7 @@ def get(account_ref: str) -> BrokerPort:
         # fails red until the dev pass lands the real bodies.
         return ManualBroker(account_ref=account_ref)
     raise NotImplementedError(
-        f"tradekit.broker.get({account_ref!r}): no adapter resolves this account_ref prefix "
-        "(AlpacaBroker/'live:' real-venue routing is P4)"
+        f"tradekit.broker.get({account_ref!r}): no adapter resolves this account_ref prefix"
     )
 
 
@@ -180,7 +227,9 @@ def create_paper_account(config: AccountConfig) -> str:
 __all__ = [
     "AccountAlreadyExists",
     "AdvisoryOnly",
+    "AlpacaBroker",
     "BrokerPort",
+    "LiveTradingDisabled",
     "ManualBroker",
     "OrderNotCancelable",
     "PaperBroker",
