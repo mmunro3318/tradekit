@@ -78,8 +78,17 @@ docstring discipline (SPRINT P3 batch C).
 
 from __future__ import annotations
 
+import json
+from decimal import Decimal
 from typing import Any
 
+from ulid import ULID
+
+from tradekit.contracts import EventFilter, Verification
+from tradekit.ledger import Ledger, default_ledger
+from tradekit.mae import _runtime as _mae_runtime
+from tradekit.policy._dials import PolicyDials
+from tradekit.review import _artifacts
 from tradekit.review._adapters import SubprocessReviewerAdapter
 from tradekit.review._port import (
     LLMReviewerPort,
@@ -102,21 +111,229 @@ __all__ = [
 ]
 
 
-def run_review(thesis_id: str) -> dict[str, Any]:
-    """`run_review(thesis_id) -> ReviewArtifact` (dict-shaped, §4.2). STUB
-    — see module docstring for the pinned pipeline algorithm."""
-    raise NotImplementedError(
-        f"review.run_review({thesis_id!r}): SPRINT P3 batch D dev pass lands this "
-        "(§12.1 auto-fail short-circuits + attack/defense pipeline)"
+def _latest_payload(
+    ledger: Ledger, thesis_id: str, event_type: str
+) -> dict[str, Any] | None:
+    """Latest `event_type` payload for `thesis_id`, queried DIRECTLY (not
+    via `thesis._machine.latest_payload`, which is scoped to
+    `THESIS_EVENT_TYPES` -- the lifecycle-marker whitelist -- and does not
+    include `SizingComputed`/`InvalidationAttested`, both of which this
+    module needs to read)."""
+    matches = [
+        event
+        for event in ledger.query(EventFilter(types=[event_type]))
+        if event.payload.get("thesis_id") == thesis_id
+    ]
+    return matches[-1].payload if matches else None
+
+
+def _no_falsifiable_success_criteria(success_criteria: list[dict[str, Any]]) -> bool:
+    """Empty, OR every predicate is a bare `time_expiry` with no
+    price-anchored criterion alongside it (§12.1 step 1b)."""
+    if not success_criteria:
+        return True
+    kinds = {predicate["kind"] for predicate in success_criteria}
+    return kinds == {"time_expiry"}
+
+
+def _auto_fail_reason(
+    contract: dict[str, Any], sizing_payload: dict[str, Any], dials: PolicyDials
+) -> str | None:
+    """Three auto-fail checks, first match wins (§12.1 step 1, ASSUMPTIONS
+    round-20 entries 125/126/129)."""
+    ev_usd = Decimal(str(contract["ev_block"]["ev_usd"]))
+    if ev_usd <= 0:
+        return "missing_numeric_ev"
+
+    if _no_falsifiable_success_criteria(contract["success_criteria"]):
+        return "no_falsifiable_success_criteria"
+
+    size_usd = Decimal(str(contract["size_usd"]))
+    recommended = Decimal(str(sizing_payload["sizing"]["recommended_size_usd"]))
+    deviation = abs(size_usd - recommended) / recommended if recommended != 0 else Decimal("1")
+    if deviation > dials.sizing_tolerance_pct:
+        return "size_mismatch_vs_sizing_computed"
+
+    return None
+
+
+def _build_thesis_review_prompt(contract: dict[str, Any]) -> str:
+    """Attack/defense prompt kit (§12.1 step 2, §4.2's read-verb surface) —
+    a structured JSON block; the reviewer-model-specific prose wrapping is
+    an adapter/prompt-template concern, not this pipeline's (`prompts/
+    rubric-thesis-v1.md`, DRAFT, ASSUMPTIONS round-20 entry 132)."""
+    return json.dumps({"kind": "thesis_review", "thesis_contract": contract})
+
+
+def _build_void_signoff_prompt(
+    contract: dict[str, Any], attestation: dict[str, Any]
+) -> str:
+    """Void sign-off prompt kit (§12.2/§10.4 guard 2) — thesis + the
+    `InvalidationAttested(kind="structural")` payload guard 1 already
+    appended."""
+    return json.dumps(
+        {"kind": "void_signoff", "thesis_contract": contract, "invalidation_attested": attestation}
     )
+
+
+def _call_reviewer_and_score(
+    prompt: str, dials: PolicyDials
+) -> tuple[list[dict[str, Any]], dict[str, Any], int, str | None]:
+    """Adapter call + strict-JSON-parse + deterministic rubric scoring,
+    shared by `run_review`/`verify_claim` (§12.1 steps 2-4). Returns
+    `(exchanges, rubric_scores, unresolved_attack_count, failure_mode)` —
+    `failure_mode` is `None` on a clean scored round, else one of
+    `"timeout"`/`"output_too_large"`/`"malformed_output"` (§12.1 step 3,
+    ASSUMPTIONS round-20 entry 128) — NEVER a crash, NEVER a retry."""
+    adapter = SubprocessReviewerAdapter.from_dials(dials)
+    failure_mode: str | None = None
+    exchanges: list[dict[str, Any]] = []
+    try:
+        stdout = adapter.review(
+            prompt,
+            timeout_s=dials.reviewer_timeout_s,
+            max_output_bytes=dials.reviewer_max_output_bytes,
+        )
+        try:
+            exchanges = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise ReviewMalformedOutput(
+                f"review pipeline: reviewer stdout did not strictly JSON-parse: {exc}"
+            ) from exc
+    except ReviewTimeout:
+        failure_mode = "timeout"
+    except ReviewOutputTooLarge:
+        failure_mode = "output_too_large"
+    except ReviewMalformedOutput:
+        failure_mode = "malformed_output"
+
+    if failure_mode is not None:
+        return [], {}, 0, failure_mode
+
+    scored = score_exchanges(exchanges)
+    return (
+        exchanges,
+        scored["rubric_scores"],
+        scored["unresolved_attack_count"],
+        None,
+    )
+
+
+def run_review(thesis_id: str) -> dict[str, Any]:
+    """`run_review(thesis_id) -> ReviewArtifact` (dict-shaped, §4.2). See
+    module docstring for the pinned pipeline algorithm."""
+    ledger: Ledger = default_ledger()
+    dials = PolicyDials.load()
+
+    drafted = _latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    contract = drafted["contract"]
+
+    sizing_payload = _latest_payload(ledger, thesis_id, "SizingComputed")
+    if sizing_payload is None:
+        raise ValueError(f"no SizingComputed event found for thesis_id={thesis_id!r}")
+
+    auto_fail_reason = _auto_fail_reason(contract, sizing_payload, dials)
+    if auto_fail_reason is not None:
+        artifact = _artifacts.assemble(
+            thesis_id=thesis_id,
+            kind="thesis_review",
+            passed=False,
+            model=dials.reviewer_binary,
+            exchanges=[],
+            rubric_scores={},
+            unresolved_attack_count=0,
+            auto_fail_reason=auto_fail_reason,
+            failure_mode=None,
+        )
+        _artifacts.append_review_completed(artifact, ledger)
+        return artifact.model_dump(mode="json")
+
+    prompt = _build_thesis_review_prompt(contract)
+    exchanges, rubric_scores, unresolved_attack_count, failure_mode = _call_reviewer_and_score(
+        prompt, dials
+    )
+
+    passed = failure_mode is None and unresolved_attack_count < dials.unresolved_attack_threshold
+    artifact = _artifacts.assemble(
+        thesis_id=thesis_id,
+        kind="thesis_review",
+        passed=passed,
+        model=dials.reviewer_binary,
+        exchanges=exchanges,
+        rubric_scores=rubric_scores,
+        unresolved_attack_count=unresolved_attack_count,
+        auto_fail_reason=None,
+        failure_mode=failure_mode,
+    )
+    _artifacts.append_review_completed(artifact, ledger)
+    return artifact.model_dump(mode="json")
+
+
+def _verify_void_signoff(claim: dict[str, Any]) -> dict[str, Any]:
+    """`claim["kind"] == "void_signoff"` (§12.2/§10.4 guard 2) — see module
+    docstring for the pinned algorithm."""
+    thesis_id = claim["thesis_id"]
+    ledger: Ledger = default_ledger()
+    dials = PolicyDials.load()
+
+    drafted = _latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    contract = drafted["contract"]
+
+    attested = _latest_payload(ledger, thesis_id, "InvalidationAttested")
+    if attested is None:
+        raise ValueError(
+            f"no InvalidationAttested event found for thesis_id={thesis_id!r} — §10.4 guard 1 "
+            "must exist before a void-signoff verification can be attempted"
+        )
+
+    prompt = _build_void_signoff_prompt(contract, attested)
+    exchanges, rubric_scores, unresolved_attack_count, failure_mode = _call_reviewer_and_score(
+        prompt, dials
+    )
+
+    passed = failure_mode is None and unresolved_attack_count < dials.unresolved_attack_threshold
+    artifact = _artifacts.assemble(
+        thesis_id=thesis_id,
+        kind="void_signoff",
+        passed=passed,
+        model=dials.reviewer_binary,
+        exchanges=exchanges,
+        rubric_scores=rubric_scores,
+        unresolved_attack_count=unresolved_attack_count,
+        auto_fail_reason=None,
+        failure_mode=failure_mode,
+    )
+    _artifacts.append_review_completed(artifact, ledger)
+
+    verification = Verification(
+        verification_id=str(ULID()),
+        claim_kind="void_signoff",
+        passed=passed,
+        review_artifact_id=artifact.review_artifact_id,
+        notes=None,
+        ts_utc=_mae_runtime.clock(),
+    )
+    return verification.model_dump(mode="json")
 
 
 def verify_claim(claim: dict[str, Any]) -> dict[str, Any]:
     """`verify_claim(claim) -> Verification` (dict-shaped, §4.2/§12.2/
-    §10.4). STUB — see module docstring for the pinned pipeline algorithm,
+    §10.4). See module docstring for the pinned pipeline algorithm,
     including the EXACT `kind="void_signoff"` `ReviewCompleted` shape this
     closes the P2 void-verb debt against."""
+    kind = claim.get("kind")
+    if kind == "void_signoff":
+        return _verify_void_signoff(claim)
+    if kind == "trade_settlement":
+        raise NotImplementedError(
+            f"review.verify_claim({claim!r}): claim_kind='trade_settlement' is P4's §12.2 "
+            "done-gate use, not implemented this sprint"
+        )
     raise NotImplementedError(
-        f"review.verify_claim({claim!r}): SPRINT P3 batch D dev pass lands this "
-        "(§12.2/§10.4 verification pipeline)"
+        f"review.verify_claim({claim!r}): unknown claim_kind {kind!r} — this module handles "
+        "'void_signoff' (implemented) and 'trade_settlement' (P4, not yet)"
     )

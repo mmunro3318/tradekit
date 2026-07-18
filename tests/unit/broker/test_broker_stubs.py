@@ -26,15 +26,15 @@ stubs naming batch D.
 SPRINT P3 batch D dev pass (obsolescence update, same pattern again):
 `get("advisory:*")` now resolves to a real `ManualBroker` instance too
 (see the two functions below, renamed from their old
-"...is_not_yet_implemented..." names). `record_manual_fill` stays a real
-`NotImplementedError` stub, SIGNATURE expanded (`side`/`symbol`/
-`account_ref`)."""
+"...is_not_yet_implemented..." names). `record_manual_fill` is ALSO real
+now (`_manual.record_manual_fill`'s dev pass, `tests/unit/broker/
+test_manual.py` carries its exhaustive real-behavior coverage) — this
+file's own `test_record_manual_fill_is_not_yet_implemented_and_names_its_
+batch` pin is definitionally obsolete once the verb it describes ships,
+same as `get()`'s batch-A/B/C pins above; removed rather than left to
+bit-rot into a false assertion."""
 
 from __future__ import annotations
-
-from decimal import Decimal
-
-import pytest
 
 from tradekit import broker
 from tradekit.contracts import VerdictToken
@@ -74,22 +74,6 @@ def test_get_resolves_an_advisory_prefixed_account_ref_to_a_manual_broker() -> N
     adapter = broker.get("advisory:kraken")
     assert isinstance(adapter, ManualBroker)
     assert adapter.account_ref == "advisory:kraken"
-
-
-def test_record_manual_fill_is_not_yet_implemented_and_names_its_batch() -> None:
-    """SIGNATURE changed this batch (`side`/`symbol`/`account_ref` added,
-    the sprint doc's own pinned shape) -- still a real `NotImplementedError`
-    stub naming batch D (`_manual.record_manual_fill`'s dev pass)."""
-    with pytest.raises(NotImplementedError, match="batch D"):
-        broker.record_manual_fill(
-            "TH-1",
-            Decimal("10.00"),
-            Decimal("1"),
-            Decimal("0.05"),
-            "buy",
-            "BTC/USD",
-            "advisory:kraken",
-        )
 
 
 def test_port_protocol_declares_exactly_five_methods() -> None:

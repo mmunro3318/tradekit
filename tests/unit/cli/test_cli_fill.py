@@ -17,7 +17,13 @@ from tradekit.cli.main import app
 runner = CliRunner()
 
 
-def test_fill_record_on_a_stubbed_verb_exits_cleanly_not_a_traceback(tmp_path) -> None:
+def test_fill_record_succeeds_now_that_record_manual_fill_is_real(tmp_path) -> None:
+    """CTO re-point (batch-D dev pass, dev stop-and-flagged the conflict):
+    this test was authored as a stub-era clean-exit pin in the SAME batch
+    whose dev pass implements record_manual_fill — intra-batch obsolescence,
+    a TDD authoring slip. Flipped to assert the real success path (same
+    pattern as test_cli_policy/test_broker_stubs), asserting MORE, not
+    less."""
     result = runner.invoke(
         app,
         [
@@ -40,6 +46,5 @@ def test_fill_record_on_a_stubbed_verb_exits_cleanly_not_a_traceback(tmp_path) -
         ],
         env={"TK_DATA_DIR": str(tmp_path)},
     )
-    assert result.exit_code == 1, result.output
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
     assert "Traceback" not in result.output

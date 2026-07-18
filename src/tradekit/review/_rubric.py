@@ -58,10 +58,23 @@ def score_exchanges(exchanges: list[dict[str, Any]]) -> dict[str, Any]:
     `random`, no set/dict ordering that isn't insertion-stable -- three
     calls with the identical input list must return byte-identical dicts
     (`test_rubric.py`'s determinism pin, 3 runs)."""
-    raise NotImplementedError(
-        "review._rubric.score_exchanges(...): SPRINT P3 batch D dev pass lands this "
-        "(§12.1 deterministic rubric tally)"
-    )
+    rubric_scores: dict[str, Any] = {
+        category: {"count": 0, "max_severity": 0} for category in RUBRIC_CATEGORIES
+    }
+    unresolved_attack_count = 0
+    for exchange in exchanges:
+        category = exchange["category"]
+        severity = exchange["severity"]
+        if category in rubric_scores:
+            entry = rubric_scores[category]
+            entry["count"] += 1
+            entry["max_severity"] = max(entry["max_severity"], severity)
+        if exchange["resolved"] is False:
+            unresolved_attack_count += 1
+    return {
+        "rubric_scores": rubric_scores,
+        "unresolved_attack_count": unresolved_attack_count,
+    }
 
 
 __all__ = ["RUBRIC_CATEGORIES", "score_exchanges"]

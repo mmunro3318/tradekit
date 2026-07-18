@@ -8,7 +8,7 @@ reason (same discipline as every other red-phase file this sprint).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,7 +16,15 @@ import pytest
 from tradekit import broker
 from tradekit.broker._manual import ManualBroker
 from tradekit.broker._port import AdvisoryOnly
-from tradekit.contracts import AssetRef, EventFilter, OrderRequest, VerdictToken
+from tradekit.contracts import (
+    AssetRef,
+    EventFilter,
+    OrderRequest,
+    ThesisContract,
+    ThesisDraftedPayload,
+    ThesisGradedPayload,
+    VerdictToken,
+)
 from tradekit.ledger import default_ledger
 
 
@@ -110,3 +118,79 @@ def test_manual_broker_order_status_reports_rejected_for_any_order_id() -> None:
     adapter = broker.get("advisory:kraken")
     status = adapter.order_status("O-never-existed")
     assert status.status == "rejected"
+
+
+def test_record_manual_fill_during_r009_lockout_appends_gate_violation_alongside_the_fill(
+    thesis_kwargs,
+    make_event,
+) -> None:
+    """ADDITIVE (CTO ratification, ASSUMPTIONS round-20, 2026-07-17):
+    `record_manual_fill` NEVER refuses -- a fill Mike already executed
+    off-platform cannot be denied retroactively. But when this account_ref
+    is under an active R-009 drawdown lockout (the SAME trailing-30d
+    peak-to-trough computation `policy._rules._check_r009` reads), the fill
+    is recorded AND a `GateViolationDetected(rule_id="R-009")` event is
+    appended alongside it -- visibility -> series cleanliness -> promotion
+    consequences, F7's actual teeth."""
+    account_ref = "advisory:kraken"
+    kw = dict(thesis_kwargs)
+    kw["account_ref"] = account_ref
+    contract = ThesisContract(**kw)
+    ledger = default_ledger()
+    graded_ts = datetime.now(UTC) - timedelta(days=1)
+
+    ledger.append(
+        make_event(
+            type="ThesisDrafted",
+            ts=graded_ts,
+            payload=ThesisDraftedPayload(
+                thesis_id=contract.thesis_id,
+                contract=contract.model_dump(mode="json"),
+            ).model_dump(mode="json"),
+        )
+    )
+    ledger.append(
+        make_event(
+            type="ThesisGraded",
+            ts=graded_ts,
+            payload=ThesisGradedPayload(
+                thesis_id=contract.thesis_id,
+                outcome="FAIL",
+                measured=[],
+                ambiguous_bar=False,
+                # -100 off a $500 default paper_starting_equity_usd base is a
+                # 20% drawdown -- comfortably >= the 10% R-009 default breaker.
+                pnl_usd=Decimal("-100.00"),
+                graded_ts=graded_ts,
+            ).model_dump(mode="json"),
+        )
+    )
+
+    fill = broker.record_manual_fill(
+        thesis_id="TH-LOCKOUT-1",
+        price=Decimal("50000.00"),
+        qty=Decimal("0.001"),
+        fees_usd=Decimal("0.10"),
+        side="buy",
+        symbol="BTC/USD",
+        account_ref=account_ref,
+    )
+    assert fill.thesis_id == "TH-LOCKOUT-1"
+
+    fills = [
+        e
+        for e in ledger.query(EventFilter(types=["FillRecorded"]))
+        if e.payload.get("thesis_id") == "TH-LOCKOUT-1"
+    ]
+    assert len(fills) == 1, "record_manual_fill never refuses -- the fill is always recorded"
+
+    violations = [
+        e
+        for e in ledger.query(EventFilter(types=["GateViolationDetected"]))
+        if e.payload.get("account_ref") == account_ref and e.payload.get("rule_id") == "R-009"
+    ]
+    assert len(violations) == 1, (
+        "an active R-009 lockout must append GateViolationDetected ALONGSIDE the fill "
+        "(CTO ratification, ASSUMPTIONS round-20) -- visibility, never a refusal"
+    )
+    assert violations[0].payload.get("thesis_id") == "TH-LOCKOUT-1"

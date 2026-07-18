@@ -22,6 +22,7 @@ from ulid import ULID
 
 from tradekit.contracts import Event, ReviewArtifact, ReviewCompletedPayload
 from tradekit.ledger import Ledger, default_ledger
+from tradekit.mae import _runtime as _mae_runtime
 
 # 'agent:<model>' | 'mike' | 'system:<job>' -- review artifacts are a
 # machine-derived ledger append, same actor convention as
@@ -51,9 +52,18 @@ def assemble(
     step, called by `run_review`/`verify_claim` AFTER this returns, mirrors
     `thesis._submit`'s "validate everything, return payloads; caller
     appends" split)."""
-    raise NotImplementedError(
-        f"review._artifacts.assemble(thesis_id={thesis_id!r}, kind={kind!r}): SPRINT P3 batch D "
-        "dev pass lands this (§12.1 artifact assembly)"
+    return ReviewArtifact(
+        review_artifact_id=str(ULID()),
+        thesis_id=thesis_id,
+        kind=kind,  # type: ignore[arg-type]
+        passed=passed,
+        model=model,
+        exchanges=exchanges,
+        rubric_scores=rubric_scores,
+        unresolved_attack_count=unresolved_attack_count,
+        auto_fail_reason=auto_fail_reason,
+        failure_mode=failure_mode,  # type: ignore[arg-type]
+        ts_utc=_mae_runtime.clock(),
     )
 
 

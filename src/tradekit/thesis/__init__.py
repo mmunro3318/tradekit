@@ -231,12 +231,21 @@ def void(thesis_id: str, attestation: str) -> None:
 
 
 def _has_void_signoff(ledger: Ledger, thesis_id: str) -> bool:
-    """A `ReviewCompleted(kind="void_signoff")` event exists for `thesis_id`
-    (§10.4 guard 2's reviewer sign-off artifact — CTO adjudication,
-    ASSUMPTIONS 73)."""
+    """A PASSING `ReviewCompleted(kind="void_signoff", passed=True)` event
+    exists for `thesis_id` (§10.4 guard 2's reviewer sign-off artifact —
+    CTO adjudication, ASSUMPTIONS 73). `passed` MUST be checked here (SPRINT
+    P3 batch D fix): `review.verify_claim`'s real pipeline (ASSUMPTIONS
+    round-20) ledgers a `ReviewCompleted(kind="void_signoff")` event on a
+    FAILED sign-off too (`passed=False` — the same "artifact vs
+    pointer-event" shape as a pass, per DESIGN §12.1), so a passed-blind
+    existence check would let a rubric-failed or boundary-failed sign-off
+    satisfy this guard — `tests/unit/review/test_verify_claim.py::
+    test_verify_claim_void_signoff_fail_leaves_thesis_void_still_refused`
+    pins that a failed sign-off must leave `void()` refused."""
     return any(
         event.payload.get("thesis_id") == thesis_id
         and event.payload.get("kind") == "void_signoff"
+        and event.payload.get("passed") is True
         for event in ledger.query(EventFilter(types=["ReviewCompleted"]))
     )
 

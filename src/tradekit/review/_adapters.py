@@ -19,6 +19,8 @@ make.
 
 from __future__ import annotations
 
+import subprocess
+
 from tradekit.policy._dials import PolicyDials
 from tradekit.review._port import ReviewMalformedOutput, ReviewOutputTooLarge, ReviewTimeout
 
@@ -80,10 +82,26 @@ class SubprocessReviewerAdapter:
              is the CALLER's job, not this method's; `ReviewMalformedOutput`
              is raised by the caller after a failed `json.loads`, never
              from inside `review()`)."""
-        raise NotImplementedError(
-            f"SubprocessReviewerAdapter(binary={self.binary!r}).review(...): SPRINT P3 batch D "
-            "dev pass lands this (§12.1 subprocess timeout/cap plumbing)"
-        )
+        try:
+            result = subprocess.run(
+                [self.binary, *self.args],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ReviewTimeout(
+                f"SubprocessReviewerAdapter(binary={self.binary!r}).review(...): exceeded "
+                f"timeout_s={timeout_s!r}"
+            ) from exc
+
+        if len(result.stdout.encode("utf-8")) > max_output_bytes:
+            raise ReviewOutputTooLarge(
+                f"SubprocessReviewerAdapter(binary={self.binary!r}).review(...): stdout "
+                f"exceeded max_output_bytes={max_output_bytes!r}"
+            )
+        return result.stdout
 
 
 __all__ = [
