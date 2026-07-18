@@ -41,6 +41,16 @@ class BrokerTokenRequired(Exception):
     exception."""
 
 
+class AdvisoryOnly(Exception):
+    """Raised by `ManualBroker.submit` (SPRINT P3 batch D, DESIGN §8.4,
+    D16) -- an advisory account (`"advisory:*"`) never places a real
+    order; the flow is thesis + recommendation -> Mike executes off-
+    platform -> `broker.record_manual_fill` writes the `FillRecorded`
+    event with `actor="mike"`. Canonical home alongside `BrokerTokenRequired`/
+    `NoQuoteAvailable` for the same identity-match reason (the conformance
+    suite and `_manual.py` must import the SAME class object)."""
+
+
 class NoQuoteAvailable(Exception):
     """Raised by an adapter's fill evaluation when the order's symbol has NO
     cached closed bars to price against (CTO adjudication, SPRINT P3 batch B
@@ -76,4 +86,4 @@ class BrokerPort(Protocol):
         ...
 
 
-__all__ = ["BrokerPort", "BrokerTokenRequired", "NoQuoteAvailable"]
+__all__ = ["AdvisoryOnly", "BrokerPort", "BrokerTokenRequired", "NoQuoteAvailable"]

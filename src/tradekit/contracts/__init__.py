@@ -91,6 +91,7 @@ from tradekit.contracts._marketdata import (
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
 from tradekit.contracts._quantize import quantize
+from tradekit.contracts._review import ReviewArtifact, Verification
 from tradekit.contracts._schemas import json_schemas
 from tradekit.contracts._thesis import AssetRef, EntrySpec, EVBlock, ThesisContract
 
@@ -137,6 +138,7 @@ __all__ = [
     "PromotionGrantedPayload",
     "ProposedAction",
     "ReconciliationRunPayload",
+    "ReviewArtifact",
     "ReviewCompletedPayload",
     "RuleHit",
     "RunManifest",
@@ -153,6 +155,7 @@ __all__ = [
     "Verdict",
     "VerdictIssuedPayload",
     "VerdictToken",
+    "Verification",
     "json_schemas",
     "quantize",
 ]

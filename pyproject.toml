@@ -102,6 +102,7 @@ module = [
     "tradekit.thesis.*",
     "tradekit.policy.*",
     "tradekit.broker.*",
+    "tradekit.review.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

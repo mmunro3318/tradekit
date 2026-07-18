@@ -75,3 +75,11 @@ n_trials_default = 1
 # Batch D: default account_ref for the argless promotion_status()/
 # confirm_promotion() verbs (P2 MVP is single-account; FLAGGED, ASSUMPTIONS).
 default_account_ref = "paper:alpha"
+
+# SPRINT P3 batch D (DESIGN §12, TD-21): reviewer subprocess dials.
+reviewer_binary = "codex"
+reviewer_args = []
+reviewer_timeout_s = 120
+reviewer_max_output_bytes = 1048576
+# R-review: unresolved-attack threshold that blocks approval (§12.1).
+unresolved_attack_threshold = 1

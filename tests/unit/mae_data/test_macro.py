@@ -18,11 +18,26 @@ cache -> stale=True + cached bars; cold cache -> stale=True + empty bars.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
+
+import pytest
 
 from tradekit.mae._data import macro
 from tradekit.mae._data.cache import BarCache
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(monkeypatch):
+    """Delayed-fuse determinism fix (found P3 batch D, 2026-07-17): these
+    tests carry FIXED-DATE fixture rows (2026-07-13..15) but originally ran
+    against the REAL clock via `_runtime.clock()` inside get_macro_bars'
+    lookback-window arithmetic — green when written, red once wall-clock UTC
+    advanced past the fixture window. Fixed-date fixtures MUST always pin
+    the clock (house rule; every other bar-consuming test file already
+    does)."""
+    fixed_now = datetime(2026, 7, 16, 12, 0, 0, tzinfo=UTC)
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: fixed_now)
 
 _Row = tuple[date, str, str, str, str, str]
 

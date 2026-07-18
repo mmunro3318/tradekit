@@ -18,10 +18,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from ulid import ULID
 
+from tradekit.broker._manual import ManualBroker
+from tradekit.broker._manual import record_manual_fill as _manual_record_manual_fill
 from tradekit.broker._paper import PaperBroker
 from tradekit.broker._pipeline import (
     OrderNotCancelable,
@@ -30,7 +32,7 @@ from tradekit.broker._pipeline import (
 from tradekit.broker._pipeline import cancel_order as _pipeline_cancel_order
 from tradekit.broker._pipeline import execute_order as _pipeline_execute_order
 from tradekit.broker._pipeline import reconcile as _pipeline_reconcile
-from tradekit.broker._port import BrokerPort
+from tradekit.broker._port import AdvisoryOnly, BrokerPort
 from tradekit.contracts import (
     AccountConfig,
     AccountCreatedPayload,
@@ -70,13 +72,21 @@ def get(account_ref: str) -> BrokerPort:
     — routing it through the SAME ledger-projection paper simulator
     `"paper:"` uses is the honest MVP stand-in (no money ever actually
     leaves a real venue either way), never a fabricated "real" broker
-    call. `"advisory:*"` (-> ManualBroker, §8.1) stays a
-    `NotImplementedError` naming batch D."""
+    call. `"advisory:*"` (-> ManualBroker, §8.1, SPRINT P3 batch D) now
+    resolves to a real `ManualBroker` instance — every METHOD on it is
+    still a `NotImplementedError` stub this batch (`_manual.py`)."""
     if account_ref.startswith("paper:") or account_ref.startswith("live:"):
         return PaperBroker(account_ref=account_ref)
+    if account_ref.startswith("advisory:"):
+        # SPRINT P3 batch D: ManualBroker is instantiable now (declarative
+        # resolution, same "cheap" status as PaperBroker's own routing) --
+        # every METHOD on it is still a NotImplementedError stub this batch
+        # (see _manual.py's module docstring), so calling any of them still
+        # fails red until the dev pass lands the real bodies.
+        return ManualBroker(account_ref=account_ref)
     raise NotImplementedError(
-        f"tradekit.broker.get({account_ref!r}): batch D (ManualBroker, AlpacaBroker stub) "
-        "lands adapter resolution for 'advisory:' account_refs"
+        f"tradekit.broker.get({account_ref!r}): no adapter resolves this account_ref prefix "
+        "(AlpacaBroker/'live:' real-venue routing is P4)"
     )
 
 
@@ -111,12 +121,19 @@ def record_manual_fill(
     price: Decimal,
     qty: Decimal,
     fees_usd: Decimal,
+    side: Literal["buy", "sell"],
+    symbol: str,
+    account_ref: str,
 ) -> Fill:
-    """`tk fill record` — advisory/manual fills, `actor=mike` (D16, §8.4).
-    STUB — batch D (ManualBroker)."""
-    raise NotImplementedError(
-        f"tradekit.broker.record_manual_fill({thesis_id!r}, ...): batch D "
-        "(ManualBroker/advisory mode, D16) lands this"
+    """`tk fill record` — advisory/manual fills, `actor="mike"` (D16, §8.4).
+    Thin delegation to `_manual.record_manual_fill` (SPRINT P3 batch D dev
+    pass lands the real body — see that module's docstring for the pinned
+    algorithm). Signature EXPANDED this batch (`side`/`symbol`/
+    `account_ref` added, TDD red phase) to the sprint doc's own pinned
+    shape — `record_manual_fill(thesis_id, price, qty, fees, side, symbol,
+    account_ref)`."""
+    return _manual_record_manual_fill(
+        thesis_id, price, qty, fees_usd, side, symbol, account_ref
     )
 
 
@@ -162,7 +179,9 @@ def create_paper_account(config: AccountConfig) -> str:
 
 __all__ = [
     "AccountAlreadyExists",
+    "AdvisoryOnly",
     "BrokerPort",
+    "ManualBroker",
     "OrderNotCancelable",
     "PaperBroker",
     "PipelineDenied",

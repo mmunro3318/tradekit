@@ -21,7 +21,14 @@ resolves a `"live:"` account_ref to a `PaperBroker` (ASSUMPTIONS round-18
 — no real venue adapter lands before batch D, so a confirmed-T2 live
 account routes through the same paper simulator until then). Only
 `"advisory:"` and `record_manual_fill` remain real `NotImplementedError`
-stubs naming batch D."""
+stubs naming batch D.
+
+SPRINT P3 batch D dev pass (obsolescence update, same pattern again):
+`get("advisory:*")` now resolves to a real `ManualBroker` instance too
+(see the two functions below, renamed from their old
+"...is_not_yet_implemented..." names). `record_manual_fill` stays a real
+`NotImplementedError` stub, SIGNATURE expanded (`side`/`symbol`/
+`account_ref`)."""
 
 from __future__ import annotations
 
@@ -54,15 +61,34 @@ def test_get_resolves_a_live_prefixed_account_ref_to_a_paper_broker() -> None:
     assert adapter.account_ref == "live:alpaca"
 
 
-def test_get_is_not_yet_implemented_for_advisory_prefix() -> None:
-    with pytest.raises(NotImplementedError, match="batch D"):
-        broker.get("advisory:kraken")
+def test_get_resolves_an_advisory_prefixed_account_ref_to_a_manual_broker() -> None:
+    """SPRINT P3 batch D dev pass, superseding this file's own batch-A/B/C
+    placeholder again -- the SAME obsolescence-update pattern this file's
+    module docstring already documents twice: `get()` now resolves EVERY
+    prefix it recognizes to a real adapter instance, `ManualBroker` for
+    `"advisory:*"` (`_manual.py`) -- `ManualBroker`'s individual METHODS
+    are still real `NotImplementedError` stubs (`tests/unit/broker/
+    test_manual.py` covers those)."""
+    from tradekit.broker._manual import ManualBroker
+
+    adapter = broker.get("advisory:kraken")
+    assert isinstance(adapter, ManualBroker)
+    assert adapter.account_ref == "advisory:kraken"
 
 
 def test_record_manual_fill_is_not_yet_implemented_and_names_its_batch() -> None:
+    """SIGNATURE changed this batch (`side`/`symbol`/`account_ref` added,
+    the sprint doc's own pinned shape) -- still a real `NotImplementedError`
+    stub naming batch D (`_manual.record_manual_fill`'s dev pass)."""
     with pytest.raises(NotImplementedError, match="batch D"):
         broker.record_manual_fill(
-            "TH-1", Decimal("10.00"), Decimal("1"), Decimal("0.05")
+            "TH-1",
+            Decimal("10.00"),
+            Decimal("1"),
+            Decimal("0.05"),
+            "buy",
+            "BTC/USD",
+            "advisory:kraken",
         )
 
 

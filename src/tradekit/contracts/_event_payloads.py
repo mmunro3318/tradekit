@@ -116,6 +116,29 @@ class ReviewCompletedPayload(StrictFrozenModel):
     review_artifact_id: str
     passed: bool
     kind: Literal["thesis_review", "void_signoff"] = "thesis_review"
+    # `failure_mode` (SPRINT P3 batch D, additive+defaulted -- every P2/P3
+    # pre-existing payload keeps validating): the "ReviewFailed-as-
+    # ReviewCompleted" pin (sprint doc addendum, ASSUMPTIONS round-20) -- a
+    # reviewer subprocess boundary failure (malformed JSON, timeout,
+    # oversized output) or an auto-fail short-circuit is NEVER a crash and
+    # NEVER a distinct event type; it is ReviewCompleted(passed=False,
+    # failure_mode=...). None on a passed=True artifact, and on any
+    # passed=False artifact whose failure came from the deterministic
+    # rubric itself (unresolved attack >= threshold) rather than a
+    # boundary/short-circuit failure -- failure_mode names WHY the reviewer
+    # pipeline couldn't produce a scored exchange, not "the thesis failed
+    # review" (that case is passed=False with failure_mode=None).
+    failure_mode: (
+        Literal[
+            "auto_fail_ev_missing",
+            "auto_fail_no_falsifiable_criteria",
+            "auto_fail_size_mismatch",
+            "malformed_output",
+            "timeout",
+            "output_too_large",
+        ]
+        | None
+    ) = None
 
 
 class ThesisApprovedPayload(StrictFrozenModel):

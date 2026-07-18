@@ -117,6 +117,20 @@ class PolicyDials(BaseSettings):
     # MVP (multi-account promotion ladders are a P3 concern) — this dial is
     # that default, read by `promotion_status()`/`confirm_promotion()`.
     default_account_ref: str = "paper:alpha"
+    # SPRINT P3 batch D (DESIGN §12, TD-21): reviewer subprocess dials.
+    # `reviewer_binary`/`reviewer_args` resolve the adapter's argv
+    # (`review._adapters.SubprocessReviewerAdapter`); `reviewer_timeout_s`/
+    # `reviewer_max_output_bytes` bound a single subprocess call (a chatty
+    # or hung reviewer model must never crash or block the pipeline, sprint
+    # doc "Traps"). `unresolved_attack_threshold` is the deterministic
+    # rubric gate (DESIGN §12.1: "any unresolved attack >= severity
+    # threshold blocks approval") -- compared against
+    # `ReviewArtifact.unresolved_attack_count`.
+    reviewer_binary: str = "codex"
+    reviewer_args: tuple[str, ...] = ()
+    reviewer_timeout_s: int = 120
+    reviewer_max_output_bytes: int = 1_048_576
+    unresolved_attack_threshold: int = 1
 
     @classmethod
     def settings_customise_sources(

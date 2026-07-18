@@ -2160,3 +2160,136 @@ those two reasons, never wrapped in `pytest.raises(NotImplementedError)`
     every edit survived audit and was prominently self-reported — the
     10-for-10 tests-were-right streak is now 9-for-10 with one
     fixture-data asterisk.
+
+## Round-20 -- P3 batch D TDD session (review module + ManualBroker/
+advisory + `tk fill record`), 2026-07-17
+
+RED this session -- `review.run_review`/`review.verify_claim`,
+`review._adapters.SubprocessReviewerAdapter.review`, `review._rubric.
+score_exchanges`, `review._artifacts.assemble`, and every `ManualBroker`
+method (`account`/`positions`/`submit`/`order_status`/`fills`) plus
+`broker._manual.record_manual_fill` are unconditional `NotImplementedError`
+stubs; every test describes REAL target behavior (same discipline as every
+prior red-phase session this sprint, never `pytest.raises(NotImplementedError)`).
+`broker.get()` (routing) and `SubprocessReviewerAdapter.__init__`/
+`from_dials()` ARE real this batch (declarative construction/routing, same
+"cheap" status as `PaperBroker`'s own resolution) -- three tests are
+therefore green out of this red-phase file set:
+`test_manual.py::test_broker_get_advisory_account_ref_resolves_to_a_real_manual_broker`,
+`test_adapters.py::test_from_dials_resolves_binary_args_and_caps_from_policydials`,
+`test_cli_fill.py::test_fill_record_on_a_stubbed_verb_exits_cleanly_not_a_traceback`.
+
+125. **"Missing/non-numeric EV block" auto-fail (DESIGN §12.1/F5) is
+     UNREACHABLE as literally worded through any real `ThesisContract` --
+     `EVBlock`'s four fields are already mandatory `Decimal`s at the
+     contracts layer (F5 enforced at construction, not at review time).**
+     FLAGGED for CTO ratification, not improvised: this batch's tests
+     (`test_run_review.py::
+     test_auto_fail_nonpositive_ev_short_circuits_with_zero_adapter_calls`)
+     interpret the check as **`ev_block.ev_usd <= 0`** -- a mathematically
+     non-positive expectancy is the one EV defect still reachable on a
+     valid contract, and it is the substantive thing `run_review` can
+     usefully auto-fail on (a `p_win`/`reward_usd`/`risk_usd` combination
+     that doesn't justify the trade at all). If Mike intends something
+     else (e.g. `ev_usd` disagreeing with the recomputed value already
+     checked at `thesis.submit()` time, DESIGN §5.1's `ThesisSubmittedPayload.
+     ev_recomputed_usd`), this test's fixture and `run_review`'s docstring
+     both need updating together.
+
+126. **Auto-fail short-circuit tests read thesis state via a HARNESS that
+     bypasses `thesis.draft`/`submit` (`tests/unit/review/conftest.py::
+     _seed_submitted_thesis`), appending `ThesisDrafted`/`ThesisSubmitted`/
+     `SizingComputed` directly through their typed payload models.** The
+     real `thesis.submit` verb validates EV/sizing tolerance itself and
+     would refuse to produce the deliberately-mismatched fixtures these
+     tests need (an empty `success_criteria` list, a `size_usd` that
+     disagrees with `SizingComputed`) -- same "producer pattern" technique
+     `test_void_verb.py::_append_void_signoff` already uses one lifecycle
+     stage later. `run_review`'s own real implementation is NOT pinned to
+     read the ledger this same way (it may use whatever internal seam the
+     dev pass prefers) -- only the OBSERVABLE contract (`ReviewArtifact`
+     fields, `ReviewCompleted` event, zero adapter calls) is pinned by
+     these tests.
+
+127. **`ReviewArtifact`/`Verification` (SPRINT P3 batch D, additive
+     contracts, `contracts/_review.py`) are the dict-shaped return values
+     `run_review`/`verify_claim` produce -- distinct from the narrower,
+     ledger-facing `ReviewCompletedPayload` (existing since P2).** An
+     artifact carries the FULL transcript+scores; the ledgered event is a
+     pointer (`review_artifact_id`) + verdict, per DESIGN §12.1's own
+     "artifact vs pointer-event" wording. `ReviewCompletedPayload` gained
+     an additive+defaulted `failure_mode` field this batch (the
+     "ReviewFailed-as-ReviewCompleted" pin, entry 128 below) -- every P2/P3
+     pre-existing payload construction keeps validating unchanged.
+
+128. **Pin: a reviewer-subprocess boundary failure (malformed JSON,
+     timeout, oversized output) is NEVER a distinct event type and NEVER an
+     uncaught crash -- it is `ReviewCompleted(passed=False,
+     failure_mode="malformed_output" | "timeout" | "output_too_large")`.**
+     An auto-fail short-circuit and a rubric-driven fail (unresolved attack
+     >= threshold) are ALSO `passed=False`, but with `failure_mode=None` --
+     `failure_mode` answers "did the reviewer PIPELINE itself fail to
+     produce a scored verdict", not "did the thesis pass review". Pinned by
+     every `test_run_review.py` test's explicit `failure_mode` assertion.
+
+129. **Rubric-threshold arithmetic: `unresolved_attack_count` is a FLAT
+     count across ALL rubric categories, compared against
+     `PolicyDials.unresolved_attack_threshold` (default 1) by
+     `review.run_review`/`verify_claim` -- NOT inside `_rubric.
+     score_exchanges` itself, which stays threshold-agnostic (reports the
+     raw count only).** A single unresolved severity-5 attack in ANY
+     category blocks approval at the default threshold -- there is no
+     per-category threshold in P3 (flagged as an open question in
+     `prompts/rubric-thesis-v1.md`'s own "Open questions for Mike" section,
+     not decided here).
+
+130. **Kraken read-only balance tracking for advisory accounts (DESIGN
+     §8.4, sprint doc story 3.5) is EXPLICITLY DEFERRED past P3 -- CTO
+     pin, not a dev-pass improvisation.** `ManualBroker`'s `reconcile`
+     support (not exercised by any test this batch -- `broker.reconcile`
+     itself isn't extended to advisory accounts yet) is stubbed to compare
+     RECORDED FILLS ONLY when it lands; wiring the read-only Kraken key is
+     P4-adjacent (needs the key rotated, Mike's own precondition per the
+     sprint doc). No test in this batch exercises a Kraken balance fetch of
+     any kind.
+
+131. **`record_manual_fill`'s R-009/R-014 re-enforcement question is
+     FLAGGED, not resolved (`_manual.py`'s own docstring).** DESIGN §8.4
+     says advisory accounts get "the SAME R-009 drawdown breaker and R-014
+     cooling-off ... the pipeline exists to catch that, so it applies to
+     Mike too" -- this batch reads that as enforcement happening at
+     thesis submit/approve time via `policy.evaluate`'s existing context
+     assembly (same as any other account_ref), with `record_manual_fill`
+     itself staying a POST-HOC recording verb with no gate of its own (Mike
+     already executed off-platform by the time it's called). No test pins
+     a re-check inside `record_manual_fill`; if Mike intends one, that's a
+     new red test for the dev pass, not an assumption this batch resolves
+     silently.
+
+132. **`prompts/rubric-thesis-v1.md` is a DRAFT, explicitly unratified
+     (sprint doc's own deferred-flag).** Five categories
+     (`catalyst_falsifiability`/`ev_arithmetic`/`invalidation_distinctness`/
+     `sizing_discipline`/`correlation_awareness`), 1-5 severity scale, one
+     open exchange JSON schema `review._rubric.score_exchanges` pins in
+     code (attack/category/severity/defense/resolved). Mike's edit may
+     change category names/count/severity scale -- `RUBRIC_CATEGORIES` in
+     `_rubric.py` and this file must move together when he does.
+
+    **CTO ratification (2026-07-17) — batch-D/P3 flags (125-132) + the
+    delayed-fuse discovery:** (macro clock fuse) test_macro.py carried
+    fixed-date fixtures against the REAL clock — green at authorship, red
+    when UTC rolled past the window; fixed with an autouse pinned clock;
+    swept the suite — the other dated-fixture files fake the bar seam and
+    never touch the real clock. STANDING RULE SHARPENED: fixed-date
+    fixtures always pin the clock, and the gate check is "what happens to
+    this test in a month," not "is it green now". (ev auto-fail) RATIFIED
+    as ev_usd <= 0 — the contract makes missing-EV unconstructible, and a
+    non-positive stated EV is the honest auto-fail. (rubric threshold
+    placement, kraken-balance deferral, rubric DRAFT status) RATIFIED as
+    pinned — rubric prompt goes to Mike at close-out. (record_manual_fill
+    gates) RESOLVED: the verb NEVER refuses — the ledger must reflect
+    reality, a fill that happened cannot be denied retroactively; instead,
+    recording while an R-009 lockout or R-014 cooling-off breach is in
+    force appends GateViolationDetected alongside the fill (visibility ->
+    series cleanliness -> promotion consequences, F7's actual teeth). The
+    dev pass MUST add one additive test pinning exactly that.

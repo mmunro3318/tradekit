@@ -9,8 +9,9 @@ the experiment registry (TD-20). Exit codes: 0 ok, 1 failed check/denial,
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, cast
 
 import typer
 
@@ -28,6 +29,7 @@ policy_app = typer.Typer(no_args_is_help=True)
 promote_app = typer.Typer(no_args_is_help=True)
 account_app = typer.Typer(no_args_is_help=True)
 order_app = typer.Typer(no_args_is_help=True)
+fill_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
@@ -36,6 +38,7 @@ app.add_typer(policy_app, name="policy", help="Policy engine (§7).")
 app.add_typer(promote_app, name="promote", help="Promotion ladder (§7.3).")
 app.add_typer(account_app, name="account", help="Named accounts (§8, TD-24).")
 app.add_typer(order_app, name="order", help="Two-phase order pipeline (§8.2, SPRINT P3 batch C).")
+app.add_typer(fill_app, name="fill", help="Advisory/manual fills (§8.4, D16, SPRINT P3 batch D).")
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -367,6 +370,41 @@ def account_reconcile(account_ref: str) -> None:
     for a caller that wants a nonzero-exit gate)."""
     _guard_not_implemented(broker.reconcile, account_ref)
     typer.echo(f"reconciled {account_ref}")
+
+
+@fill_app.command("record")
+def fill_record(
+    thesis_id: Annotated[str, typer.Option("--thesis", help="thesis_id this fill executes.")],
+    price: Annotated[str, typer.Option(help="Executed price.")],
+    qty: Annotated[str, typer.Option(help="Executed quantity.")],
+    fees: Annotated[str, typer.Option(help="Fees paid, USD.")],
+    side: Annotated[str, typer.Option(help="'buy' or 'sell'.")],
+    symbol: Annotated[str, typer.Option(help="Traded symbol, e.g. 'BTC/USD'.")],
+    account_ref: Annotated[str, typer.Option("--account-ref", help="'advisory:*' account_ref.")],
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """`broker.record_manual_fill` (thin dispatch, SPRINT P3 batch D, D16/
+    §8.4) — writes a `FillRecorded` event with `actor="mike"` for an
+    advisory position Mike executed off-platform, then activates the
+    thesis (mirrors `order submit`'s fill-triggers-activation shape).
+    Money fields are `str` CLI options (Typer has no native `Decimal`
+    converter, same reason every other money-carrying CLI verb in this
+    codebase reads from a JSON config file instead) — converted to
+    `Decimal` here, at the thin-shell boundary, before dispatch."""
+    fill = _guard_not_implemented(
+        broker.record_manual_fill,
+        thesis_id,
+        Decimal(price),
+        Decimal(qty),
+        Decimal(fees),
+        cast(Literal["buy", "sell"], side),
+        symbol,
+        account_ref,
+    )
+    if as_json:
+        typer.echo(fill.model_dump_json())
+    else:
+        typer.echo(f"{fill.order_id} {fill.price} x {fill.qty}")
 
 
 if __name__ == "__main__":
