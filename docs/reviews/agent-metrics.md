@@ -141,3 +141,35 @@ routing rule keeps earning its keep; (3) usage-cap deaths are now routine
 and harmless: always `git status` + gate before assuming loss, revert
 partial single-file work to the committed red rather than resuming
 mid-thought.
+
+## Round 6 — 2026-07-18 UTC — P3 paper trading/review/reporting (commits 6ab872a..425f000)
+
+Reviewer: code-reviewer agent (Opus). Verification: full gate green (774 at
+review), fill arithmetic hand-recomputed vs the costs tables, G5/lookahead
+probes, token-forgery attempts, state-hygiene sweep. Verdict: **FIX-FIRST
+(3 MED, 1 LOW — zero HIGH; the three-sprint HIGH streak in the
+pre-registered focus area is broken)**. Fixes 3f207d9→425f000, 781 green.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tdd-p3 (Sonnet) | batch A (port/contracts/TD-24) | 0 | 0 | 0 | A- | Collapsed TDD/dev for declarative machinery (authorized); dial migration kept the $500 identity exactly. |
+| tdd-p3-b / dev-p3-b (Sonnet) | batch B PaperBroker | 0 | 1* | 0 | A- / A- | Dev's shape-only token seam was proven wrong by the conformance suite (authored first, exactly as designed) — CTO pulled real verification forward; dev's stop-on-conflict was exemplary. *The remaining narrowness (thesis binding, no-newer-deny) became review MED-2. |
+| tdd-p3-c / dev-p3-c (Sonnet) | batch C pipeline | 0 | 2* | 0 | B+ / B | Dev edited tests beyond authorization (all survived audit; process note issued). *MED-1 (halt-bypass via resting-limit polling) and MED-3 (one-directional reconcile) originate here. |
+| tdd-p3-d / dev-p3-d (Sonnet) | batch D review module | 0 | 0 | 1 | A / A | Dev caught a LATENT P2 bug (void() ignored passed on sign-offs — a failed review would have permitted a void) and stop-and-flagged perfectly. LOW-1 subprocess cap. |
+| tdd-p3-e / dev-p3-e (Sonnet) | batch E memory/report | 0 | 0 | 0* | A- / A- | *CTO-gate catches: repo-path report litter (state hygiene), six intra-batch stub-era CLI pins (third occurrence — pattern now named), one CTO over-flip corrected. Done-gate replay green end-to-end. |
+| fix-p3 (Sonnet) | review fixes | — | — | — | A | All three MEDs with proven red-first discrimination. |
+
+CTO-gate catches this sprint (pre-review): delayed-fuse macro tests (fixed-
+date fixtures + real clock — new standing rule: gate check is "what happens
+to this test in a month"); report-path litter; the token-verification
+pull-forward; intra-batch stub-era pin churn (process cost of the
+collapsed-batch pattern — next sprint: TDD agents must not author stub-era
+CLI pins for verbs their own batch implements).
+
+Process notes: (1) zero HIGH for the first time in a FIX-FIRST round — the
+defect mass is migrating from money-math to interaction seams (halt x
+polling, reconcile direction), which is what the adversarial-replay style
+catches; extend ring-3 scenarios to seam interactions in P4. (2) Dev
+stop-and-flag discipline is now reliably good; the batch-C overstep was the
+exception and its process note landed. (3) 11 usage-cap deaths across the
+project to date; all recovered without loss.

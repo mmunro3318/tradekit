@@ -2,6 +2,49 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-17/18 (Fable) — P3 paper trading/review/reporting COMPLETE (M3.1-M3.3*)
+
+- *Open deferrals, all Mike-paired or Mike-blocked: rubric-thesis-v1.md DRAFT
+  awaits his approval; research-loop prompts (D14) = paired session; Kraken
+  read-only balance tracking = his key rotation; $5k/$5k seed distribution =
+  his long-term thesis content; derivatives provider stays deprioritized.
+- **P2 rules sign-off closed first**: Mike confirmed with amendments → TD-24
+  (per-account dial layering: percent-of-principal position/exposure dials,
+  AccountConfig contract with prop-style slots, None=disabled; R-008 min
+  notional stays absolute — fee-floor exception he accepted).
+- **The full paper pipeline is live**: BrokerPort + conformance suite;
+  PaperBroker (event-sourced accounts, deterministic mid±spread fills with
+  quote snapshots, G5 through-by-tick limits, REAL ledger token verification
+  with thesis binding + no-newer-deny); execute_order two-phase pipeline
+  (§8.2 ordering guarantee: intent → verdict → broker, deny leaves zero
+  Order* events); reconcile BOTH directions → auto-HaltSet; review module
+  (LLMReviewerPort, subprocess adapters with caps, deterministic rubric,
+  zero-token auto-fail short-circuits, void_signoff emission closing the P2
+  debt); ManualBroker/advisory + tk fill record (never refuses, ledgers
+  GateViolationDetected under lockouts — F7's teeth); memory (brief with
+  hard token cap + salience truncation, search AND/phrase, wiki, lessons);
+  report (memo/readiness/pnl); ledger.models accessors; SeriesClosed
+  emission; strategy-tag registry (57f debt closed). TD-24 landed:
+  create-paper-account, R-017/R-018 with not_configured audit hits,
+  evaluate hardened to an outcome ALLOWLIST (unknown values fail closed).
+- **Done-gate green**: tests/replay/test_p3_end_to_end.py — scan → thesis →
+  review (fake adapter) → gates → order → paper fill → grade PASS with pnl →
+  memo/brief → byte-identical projection rebuild → chain verify.
+- **In-sprint catches**: dev-p3-d found a LATENT P2 bug (void() never checked
+  `passed` on sign-offs — a FAILED review would have permitted a void);
+  delayed-fuse macro tests (fixed dates + real clock) — new standing rule;
+  report-path litter; token-verification pull-forward when the conformance
+  suite proved the shape-only seam wrong. live:→PaperBroker routing is
+  EXPLICITLY TEMPORARY (P4 replaces + pins).
+- **Review round 6 (Opus): FIX-FIRST, zero HIGH (streak broken), 3 MED**:
+  halt-bypass via resting-limit polling (order_status now halt-gated);
+  token gate narrower than its pin (thesis binding + no-newer-deny landed);
+  one-directional reconcile (phantom-ledger-fill direction added). Fixes
+  3f207d9→425f000. agent-metrics round 6.
+- **Final: 781 tests green, ruff clean, mypy clean (71 src files).**
+- Next: P4 (live proof — every step pairs with Mike; needs BOTH key
+  rotations + Alpaca live keys + $50-100). Seed: SESSION-SEED-P4.md.
+
 ## 2026-07-17 (Fable) — P2 thesis lifecycle + policy engine COMPLETE (M2.1, M2.2)*
 
 - *One open DoD item: **Mike's sign-off on rules/RULES.md WHYs + config.toml dials**

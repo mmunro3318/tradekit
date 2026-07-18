@@ -123,26 +123,26 @@
 
 **Done-gate:** end-to-end on paper: scan → thesis → adversarial review → gates → order → simulated fill → grade → memo, all replayable from the ledger.
 
-### M3.1 Execution pipeline
+### M3.1 Execution pipeline — done 2026-07-17/18 (P3)
 
-- [ ] `BrokerPort` + conformance suite (TD-6/18)
-- [ ] PaperBroker: named accounts, market fills (mid±spread+fees), limit fills (trade-through ≥1 tick, G5), deterministic replay
-- [ ] `broker.execute_order` two-phase pipeline (§8.2)
-- [ ] `reconcile` for paper accounts (self-consistency) + seed $5k/$5k base distribution w/ long-term theses (SCOPE Pass C)
+- [x] `BrokerPort` + conformance suite (TD-6/18) — every adapter passes the same suite; token gate with thesis binding + no-newer-deny (review round 6)
+- [x] PaperBroker: named accounts (TD-24 AccountConfig), market fills (mid±spread+fees, quote snapshot on the Fill), limit fills (trade-through ≥1 tick, G5; halt-gated polling per review round 6), deterministic replay
+- [x] `broker.execute_order` two-phase pipeline (§8.2) — ordering guarantee pinned; deny leaves zero Order* events
+- [x] `reconcile` for paper accounts — BOTH directions (broker-missing AND phantom-ledger-fill) → auto-HaltSet; $5k/$5k seed distribution = OPERATIONAL task with Mike (needs his long-term thesis content, SCOPE Pass C) — not a code box
 
-### M3.2 Review & advisory
+### M3.2 Review & advisory — done 2026-07-17/18 (P3)
 
-- [ ] `LLMReviewerPort` + Codex/Gemini subprocess adapters (TD-21)
-- [ ] Attack/defense orchestration + rubric scoring + auto-fail short-circuits (§12.1)
-- [ ] ManualBroker + `tk fill record` (advisory, D16); Kraken read-only tracking (needs Mike's key)
-- [ ] Advisory rules live: R-009 for advisory pools, R-014 cooling-off
+- [x] `LLMReviewerPort` + Codex/Gemini subprocess adapters (TD-21) — timeout/output caps; streaming caps deferred P4 (ASSUMPTIONS 141)
+- [x] Attack/defense orchestration + rubric scoring + auto-fail short-circuits (§12.1) — rubric prompt is a DRAFT awaiting Mike (prompts/rubric-thesis-v1.md)
+- [x] ManualBroker + `tk fill record` (advisory, D16) — never refuses, ledgers GateViolationDetected under active lockouts (F7 teeth); Kraken read-only tracking DEFERRED until Mike rotates the key
+- [x] Advisory rules live: R-009 for advisory pools, R-014 cooling-off (adversarial suite covers the advisory variant)
 
-### M3.3 Reporting, memory, research
+### M3.3 Reporting, memory, research — done except two deferrals
 
-- [ ] `tk brief` (token-budgeted) + `tk search` (memory module, TD-20)
-- [ ] Daily memo + readiness report + P&L snapshot templates (§12.3)
-- [ ] Research-loop lead/scout prompts (D14, deferred from Pass B) + `tk wiki add`
-- [ ] Derivatives provider: Kraken Futures primary, Coinalyze cross-check (G6)
+- [x] `tk brief` (token-budgeted, salience truncation) + `tk search` (AND/phrase pinned) (memory module, TD-20)
+- [x] Daily memo + readiness report + P&L snapshot templates (§12.3)
+- [ ] Research-loop lead/scout prompts (D14) — DEFERRED to a Mike-paired session (tone/shape approval is his); `tk wiki add` itself is [x] done
+- [ ] Derivatives provider: Kraken Futures primary, Coinalyze cross-check (G6) — remains deprioritized per Mike (futures below stocks/crypto); revisit when a scan filter needs funding/OI
 
 ---
 
