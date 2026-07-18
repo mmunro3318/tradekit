@@ -2396,3 +2396,121 @@ its FINAL two lines (`memory.brief()`/`report.daily_memo()`).
     modules. daily_memo per-thesis, PolicyDials reuse, memory's private
     clock seam (mae._runtime stays sanctioned for thesis/broker only):
     as pinned.
+
+## Round-22 -- P3 review fixes (Opus FIX-FIRST verdict: 3 MEDIUM + 1
+LOW-deferral), 2026-07-17
+
+Baseline: 774 green at 9c9c12e. Every finding below fixed TDD (red test
+proven red against the pre-fix code, then green).
+
+138. **MED-1, halt bypass via resting-limit fill (reviewer probe:
+     `PaperBroker.order_status` appended `FillRecorded` with NO halt check
+     — a limit resting BEFORE a `HaltSet` could still fill AFTER the halt
+     via a later `tk order status` poll).** Fix: `_paper.py` grows a
+     private `_is_halted(ledger)` that folds every `HaltSet`/`HaltCleared`
+     event in append order into the current halt state (last one wins) —
+     the SAME derivation `policy._context._halt_state` uses, DUPLICATED
+     here (not imported) so `broker` gains no dependency on `policy`
+     (comment in `_is_halted`'s own docstring names the twin explicitly,
+     per the CTO pin: "duplication acceptable here"). `order_status` now
+     checks `_is_halted` immediately after determining an order is a
+     still-open limit and BEFORE evaluating trade-through bars — while
+     halted, the order stays `"open"`, zero `FillRecorded`, regardless of
+     whether a bar has traded through; a LATER poll after `HaltCleared`
+     evaluates normally (ledger determinism is event-based, so replay at
+     any later point reproduces the same fill-or-not outcome — noted in
+     the method's own docstring). RED proof: two new tests in
+     `tests/unit/broker/test_paper_fills.py`
+     (`test_order_status_does_not_fill_a_resting_limit_while_halted`,
+     `test_order_status_fills_a_resting_limit_after_halt_cleared`) both
+     failed against pre-fix code (`AssertionError: assert 'filled' ==
+     'open'` and `assert [Fill(...)] == []`), confirming the bypass was
+     real; both green after the fix.
+
+139. **MED-2, token gate narrower than the written pin (reviewer probe:
+     `_verify_token` only checked existence + allow + hash; the addendum
+     pins "existence + thesis match + no newer deny" — a token minted for
+     one thesis could authorize an order for a DIFFERENT thesis, and an
+     allow superseded by a later deny for the same thesis was still
+     accepted).** Fix, both halves, in `_paper.py._verify_token`:
+     (a) thesis binding — `_verify_token`'s signature grows a `thesis_id`
+     parameter (the submitting order's own `thesis_id`, threaded from
+     `submit`'s call site); the matched `VerdictIssued` event's own
+     `thesis_id` field (already present on `VerdictIssuedPayload`, no new
+     field needed) must equal it, or `BrokerTokenRequired`, fail-closed
+     (a `None`-vs-real mismatch refuses same as any other mismatch);
+     (b) no-newer-deny — after the thesis-binding check passes, a second
+     ledger scan looks for ANY OTHER `VerdictIssued` for the SAME
+     `thesis_id` at a STRICTLY LATER `ts_utc` than the matched allow with
+     `allow is False` -> `BrokerTokenRequired`; a later ALLOW does not
+     invalidate the presented token, only a later DENY does. RED proof:
+     three new tests
+     (`test_submit_refuses_a_token_minted_for_a_different_thesis`,
+     `test_submit_refuses_an_allow_token_superseded_by_a_later_deny_for_the_same_thesis`,
+     plus the positive control
+     `test_submit_accepts_an_allow_token_when_a_later_verdict_is_also_an_allow`)
+     — the two refusal tests failed with `Failed: DID NOT RAISE
+     BrokerTokenRequired` against pre-fix code; the positive control
+     passed both before and after (by design, as the control). SIDE
+     EFFECT: `_verify_token`'s new signature (`verdict, thesis_id`)
+     required every existing test fixture seeding a `VerdictIssued` with
+     `thesis_id=None` to instead seed the REAL thesis_id the order under
+     test carries — `tests/unit/broker/test_paper_fills.py`'s
+     `_seed_allow_verdict` and `tests/unit/broker/test_pipeline.py`'s
+     `_seed_allow_verdict` both grow an explicit `thesis_id` kwarg, and
+     every call site now passes the order's own `thesis_id` (previously
+     `None` worked only because the old check never looked at it — no
+     assertion was weakened, the fixtures became honest about what they
+     were already implicitly claiming).
+
+140. **MED-3, reconcile one-directional (reviewer probe:
+     `_pipeline.reconcile` only checked "every broker fill has a matching
+     ledger row" — a `FillRecorded` sitting on the ledger with NO matching
+     broker fill, a "phantom ledger fill", was invisible to reconcile).**
+     Fix: `reconcile` now also builds the ledger's own fill keys
+     (`(order_id, ts_utc, qty)`, same exact-triple match, no new key
+     scheme) and, for each ledger `FillRecorded` with a key absent from
+     the broker's reported set, appends a mismatch entry tagged
+     `"kind": "phantom_ledger_fill"` and folds its `order_id` into the
+     `HaltSet` reason string (which now names `phantom_ledger_fill`
+     explicitly when that branch fires, alongside the pre-existing
+     "unmatched broker fill(s)" wording when both directions disagree
+     simultaneously). A real `PaperBroker` structurally cannot exercise
+     this branch (`PaperBroker.fills()` derives FROM the same ledger
+     `reconcile` reads, so it can never disagree with itself) — RED proof
+     uses the SAME `_FakeBrokerPort` pattern `test_reconcile.py` already
+     established (mocks mirror real shapes — `contracts.Fill` instances),
+     reporting a SUBSET of what the ledger has. New test
+     `test_reconcile_detects_a_phantom_ledger_fill_the_broker_never_reported`
+     failed with `AssertionError: assert 'ok' == 'mismatch'` against
+     pre-fix code (the phantom fill was silently invisible); green after
+     the fix. Positive control
+     `test_reconcile_ok_when_ledger_and_broker_fill_sets_are_identical`
+     (two fills each side, identical triples) passed both before and
+     after, confirming the new reverse check does not false-positive on a
+     clean two-sided match.
+
+141. **LOW-1, subprocess cap is post-buffering — NO code change, deferred
+     to P4.** Reviewer probe: wherever this sprint shells out to a
+     subprocess with an output cap, the cap is enforced by reading the
+     FULL stdout/stderr into memory and truncating afterward (post hoc),
+     not by bounding the read as it streams — a misbehaving or malicious
+     subprocess that emits gigabytes before the process exits (or never
+     exits) is bounded only by the SAME timeout that already governs the
+     call, not by the output cap itself, and peak memory during the read
+     is unbounded by that cap. Assessed and INTENTIONALLY DEFERRED, not
+     silently ignored: at MVP scope every subprocess call site invokes a
+     TRUSTED, house-controlled CLI (no third-party/user-supplied
+     executables reachable through this path this sprint) and every call
+     is already timeout-bounded, so the failure mode this would guard
+     against (an adversarial or runaway subprocess exhausting memory
+     before the cap can apply) is not currently reachable. Streaming caps
+     (bound the read itself, not just the post hoc truncation) are real
+     work — a chunked-read loop with an early-abort once the cap is
+     exceeded, plus a test harness that can actually produce a
+     multi-gigabyte or hanging subprocess — properly scoped to P4 when/if
+     a less-trusted subprocess consumer is added, not squeezed into this
+     review-fix pass.
+
+    **CTO ratification pending** -- entries 138-141 flagged this session
+    (P3 review fix pass), not yet reviewed.

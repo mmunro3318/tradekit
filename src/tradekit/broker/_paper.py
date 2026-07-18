@@ -121,6 +121,24 @@ _TIMEFRAME = "1d"
 _LOOKBACK_DAYS = 30
 
 
+def _is_halted(ledger: Ledger) -> bool:
+    """MED-1 (P3 review, CTO-pinned fix) — fold every `HaltSet`/
+    `HaltCleared` event, in ledger (append) order, into the CURRENT halt
+    state (last one wins). This is the SAME derivation `policy._context.
+    _halt_state` uses; duplicated here rather than imported so `broker`
+    does not gain a dependency on `policy` (mirrors the CTO addendum's
+    "policy imports nothing from broker or mae" pin, inverted — `broker`
+    reading `HaltSet`/`HaltCleared` directly off the ledger is a read-only
+    fact, not a reach into `policy`'s internals). Duplication is
+    acceptable here per the task pin; if the two derivations ever drift,
+    that is a bug in ONE of them, not evidence either should import the
+    other."""
+    halted = False
+    for event in ledger.query(EventFilter(types=["HaltSet", "HaltCleared"])):
+        halted = event.type == "HaltSet"
+    return halted
+
+
 class PaperBroker:
     """One named paper account (`"paper:alpha"`, `"paper:conformance-
     suite"`, ...), a ledger projection — see module docstring for the "no
@@ -210,12 +228,14 @@ class PaperBroker:
     # ------------------------------------------------------------------
 
     def submit(self, order: OrderRequest, verdict: VerdictToken) -> OrderAck:
-        """Validate `verdict` via `_verify_token` (shape-only this batch,
-        see module docstring), then evaluate the market fill model (§8.3)
-        and append `OrderSubmitted`/`OrderAck`/`FillRecorded`, or — for a
-        limit order — leave it resting (`OrderSubmitted`/`OrderAck` only,
-        until a later `order_status` check trades through it)."""
-        self._verify_token(verdict)
+        """Validate `verdict` via `_verify_token` (existence + thesis
+        match + no-newer-deny, MED-2 P3-review hardening — see
+        `_verify_token`'s own docstring), then evaluate the market fill
+        model (§8.3) and append `OrderSubmitted`/`OrderAck`/`FillRecorded`,
+        or — for a limit order — leave it resting (`OrderSubmitted`/
+        `OrderAck` only, until a later `order_status` check trades through
+        it)."""
+        self._verify_token(verdict, order.thesis_id)
 
         now = _mae_runtime.clock()
 
@@ -251,7 +271,17 @@ class PaperBroker:
         synchronously at `submit()` time against the latest closed bar),
         `"open"` for a limit order until a later closed bar trades through
         it — THIS call is the polling point that evaluates and appends the
-        fill (ASSUMPTIONS round-17 entry 110, CTO-ratified)."""
+        fill (ASSUMPTIONS round-17 entry 110, CTO-ratified).
+
+        MED-1 (P3 review, CTO-pinned fix): while the account is HALTED
+        (`_is_halted` — an unresolved `HaltSet`, no matching `HaltCleared`
+        yet), this method does NOT evaluate or append a resting limit's
+        fill even if a later bar has traded through it — the order simply
+        stays `"open"`. This closes a halt-bypass: a limit resting BEFORE
+        a `HaltSet` must not be able to fill via a later poll AFTER the
+        halt. Once `HaltCleared`, a subsequent poll evaluates normally
+        (ledger determinism is event-based — replaying the same event log
+        reproduces the same fill-or-not outcome at each poll point)."""
         submitted = self._order_submitted_event(order_id)
         if submitted is None:
             return OrderStatus(order_id=order_id, status="rejected")
@@ -270,6 +300,11 @@ class PaperBroker:
         if payload["order_type"] != "limit" or payload.get("limit_price") is None:
             # Market orders fill synchronously at submit() time; anything
             # else without a limit_price has nothing further to evaluate.
+            return OrderStatus(order_id=order_id, status="open", remaining_qty=qty)
+
+        if _is_halted(self._ledger):
+            # MED-1: refuse to evaluate/append a fill while halted — the
+            # order stays resting, no FillRecorded, no state advance.
             return OrderStatus(order_id=order_id, status="open", remaining_qty=qty)
 
         asset = AssetRef.model_validate(payload["asset"])
@@ -299,17 +334,33 @@ class PaperBroker:
 
         return OrderStatus(order_id=order_id, status="open", remaining_qty=qty)
 
-    def _verify_token(self, verdict: VerdictToken | None) -> None:
+    def _verify_token(self, verdict: VerdictToken | None, thesis_id: str) -> None:
         """Documented seam (§8.2/§15): REAL ledger-side verification (CTO
         adjudication 2026-07-17, batch C's hardening pulled forward — the
-        conformance suite proved a shape-only check dishonest). A token is
-        valid iff this ledger contains a `VerdictIssued` event whose payload
-        `verdict_id == verdict.verdict_id` AND `allow` is true AND
-        `policy_version_hash` matches the token's. Missing/None,
-        unregistered, hash-mismatched, and registered-but-deny all raise the
+        conformance suite proved a shape-only check dishonest; MED-2, P3
+        review, hardened this further to match the written pin verbatim:
+        "existence + thesis match + no newer deny"). A token is valid iff
+        ALL of:
+
+        1. Existence + allow + hash: this ledger contains a `VerdictIssued`
+           event whose payload `verdict_id == verdict.verdict_id` AND
+           `allow` is true AND `policy_version_hash` matches the token's.
+        2. Thesis binding (MED-2a): that SAME `VerdictIssued` event's
+           `thesis_id` equals the `thesis_id` of the order being
+           submitted — a token minted for thesis A can never authorize an
+           order for thesis B. A `VerdictIssued` with `thesis_id=None`
+           (e.g. a non-order action) only matches an order whose own
+           `thesis_id` is also falsy — fails closed otherwise.
+        3. No newer deny (MED-2b): no OTHER `VerdictIssued` event for the
+           SAME `thesis_id`, at a STRICTLY LATER `ts_utc` than the matched
+           allow event, has `allow` false. A later verdict that is itself
+           an allow does NOT invalidate the presented token — only a later
+           DENY does.
+
+        Missing/None, unregistered, hash-mismatched, registered-but-deny,
+        thesis-mismatched, and superseded-by-a-later-deny all raise the
         ONE refusal type, `BrokerTokenRequired`, with the reason in the
-        message. Batch C may harden further (consumption, no-later-deny,
-        thesis linkage) WITHOUT changing this method's name or call site."""
+        message."""
         if verdict is None:
             raise BrokerTokenRequired(
                 f"PaperBroker({self.account_ref!r}).submit(...): no VerdictToken supplied "
@@ -317,6 +368,7 @@ class PaperBroker:
                 "impossible)"
             )
         saw_verdict_id = False
+        matched_event: Event | None = None
         for event in self._ledger.query(EventFilter(types=["VerdictIssued"])):
             payload = event.payload
             if payload.get("verdict_id") != verdict.verdict_id:
@@ -326,18 +378,43 @@ class PaperBroker:
                 payload.get("allow") is True
                 and payload.get("policy_version_hash") == verdict.policy_version_hash
             ):
-                return
-        if saw_verdict_id:
+                matched_event = event
+                break
+        if matched_event is None:
+            if saw_verdict_id:
+                raise BrokerTokenRequired(
+                    f"PaperBroker({self.account_ref!r}).submit(...): VerdictIssued "
+                    f"verdict_id={verdict.verdict_id!r} exists but is not a matching allow "
+                    "(deny verdict or policy_version_hash mismatch)"
+                )
+            raise BrokerTokenRequired(
+                f"PaperBroker({self.account_ref!r}).submit(...): no VerdictIssued event on "
+                f"the ledger for verdict_id={verdict.verdict_id!r} — token does not "
+                "reference a real allow-verdict (§8.2/§15)"
+            )
+
+        verdict_thesis_id = matched_event.payload.get("thesis_id")
+        if verdict_thesis_id != thesis_id:
             raise BrokerTokenRequired(
                 f"PaperBroker({self.account_ref!r}).submit(...): VerdictIssued "
-                f"verdict_id={verdict.verdict_id!r} exists but is not a matching allow "
-                "(deny verdict or policy_version_hash mismatch)"
+                f"verdict_id={verdict.verdict_id!r} references thesis_id="
+                f"{verdict_thesis_id!r} but the submitted order is for "
+                f"thesis_id={thesis_id!r} — a token cannot authorize a different thesis "
+                "(§8.2/§15 thesis binding, MED-2)"
             )
-        raise BrokerTokenRequired(
-            f"PaperBroker({self.account_ref!r}).submit(...): no VerdictIssued event on the "
-            f"ledger for verdict_id={verdict.verdict_id!r} — token does not reference a real "
-            "allow-verdict (§8.2/§15)"
-        )
+
+        matched_ts = matched_event.ts_utc
+        for event in self._ledger.query(EventFilter(types=["VerdictIssued"])):
+            payload = event.payload
+            if payload.get("thesis_id") != thesis_id:
+                continue
+            if payload.get("allow") is False and event.ts_utc > matched_ts:
+                raise BrokerTokenRequired(
+                    f"PaperBroker({self.account_ref!r}).submit(...): a LATER VerdictIssued "
+                    f"(allow=False) exists for thesis_id={thesis_id!r} after the presented "
+                    f"allow verdict_id={verdict.verdict_id!r} — the allow has been "
+                    "superseded by a deny (§8.2/§15 no-newer-deny, MED-2)"
+                )
 
     # ------------------------------------------------------------------
     # Internal helpers.

@@ -386,7 +386,19 @@ def reconcile(account_ref: str) -> None:
     """Broker `fills()` vs this account's own `FillRecorded` ledger history
     — exact `(order_id, ts_utc, qty)` triple match (§8.2 step 7 / §15). Any
     unmatched broker fill -> `ReconciliationRun(mismatch)` + automatic
-    `HaltSet`; a clean run -> `ReconciliationRun(ok)`, no halt."""
+    `HaltSet`; a clean run -> `ReconciliationRun(ok)`, no halt.
+
+    MED-3 (P3 review, CTO-pinned fix) — the REVERSE check: a `FillRecorded`
+    on the ledger for this account with NO matching broker fill (same
+    exact triple) is a "phantom ledger fill" — a ledger claim of a trade
+    the broker's own record never confirms — and is exactly as dangerous
+    as the forward mismatch (an out-of-band broker fill the ledger never
+    saw): both mean the ledger and the venue disagree about reality. Any
+    phantom ledger fill -> mismatch + `HaltSet`, reason names
+    `phantom_ledger_fill`. A real `PaperBroker` can never produce this
+    (its `fills()` derive FROM the same ledger), so this branch is only
+    reachable via a fake/other `BrokerPort` adapter reporting fewer fills
+    than the ledger has."""
     from tradekit import broker as _broker
 
     ledger = default_ledger()
@@ -397,23 +409,34 @@ def reconcile(account_ref: str) -> None:
         for event in ledger.query(EventFilter(types=["FillRecorded"]))
         if event.payload.get("account_ref") == account_ref
     ]
-    ledger_keys = {
+    ledger_keyed = [
         (
-            str(event.payload.get("order_id")),
-            _as_utc(event.payload.get("ts_utc")),
-            str(Decimal(str(event.payload.get("qty")))),
+            (
+                str(event.payload.get("order_id")),
+                _as_utc(event.payload.get("ts_utc")),
+                str(Decimal(str(event.payload.get("qty")))),
+            ),
+            event.payload,
         )
         for event in ledger_fills
-    }
+    ]
+    ledger_keys = {key for key, _payload in ledger_keyed}
 
     epoch = datetime.fromtimestamp(0, tz=UTC)
     broker_fills: list[Fill] = adapter.fills(since=epoch)
+    broker_keys = {(fill.order_id, _as_utc(fill.ts_utc), str(fill.qty)) for fill in broker_fills}
 
     mismatches: list[dict[str, Any]] = []
     for fill in broker_fills:
         key = (fill.order_id, _as_utc(fill.ts_utc), str(fill.qty))
         if key not in ledger_keys:
             mismatches.append(fill.model_dump(mode="json"))
+
+    phantom_order_ids: list[str] = []
+    for key, payload in ledger_keyed:
+        if key not in broker_keys:
+            phantom_order_ids.append(str(payload.get("order_id")))
+            mismatches.append({**payload, "kind": "phantom_ledger_fill"})
 
     now = _mae_runtime.clock()
     result: Literal["ok", "mismatch"] = "mismatch" if mismatches else "ok"
@@ -428,10 +451,19 @@ def reconcile(account_ref: str) -> None:
     _append(ledger, "ReconciliationRun", run_payload.model_dump(mode="json"), now)
 
     if mismatches:
-        order_ids = ", ".join(sorted({str(m.get("order_id")) for m in mismatches}))
+        reasons = []
+        broker_order_ids = sorted(
+            {str(m.get("order_id")) for m in mismatches if m.get("kind") != "phantom_ledger_fill"}
+        )
+        if broker_order_ids:
+            reasons.append(f"unmatched broker fill(s) order_id={{{', '.join(broker_order_ids)}}}")
+        if phantom_order_ids:
+            reasons.append(
+                "phantom_ledger_fill: ledger FillRecorded with no matching broker fill "
+                f"order_id={{{', '.join(sorted(set(phantom_order_ids)))}}}"
+            )
         halt_payload = HaltSetPayload(
-            reason=f"reconcile mismatch for account_ref={account_ref!r}: unmatched broker "
-            f"fill(s) order_id={{{order_ids}}}",
+            reason=f"reconcile mismatch for account_ref={account_ref!r}: " + "; ".join(reasons),
             scope="all",
             set_by=_ACTOR,
         )
