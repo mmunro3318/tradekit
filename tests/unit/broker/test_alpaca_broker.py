@@ -1,10 +1,16 @@
 """`AlpacaBroker` — the dress-rehearsal `BrokerPort` adapter (SPRINT
 P4-PAPER batch A, addendum 2). `src/tradekit/broker/_alpaca.py`'s five
-methods are `NotImplementedError` stubs THIS batch — every test below pins
-the EXACT behavior the batch-B dev pass must produce (respx fixtures,
-status mapping, fees-from-costs arithmetic) and is therefore expected RED
-for that reason, same status `tests/unit/broker/test_paper_fills.py` had
-against SPRINT P3 batch B's own `PaperBroker` stub.
+methods are REAL now (batch B dev pass, GREEN) — every test below pins the
+EXACT behavior implemented there (respx fixtures, status mapping,
+fees-from-costs arithmetic).
+
+P4-PAPER review MEDIUM-1 (round-25) added the venue-error-taxonomy tests
+near the bottom of this file (`VenueRejected`/`VenueUnavailable`,
+`tradekit.broker._port`): a non-2xx or malformed venue response must never
+be parsed as if it were a real answer (a transient 503 fabricating
+`OrderStatus(status="rejected")`, a malformed 200 leaking a bare
+`KeyError`/`TypeError`) — those tests are GREEN against the current
+`_alpaca.py` implementation, same as everything else in this file.
 
 Fixtures embed `docs/research/alpaca-paper-shapes-2026-07-18.json`
 VERBATIM (CTO-captured, 2026-07-18 UTC: a real $10 BTC/USD Alpaca PAPER
@@ -244,7 +250,7 @@ def test_fees_from_costs_arithmetic_for_the_captured_10_dollar_order() -> None:
 
 
 # ---------------------------------------------------------------------------
-# submit() — pinned real behavior (RED: NotImplementedError stub).
+# submit() — pinned real behavior (GREEN).
 # ---------------------------------------------------------------------------
 
 
@@ -252,10 +258,7 @@ def test_submit_posts_orders_and_returns_typed_ack(respx_mock: object) -> None:
     """Pinned batch-B behavior: token verified via the shared verifier, then
     `POST {base_url}/orders` (captured `ORDER_SUBMIT_FIXTURE` shape) ->
     `OrderAck(status="open")` (ALPACA_STATUS_MAP["pending_new"]) plus typed
-    `OrderSubmitted`/`OrderAck` ledger events. Currently RED: `submit` is an
-    unconditional `NotImplementedError` stub, so this assertion never runs —
-    the exception propagates uncaught (no respx route is exercised, so
-    there is nothing for the autouse zero-network guard to complain about)."""
+    `OrderSubmitted`/`OrderAck` ledger events."""
     _seed_allow_verdict(thesis_id="TH-alpaca-buy")
     respx_mock.post(f"{ALPACA_PAPER_BASE_URL}/orders").mock(
         return_value=httpx.Response(200, json=ORDER_SUBMIT_FIXTURE)
@@ -270,10 +273,7 @@ def test_submit_posts_orders_and_returns_typed_ack(respx_mock: object) -> None:
 
 def test_submit_refuses_without_a_valid_verdict_token() -> None:
     """§8.2/§15, shared with PaperBroker: `submit` must refuse a missing/
-    unregistered `VerdictToken` with `BrokerTokenRequired`. Currently RED:
-    the stub raises unconditional `NotImplementedError`, which `pytest.
-    raises(BrokerTokenRequired)` does not match — the mismatch itself IS
-    the red signal for this batch."""
+    unregistered `VerdictToken` with `BrokerTokenRequired`."""
     adapter = _paper_broker()
     bogus = VerdictToken(verdict_id="not-a-real-verdict", policy_version_hash="0" * 64)
     with pytest.raises(BrokerTokenRequired):
@@ -285,12 +285,11 @@ def test_submit_refuses_before_any_http_call_when_env_keys_are_absent(
 ) -> None:
     """Pinned batch-B behavior (mirrors `alpaca_data.AlpacaDataProvider.
     get_bars`'s pre-HTTP credential guard, ASSUMPTIONS 35): missing env keys
-    must raise `ProviderRequestError` (provisional home — same class used by
-    `mae._data.alpaca_data`, `_alpaca.py`'s module docstring) BEFORE any
-    network call, verdict permitting. Currently RED: the stub raises
-    unconditional `NotImplementedError` instead — no respx route registered
-    at all, so there is nothing for the zero-network guard to complain
-    about regardless of which exception ends up propagating."""
+    must raise `BrokerCredentialsMissing` (round-23 ratified home,
+    `broker._port`; subclasses `ProviderRequestError` so this frozen
+    `pytest.raises(ProviderRequestError)` assertion still matches by class
+    identity — see `BrokerCredentialsMissing`'s own docstring) BEFORE any
+    network call, verdict permitting."""
     from tradekit.mae._data.errors import ProviderRequestError
 
     monkeypatch.delenv(ALPACA_PAPER_KEY_ID_ENV, raising=False)
@@ -302,7 +301,7 @@ def test_submit_refuses_before_any_http_call_when_env_keys_are_absent(
 
 
 # ---------------------------------------------------------------------------
-# order_status() — pinned real behavior (RED).
+# order_status() — pinned real behavior (GREEN).
 # ---------------------------------------------------------------------------
 
 
@@ -312,8 +311,7 @@ def test_order_status_maps_filled_and_records_a_fill_with_decimal_str_prices(
     """Pinned batch-B behavior: `GET {base}/orders/{id}` -> `filled` (string
     decimals `filled_qty`/`filled_avg_price`) -> our `OrderStatus(status=
     "filled")`, `Decimal(str(x))` per the JSON-number/string precision
-    discipline every Alpaca provider in this codebase follows. Currently
-    RED (NotImplementedError stub)."""
+    discipline every Alpaca provider in this codebase follows."""
     order_id = ORDER_GET_FILLED_FIXTURE["id"]
     respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/{order_id}").mock(
         return_value=httpx.Response(200, json=ORDER_GET_FILLED_FIXTURE)
@@ -327,15 +325,14 @@ def test_order_status_maps_filled_and_records_a_fill_with_decimal_str_prices(
 
 
 # ---------------------------------------------------------------------------
-# fills() — pinned real behavior (RED).
+# fills() — pinned real behavior (GREEN).
 # ---------------------------------------------------------------------------
 
 
 def test_fills_returns_typed_list_ascending_from_activities(respx_mock: object) -> None:
     """Pinned batch-B behavior: `GET {base}/account/activities?
     activity_types=FILL` (captured `ACTIVITIES_FIXTURE`) -> typed
-    `list[Fill]`, ASCENDING by `ts_utc` (§8.1's conformance pin). Currently
-    RED."""
+    `list[Fill]`, ASCENDING by `ts_utc` (§8.1's conformance pin)."""
     respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account/activities").mock(
         return_value=httpx.Response(200, json=ACTIVITIES_FIXTURE)
     )
@@ -424,10 +421,9 @@ def test_reconcile_over_alpaca_broker_fixtures_vs_seeded_ledger_both_directions(
 
 
 # ---------------------------------------------------------------------------
-# Halt seam (addendum 2, NEW shared-verifier behavior) — parametrized across
-# BOTH adapters. PaperBroker's case is a genuinely NEW red (the extraction
-# adds submit-time halt refusal it never had before); AlpacaBroker's case
-# stays red for the pre-existing stub reason.
+# Halt seam (addendum 2, shared-verifier behavior) — parametrized across
+# BOTH adapters, GREEN: the extraction routes submit-time halt refusal
+# through the SAME shared `_tokens.verify_token` on every adapter.
 # ---------------------------------------------------------------------------
 
 
@@ -453,15 +449,9 @@ def test_submit_refuses_with_reason_halted_when_an_unresolved_halt_set_exists(
 ) -> None:
     """Addendum 2's submit-time halt seam: an unresolved `HaltSet` must
     refuse `submit` with `BrokerTokenRequired` (message mentions "halted"),
-    on EVERY adapter, even with an otherwise-valid earned allow-verdict.
-
-    - "paper": GREEN is the target, but this is the DELIBERATE new-red case
-      against PaperBroker's PRIOR behavior (before this batch's extraction,
-      `PaperBroker.submit` never checked halt state at all) — now real via
-      `_tokens.verify_token`, so this case is expected GREEN this batch
-      (the extraction ships real code, not a stub).
-    - "alpaca-paper": RED (NotImplementedError stub never reaches the
-      shared verifier this batch)."""
+    on EVERY adapter, even with an otherwise-valid earned allow-verdict —
+    both "paper" and "alpaca-paper" route through the SAME shared
+    `_tokens.verify_token`, so both cases are GREEN."""
     account_ref = f"{adapter_kind}:halt-seam-test"
     thesis_id = "TH-halt-seam"
     _seed_allow_verdict(account_ref=account_ref, thesis_id=thesis_id, verdict_id="v-halt-1")
@@ -501,14 +491,14 @@ def test_submit_refuses_with_reason_halted_when_an_unresolved_halt_set_exists(
 # value (`OrderStatus(status="rejected")`), pinned explicitly below; every
 # other 4xx (422 etc.) raises `VenueRejected`, also never fabricated.
 #
-# RED at time of writing: `VenueRejected`/`VenueUnavailable` do not exist
-# yet in `tradekit.broker._port` (the import above itself fails collection),
-# and even once stubbed in, `_alpaca.py`'s five methods do not distinguish
-# HTTP status at all — a 503/429/malformed-200 flows straight into
-# `response.json()`/dict access, either fabricating `OrderStatus(status=
-# "rejected")` (order_status, via the ALPACA_STATUS_MAP catch-all on an
-# empty/absent `status` field) or raising a bare `KeyError`/`TypeError`
-# (account/positions/fills) instead of the typed venue error.
+# GREEN: `_alpaca.py`'s `_parse_json` classifies every response's HTTP
+# status BEFORE any field is ever read off it. Before this fix, a
+# 503/429/malformed-200 flowed straight into `response.json()`/dict access,
+# either fabricating `OrderStatus(status="rejected")` (order_status, via the
+# ALPACA_STATUS_MAP catch-all on an empty/absent `status` field) or raising
+# a bare `KeyError`/`TypeError`/`json.JSONDecodeError` (account/positions/
+# fills/submit) instead of the typed venue error — see the "P4-paper review
+# fixes: tests (red)" commit for the captured before-fix tracebacks.
 # ---------------------------------------------------------------------------
 
 
@@ -576,6 +566,32 @@ def test_fills_raises_venue_unavailable_on_error_dict_body(respx_mock: object) -
     adapter = _paper_broker()
     with pytest.raises(VenueUnavailable):
         adapter.fills(datetime(2026, 1, 1, tzinfo=UTC))
+
+
+def test_submit_raises_venue_rejected_on_422_and_appends_zero_events(
+    respx_mock: object,
+) -> None:
+    """A 422 (rejected params -- e.g. insufficient buying power) is a REAL
+    venue answer, not a transient failure -- `VenueRejected`, not
+    `VenueUnavailable`. Still zero events appended (validate-before-append
+    discipline applies to every non-2xx, not just 5xx)."""
+    _seed_allow_verdict(thesis_id="TH-alpaca-buy")
+    respx_mock.post(f"{ALPACA_PAPER_BASE_URL}/orders").mock(
+        return_value=httpx.Response(
+            422, json={"code": 40310000, "message": "insufficient buying power"}
+        )
+    )
+
+    adapter = _paper_broker()
+    before = list(default_ledger().query(EventFilter(types=["OrderSubmitted", "OrderAck"])))
+
+    with pytest.raises(VenueRejected):
+        adapter.submit(_order(), _VERDICT)
+
+    after = list(default_ledger().query(EventFilter(types=["OrderSubmitted", "OrderAck"])))
+    assert after == before, (
+        "a venue-rejected submit must append zero OrderSubmitted/OrderAck events"
+    )
 
 
 def test_submit_raises_venue_unavailable_on_500_and_appends_zero_events(

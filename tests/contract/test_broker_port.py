@@ -25,19 +25,18 @@ Pins per adapter (§8.1, §15, ASSUMPTIONS round-16):
     impossible" ordering guarantee)
   - `fills(since)` returns `Fill`s ASCENDING by `ts_utc`
 
-Batch B status: `PaperBroker`'s methods are `NotImplementedError` stubs
-(fill-model dev pass lands after this red-phase session) — every case for
-"paper" below is therefore expected RED this batch, not skipped; the
-`BrokerTokenRequired` assertion specifically stays red because batch B's
-`submit()` doesn't reach even a shape-only token check yet (see
-`tests/unit/broker/test_paper_fills.py` for the token-required pin that
-prescribes the dev pass's real behavior).
+Status: both `CASE_BUILDERS` entries are REAL adapters now and every case
+below is GREEN — `PaperBroker`'s methods (fill-model dev pass, SPRINT P3
+batch B) and `AlpacaBroker`'s methods (SPRINT P4-PAPER batch B) both pass
+the full conformance suite, including `BrokerTokenRequired` on a missing/
+invalid `VerdictToken` (see `tests/unit/broker/test_paper_fills.py` for the
+token-required pin that originally prescribed this behavior).
 
-SPRINT P4-PAPER batch A adds the "alpaca-paper" case (`_build_alpaca_
+SPRINT P4-PAPER batch A added the "alpaca-paper" case (`_build_alpaca_
 paper_case`, TD-18's "one factory entry" property — the ONLY change this
 suite itself needs for a new adapter). Dev-pass update (round-23
 adjudication addendum, PRE-AUTHORIZED test edit: "conformance builders own
-their environmental setup"): `AlpacaBroker`'s five methods are REAL now and
+their environmental setup"): `AlpacaBroker`'s five methods are REAL and
 every one of them raises `BrokerCredentialsMissing` without credentials
 (no-creds is loud everywhere — never a fabricated zero-balance/empty-list
 default), so the "alpaca-paper" builder seeds monkeypatched env keys AND
@@ -48,6 +47,16 @@ its honest code path offline, exactly like a real venue session. Builders
 therefore take `(monkeypatch, respx_mock)` (mirroring
 `test_marketdata_port.py`'s own builder signature); the suite BODIES —
 the actual conformance assertions — are untouched.
+
+P4-PAPER review MEDIUM-1 (round-25) added a typed `VenueRejected`/
+`VenueUnavailable` HTTP-error taxonomy to `AlpacaBroker` (`broker._port`);
+this conformance suite's own `order_status()` case
+(`test_order_status_returns_a_typed_order_status`) already covers the ONE
+domain-mapped 4xx (404 -> `OrderStatus(status="rejected")`) via the
+`order-does-not-exist` respx route above — the broader taxonomy (503/429/
+malformed-200/other-4xx) is unit-tested directly in
+`tests/unit/broker/test_alpaca_broker.py`, not duplicated here (this suite
+stays adapter-agnostic, per its own "suite bodies untouched" convention).
 """
 
 from __future__ import annotations

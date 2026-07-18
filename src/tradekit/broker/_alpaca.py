@@ -95,6 +95,48 @@ the executable form):
         closed -- an unrecognized terminal-ish status must never be read as
         "open" and silently re-polled forever, nor fabricated as "filled")
 
+The table above governs the STATUS FIELD of a successfully-parsed 2xx
+response only. HTTP-transport-level errors (P4-PAPER review MEDIUM-1,
+round-25 pin) are a SEPARATE, prior classification -- `broker._port`'s
+`VenueRejected`/`VenueUnavailable` taxonomy (mirrors the P1A `ProviderError`
+semantics, `mae._data.errors`, but broker-native): every one of the five
+methods classifies the raw HTTP response BEFORE parsing any field out of it
+(`_parse_json`) --
+
+    HTTP 429 or >= 500                    -> VenueUnavailable (raise;
+        never fabricate a status/balance/list -- a transient 503 on
+        order_status() must never misreport a possibly-live order as
+        terminal "rejected")
+    HTTP 404 on order_status() ONLY       -> OrderStatus(status="rejected")
+        (the ONE pinned case a 4xx maps to a domain value instead of
+        raising -- a venue-confirmed "this order does not exist" IS a real,
+        terminal answer; checked BEFORE _parse_json, never generalized to
+        any other 4xx or any other method)
+    any other 4xx (400-499, incl. 404 on
+      every OTHER method, and 422 on any
+      method)                              -> VenueRejected (raise; a real
+        venue answer -- bad params, unknown resource, auth failure -- just
+        not one that maps to a domain value anywhere but order_status's 404)
+    2xx with a body that fails to decode
+      as JSON, or of the wrong top-level
+      shape (e.g. an error dict where a
+      list was expected)                   -> VenueUnavailable (a malformed
+        200 is exactly as untrustworthy as a 5xx)
+    a field access on an otherwise-valid
+      2xx JSON body raises KeyError/
+      TypeError/ValueError/InvalidOperation -> VenueUnavailable (never a
+        bare exception leaking the parsing implementation detail to the
+        caller)
+
+`submit()`'s event-ordering discipline (round-25 pin, "validate-before-
+append"): `_parse_json` and all field extraction happen BEFORE
+`_append_order_submitted`/`_append_order_ack` are ever called -- a
+`VenueRejected`/`VenueUnavailable` raised mid-parse means ZERO ledger events
+exist for that call. This was already the ordering in the code (events were
+always appended after `response.json()`, never before the POST); the fix
+adds the missing status-code/malformed-body classification in front of that
+existing ordering, it does not need to reorder the appends themselves.
+
 Fees-from-costs convention (batch B pin, the arithmetic this batch's TDD
 author DERIVED and pins for the dev pass): Alpaca's paper crypto fill
 activities carry NO per-fill fee field (`docs/research/
@@ -123,7 +165,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import httpx
@@ -131,7 +173,7 @@ from ulid import ULID
 
 from tradekit import costs
 from tradekit.broker import _tokens
-from tradekit.broker._port import BrokerCredentialsMissing
+from tradekit.broker._port import BrokerCredentialsMissing, VenueRejected, VenueUnavailable
 from tradekit.contracts import (
     AccountState,
     Event,
@@ -244,13 +286,21 @@ class AlpacaBroker:
         the exact class ASSUMPTIONS 71 exists to kill)."""
         headers = self._headers(*self._require_credentials("account"))
         response = self._get(f"{self._base_url}/account", headers=headers)
-        data = response.json()
-        return AccountState(
-            account_ref=self.account_ref,
-            equity_usd=Decimal(str(data["equity"])),
-            settled_cash_usd=Decimal(str(data["cash"])),
-            buying_power_usd=Decimal(str(data["buying_power"])),
-        )
+        data = self._parse_json(response, method="account")
+        try:
+            if not isinstance(data, dict):
+                raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+            return AccountState(
+                account_ref=self.account_ref,
+                equity_usd=Decimal(str(data["equity"])),
+                settled_cash_usd=Decimal(str(data["cash"])),
+                buying_power_usd=Decimal(str(data["buying_power"])),
+            )
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).account(...): malformed venue response "
+                f"(missing/invalid account fields): {exc}"
+            ) from exc
 
     def positions(self) -> list[Position]:
         """`GET {base_url}/positions` -> `list[Position]` (CTO ratification,
@@ -261,21 +311,29 @@ class AlpacaBroker:
         docstring -- round-23 adjudication addendum, loud everywhere)."""
         headers = self._headers(*self._require_credentials("positions"))
         response = self._get(f"{self._base_url}/positions", headers=headers)
-        rows = response.json()
-        return [
-            Position(
-                account_ref=self.account_ref,
-                symbol=row["symbol"],
-                qty=Decimal(str(row["qty"])),
-                avg_price=Decimal(str(row["avg_entry_price"])),
-                market_value_usd=(
-                    Decimal(str(row["market_value"]))
-                    if row.get("market_value") is not None
-                    else None
-                ),
-            )
-            for row in rows
-        ]
+        rows = self._parse_json(response, method="positions")
+        try:
+            if not isinstance(rows, list):
+                raise TypeError(f"expected a JSON array, got {type(rows).__name__}")
+            return [
+                Position(
+                    account_ref=self.account_ref,
+                    symbol=row["symbol"],
+                    qty=Decimal(str(row["qty"])),
+                    avg_price=Decimal(str(row["avg_entry_price"])),
+                    market_value_usd=(
+                        Decimal(str(row["market_value"]))
+                        if row.get("market_value") is not None
+                        else None
+                    ),
+                )
+                for row in rows
+            ]
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).positions(...): malformed venue response "
+                f"(missing/invalid position fields): {exc}"
+            ) from exc
 
     def submit(self, order: OrderRequest, verdict: VerdictToken) -> OrderAck:
         """Verify `verdict` via the SHARED `broker._tokens.verify_token`
@@ -324,12 +382,26 @@ class AlpacaBroker:
                 body["qty"] = str(order.qty)
 
         response = self._post(f"{self._base_url}/orders", headers=headers, json=body)
-        data = response.json()
-        venue_order_id = str(data["id"])
-        alpaca_status = str(data.get("status", ""))
-        mapped_status = ALPACA_STATUS_MAP.get(alpaca_status, "rejected")
-        ts_raw = data.get("submitted_at") or data.get("created_at")
-        ts = _parse_alpaca_ts(ts_raw) if ts_raw else _mae_runtime.clock()
+        data = self._parse_json(response, method="submit")
+        try:
+            if not isinstance(data, dict):
+                raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+            venue_order_id = str(data["id"])
+            alpaca_status = str(data.get("status", ""))
+            mapped_status = ALPACA_STATUS_MAP.get(alpaca_status, "rejected")
+            ts_raw = data.get("submitted_at") or data.get("created_at")
+            ts = _parse_alpaca_ts(ts_raw) if ts_raw else _mae_runtime.clock()
+        except (KeyError, TypeError, ValueError) as exc:
+            # Validate-before-append discipline (round-25 pin): nothing may
+            # be appended to the ledger until the venue's response has been
+            # fully parsed and validated -- a malformed/error body must
+            # raise here, before EITHER OrderSubmitted or OrderAck exists,
+            # never leave a ledger trace claiming an order that was never
+            # actually confirmed.
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).submit(...): malformed venue response "
+                f"(missing/invalid order fields): {exc}"
+            ) from exc
 
         self._append_order_submitted(order, venue_order_id, ts)
         self._append_order_ack(venue_order_id, order.thesis_id, mapped_status, ts)
@@ -363,17 +435,41 @@ class AlpacaBroker:
         order as terminal; round-23 adjudication addendum)."""
         headers = self._headers(*self._require_credentials("order_status"))
         response = self._get(f"{self._base_url}/orders/{order_id}", headers=headers)
-        data = response.json()
 
-        alpaca_status = str(data.get("status", ""))
-        mapped_status = ALPACA_STATUS_MAP.get(alpaca_status, "rejected")
-        filled_qty_raw = data.get("filled_qty")
-        filled_qty = Decimal(str(filled_qty_raw)) if filled_qty_raw is not None else Decimal("0")
+        if response.status_code == 404:
+            # The ONE pinned case where a 4xx maps to a domain value rather
+            # than raising (round-25 pin, module docstring's status-mapping
+            # table): a venue-confirmed "this order does not exist" IS a
+            # real, terminal answer -- reads as "rejected", never
+            # generalized to any other 4xx or any other method.
+            return OrderStatus(
+                order_id=order_id,
+                status="rejected",
+                filled_qty=Decimal("0"),
+                remaining_qty=None,
+            )
 
-        remaining_qty: Decimal | None = None
-        qty_raw = data.get("qty")
-        if qty_raw is not None:
-            remaining_qty = Decimal(str(qty_raw)) - filled_qty
+        data = self._parse_json(response, method="order_status")
+        try:
+            if not isinstance(data, dict):
+                raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+
+            alpaca_status = str(data.get("status", ""))
+            mapped_status = ALPACA_STATUS_MAP.get(alpaca_status, "rejected")
+            filled_qty_raw = data.get("filled_qty")
+            filled_qty = (
+                Decimal(str(filled_qty_raw)) if filled_qty_raw is not None else Decimal("0")
+            )
+
+            remaining_qty: Decimal | None = None
+            qty_raw = data.get("qty")
+            if qty_raw is not None:
+                remaining_qty = Decimal(str(qty_raw)) - filled_qty
+        except (TypeError, ValueError, InvalidOperation) as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).order_status(...): malformed venue "
+                f"response (missing/invalid order fields): {exc}"
+            ) from exc
 
         if mapped_status == "filled":
             self._record_fill_from_order(order_id=order_id, data=data)
@@ -402,30 +498,38 @@ class AlpacaBroker:
             headers=headers,
             params={"activity_types": "FILL"},
         )
-        rows = response.json()
+        rows = self._parse_json(response, method="fills")
+        try:
+            if not isinstance(rows, list):
+                raise TypeError(f"expected a JSON array, got {type(rows).__name__}")
 
-        out = []
-        for row in rows:
-            ts = _parse_alpaca_ts(row["transaction_time"])
-            if ts < since:
-                continue
-            order_id = str(row.get("order_id", ""))
-            out.append(
-                Fill(
-                    order_id=order_id,
-                    thesis_id=self._thesis_id_for_order(order_id),
-                    ts_utc=ts,
-                    price=Decimal(str(row["price"])),
-                    qty=Decimal(str(row["qty"])),
-                    fees_usd=self._fees_for(
-                        symbol=str(row.get("symbol", "")),
-                        side=str(row.get("side", "buy")),
+            out = []
+            for row in rows:
+                ts = _parse_alpaca_ts(row["transaction_time"])
+                if ts < since:
+                    continue
+                order_id = str(row.get("order_id", ""))
+                out.append(
+                    Fill(
+                        order_id=order_id,
+                        thesis_id=self._thesis_id_for_order(order_id),
+                        ts_utc=ts,
                         price=Decimal(str(row["price"])),
                         qty=Decimal(str(row["qty"])),
-                    ),
-                    quote_snapshot={},
+                        fees_usd=self._fees_for(
+                            symbol=str(row.get("symbol", "")),
+                            side=str(row.get("side", "buy")),
+                            price=Decimal(str(row["price"])),
+                            qty=Decimal(str(row["qty"])),
+                        ),
+                        quote_snapshot={},
+                    )
                 )
-            )
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).fills(...): malformed venue response "
+                f"(missing/invalid activity fields): {exc}"
+            ) from exc
         out.sort(key=lambda f: f.ts_utc)
         return out
 
@@ -460,16 +564,67 @@ class AlpacaBroker:
     def _get(
         self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
     ) -> httpx.Response:
-        if self._client is not None:
-            return self._client.get(
-                url, headers=headers, params=params, timeout=_REQUEST_TIMEOUT_S
-            )
-        return httpx.get(url, headers=headers, params=params, timeout=_REQUEST_TIMEOUT_S)
+        try:
+            if self._client is not None:
+                return self._client.get(
+                    url, headers=headers, params=params, timeout=_REQUEST_TIMEOUT_S
+                )
+            return httpx.get(url, headers=headers, params=params, timeout=_REQUEST_TIMEOUT_S)
+        except httpx.HTTPError as exc:
+            # Timeouts/connection failures/etc -- the venue never answered at
+            # all (round-25 pin: never distinguishable from a 5xx in terms of
+            # what we're allowed to infer -- nothing).
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}): GET {url} failed: {exc}"
+            ) from exc
 
     def _post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
-        if self._client is not None:
-            return self._client.post(url, headers=headers, json=json, timeout=_REQUEST_TIMEOUT_S)
-        return httpx.post(url, headers=headers, json=json, timeout=_REQUEST_TIMEOUT_S)
+        try:
+            if self._client is not None:
+                return self._client.post(
+                    url, headers=headers, json=json, timeout=_REQUEST_TIMEOUT_S
+                )
+            return httpx.post(url, headers=headers, json=json, timeout=_REQUEST_TIMEOUT_S)
+        except httpx.HTTPError as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}): POST {url} failed: {exc}"
+            ) from exc
+
+    def _parse_json(self, response: httpx.Response, *, method: str) -> Any:
+        """Venue-error taxonomy (P4-PAPER review MEDIUM-1, round-25 pin):
+        classify `response` BEFORE any field access ever happens, so no
+        caller can accidentally parse a non-2xx/malformed body as if it were
+        a real answer.
+
+        - 429 or 5xx: `VenueUnavailable` -- the venue did not really answer
+          (rate-limited/overloaded/erroring); never fabricate a status/
+          balance/list from this.
+        - Any other 4xx: `VenueRejected` -- a REAL venue answer (bad params,
+          unknown resource, auth failure); `order_status` is the ONE caller
+          that special-cases 404 into a domain value BEFORE ever reaching
+          this method (module docstring) -- every other 4xx everywhere else
+          raises here.
+        - 2xx with a body that fails to decode as JSON: `VenueUnavailable`
+          (a malformed 200 is exactly as untrustworthy as a 5xx -- round-25
+          pin, "malformed 200 -> RAISE, never fabricate a status")."""
+        status = response.status_code
+        if status == 429 or status >= 500:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).{method}(...): venue unavailable "
+                f"(HTTP {status}): {response.text}"
+            )
+        if 400 <= status < 500:
+            raise VenueRejected(
+                f"AlpacaBroker({self.account_ref!r}).{method}(...): venue rejected the "
+                f"request (HTTP {status}): {response.text}"
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise VenueUnavailable(
+                f"AlpacaBroker({self.account_ref!r}).{method}(...): malformed response body "
+                f"(HTTP {status}, not valid JSON): {exc}"
+            ) from exc
 
     def _append(self, event_type: str, payload: dict[str, Any], ts: datetime) -> str:
         event = Event(

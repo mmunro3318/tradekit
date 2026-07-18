@@ -2713,3 +2713,72 @@ proven red against the pre-fix code, then green).
     bounded by the two-man rule + 3x$25 budget. The policy.__all__
     surface-freeze edit (additive exception export) audited: the frozen
     test guards series-mutating VERBS; an exception class is not a verb.
+
+## Round-25 — P4-paper post-sprint review fixes (Opus PASS + 1 MEDIUM fixed
+now, 1 LOW docstring sweep), 2026-07-18
+
+CTO-pinned MEDIUM-1: `AlpacaBroker`'s five `BrokerPort` methods had NO HTTP
+error taxonomy — a non-2xx body flowed straight into field access, so a
+transient 503/timeout on `order_status` fell through the `ALPACA_STATUS_MAP`
+catch-all and FABRICATED a terminal `OrderStatus(status="rejected")` for a
+request the venue never actually answered (misreporting a possibly-live
+order as dead), while `account`/`positions`/`fills`/`submit` leaked bare
+`KeyError`/`TypeError`/`json.JSONDecodeError` on malformed/error-shaped
+bodies instead of a typed error.
+
+- **Fix, mirroring the P1A `ProviderError` taxonomy semantics
+  (`mae._data.errors`) but broker-native** (round-23's "never import
+  mae._data.errors across the module boundary for `_alpaca.py` itself"
+  still holds — this is the broker's OWN hierarchy): added `VenueError`
+  (base) / `VenueRejected` / `VenueUnavailable` to `broker._port`.
+- **Classification pin (`AlpacaBroker._parse_json`, applied before ANY
+  field is read off a response, across all five methods):**
+  - HTTP 429 or >= 500 -> `VenueUnavailable` (raise; the venue did not
+    really answer — never fabricate a status/balance/list from this).
+  - HTTP 404 on `order_status()` ONLY -> `OrderStatus(status="rejected")`
+    (the ONE pinned case a 4xx maps to a domain value instead of raising —
+    checked BEFORE `_parse_json`, explicitly NOT generalized to any other
+    4xx or any other method; mirrors the pre-existing conformance-suite
+    `order-does-not-exist` respx route in `tests/contract/
+    test_broker_port.py`, which this fix keeps passing unchanged).
+  - Any other 4xx (400-499, including 404 on every OTHER method, and 422
+    anywhere) -> `VenueRejected` (raise; a real venue answer, just not one
+    that maps to a domain value outside `order_status`'s 404 case).
+  - A 2xx body that fails to decode as JSON, or has the wrong top-level
+    shape (e.g. an error dict where a list of activities was expected), or
+    whose otherwise-valid JSON is missing/mistyping an expected field
+    (`KeyError`/`TypeError`/`ValueError`/`decimal.InvalidOperation` caught
+    around the field-extraction block per method) -> `VenueUnavailable`.
+  - `httpx.HTTPError` (timeouts/connection failures) raised by `_get`/
+    `_post` themselves -> `VenueUnavailable` (the venue never answered at
+    all, same bucket as a 5xx in terms of what may be inferred: nothing).
+- **`submit()` validate-before-append discipline:** checked the existing
+  event ordering first, per the CTO's instruction — `_append_order_submitted`/
+  `_append_order_ack` were ALREADY called only after `response.json()` and
+  field extraction succeeded (never before the POST), so the ordering itself
+  was not the bug; the fix adds the missing status-code/malformed-body
+  classification (`_parse_json` + a try/except around field extraction) in
+  front of that pre-existing ordering. Net effect pinned by test: a 500 or
+  422 on `POST /orders` now raises `VenueUnavailable`/`VenueRejected` with
+  ZERO `OrderSubmitted`/`OrderAck` events appended (both cases tested).
+- Red proof (captured in the "P4-paper review fixes: tests (red)" commit,
+  4 tests red against the unmodified `_alpaca.py`): `order_status` on a 503
+  raised `json.decoder.JSONDecodeError` deep inside `response.json()` (not
+  `VenueUnavailable`, and NOT a fabricated "rejected" for this particular
+  fixture only because the mocked 503 body was non-JSON text — the
+  fabrication itself is real for any 503/429/5xx whose body happens to
+  decode as JSON with no `status` key, e.g. an empty `{}` error envelope,
+  which is the actual venue-shape risk this fix closes); `account` on a
+  malformed 200 (missing `equity`) raised bare `KeyError: 'equity'`; `fills`
+  on an error-dict 200 body raised bare `TypeError: string indices must be
+  integers, not 'str'` (iterating the dict's keys as if they were activity
+  rows); `submit` on a 500 raised the same bare `JSONDecodeError`.
+- LOW-1 (documentation-only, no assertion changes): swept stale RED-phase
+  module/test docstrings in `tests/unit/broker/test_alpaca_broker.py`
+  (batch-A "NotImplementedError stub, expected RED" framing) and the
+  `tests/contract/test_broker_port.py` header (batch-B "PaperBroker stubs,
+  expected RED this batch" framing) to state the current GREEN/real-adapter
+  truth — both suites' every case is real and passing as of this round.
+- Verified: `uv run pytest` 824 passed (818 baseline + 6 new: order_status
+  503/404, account malformed-200, fills error-dict, submit 500 and 422),
+  `uv run ruff check .` clean, `uv run mypy` clean (73 source files).
