@@ -34,6 +34,8 @@ from tradekit.contracts import (
     BarSeries,
     Event,
     EventFilter,
+    HaltClearedPayload,
+    HaltSetPayload,
     OrderRequest,
     VerdictIssuedPayload,
     VerdictToken,
@@ -46,25 +48,37 @@ _VERDICT = VerdictToken(verdict_id="v-1", policy_version_hash="0" * 64)
 _T0 = datetime(2026, 1, 2, tzinfo=UTC)
 
 
-def _seed_allow_verdict(account_ref: str = _ACCOUNT_REF) -> None:
+def _seed_allow_verdict(
+    account_ref: str = _ACCOUNT_REF,
+    *,
+    thesis_id: str | None = None,
+    verdict_id: str = "v-1",
+    ts_utc: datetime = _T0,
+) -> None:
     """Earn the allow (CTO adjudication 2026-07-17, same class as P2 batch
-    C's R-010 'the allow path must be earned' call): `_VERDICT` is only
-    valid because a REAL `VerdictIssued(allow=true)` event with a matching
-    `verdict_id`/`policy_version_hash` sits on the ledger — batch C's
-    pipeline is the normal producer; the harness appends it directly."""
+    C's R-010 'the allow path must be earned' call): a `VerdictToken` is
+    only valid because a REAL `VerdictIssued(allow=true)` event with a
+    matching `verdict_id`/`policy_version_hash` sits on the ledger — batch
+    C's pipeline is the normal producer; the harness appends it directly.
+
+    `thesis_id` MUST match the order's own `thesis_id` (MED-2 thesis
+    binding, P3 review fix) — callers pass the exact value the order under
+    test will carry; `None` is a legitimate "no thesis" verdict (e.g. a
+    reconcile-triggered action) but then only matches an order whose OWN
+    `thesis_id` is also `None`."""
     default_ledger().append(
         Event(
             event_id=str(ULID()),
-            ts_utc=_T0,
+            ts_utc=ts_utc,
             type="VerdictIssued",
             actor="system:test-harness",
             run_id=None,
             schema_ver=1,
             payload=VerdictIssuedPayload(
-                verdict_id=_VERDICT.verdict_id,
+                verdict_id=verdict_id,
                 kind="submit_order",
                 account_ref=account_ref,
-                thesis_id=None,
+                thesis_id=thesis_id,
                 allow=True,
                 policy_version_hash=_VERDICT.policy_version_hash,
             ).model_dump(mode="json"),
@@ -126,7 +140,7 @@ def test_market_buy_fills_at_mid_plus_half_spread_with_fee_from_costs_table(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id="TH-buy-market")
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="buy"), _VERDICT)
 
@@ -149,7 +163,7 @@ def test_market_sell_fills_at_mid_minus_half_spread_with_fee_from_costs_table(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id="TH-sell-market")
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="sell"), _VERDICT)
 
@@ -172,7 +186,7 @@ def test_market_fill_quote_snapshot_matches_the_bar_used(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id="TH-buy-market")
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side="buy"), _VERDICT)
 
@@ -216,7 +230,7 @@ def test_market_submit_with_no_cached_bars_raises_no_quote_available_and_appends
     # verdict must be earned so this test measures the NoQuoteAvailable
     # refusal, not a token refusal. Seeded before the baseline count so the
     # no-op assertion below is unaffected.
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id="TH-buy-market")
     events_before = len(default_ledger().query(EventFilter()))
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     with pytest.raises(NoQuoteAvailable):
@@ -251,7 +265,7 @@ def _submit_resting_buy_limit(monkeypatch: pytest.MonkeyPatch) -> tuple[PaperBro
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([quiet_bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0)
 
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id="TH-buy-limit")
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     ack = broker.submit(_order(side="buy", order_type="limit", limit_price=str(_LIMIT)), _VERDICT)
     assert ack.status == "accepted"
@@ -371,7 +385,7 @@ def test_market_fill_replay_is_deterministic(monkeypatch: pytest.MonkeyPatch) ->
     # Both brokers resolve default_ledger() under the same TK_DATA_DIR tmp
     # isolation, so one seeded VerdictIssued serves both submits — each
     # broker's ledger (the shared one) carries the earned allow.
-    _seed_allow_verdict("paper:replay-a")
+    _seed_allow_verdict("paper:replay-a", thesis_id="TH-buy-market")
     broker_a = PaperBroker(account_ref="paper:replay-a")
     broker_b = PaperBroker(account_ref="paper:replay-b")
     broker_a.submit(_order(side="buy"), _VERDICT)
@@ -416,7 +430,7 @@ def test_market_fill_price_stays_within_the_spread_adjusted_bar_envelope(
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
 
-    _seed_allow_verdict()
+    _seed_allow_verdict(thesis_id=f"TH-{side}-market")
     broker = PaperBroker(account_ref=_ACCOUNT_REF)
     broker.submit(_order(side=side), _VERDICT)
 
@@ -424,3 +438,213 @@ def test_market_fill_price_stays_within_the_spread_adjusted_bar_envelope(
     lower_bound = Decimal(low) * (1 - r)
     upper_bound = Decimal(high) * (1 + r)
     assert lower_bound <= fill_price <= upper_bound
+
+
+# ---------------------------------------------------------------------------
+# MED-1 (P3 review, CTO-pinned fix) — halt bypass via resting-limit fill.
+#
+# `order_status` is the poll point that appends a resting limit's
+# `FillRecorded` (§8.3). Before this fix it did so unconditionally, so a
+# limit resting BEFORE a `HaltSet` could still fill AFTER the halt via a
+# later `tk order status` poll -- a halt bypass. Fix: `order_status` folds
+# `HaltSet`/`HaltCleared` (the SAME derivation `policy._context._halt_state`
+# uses, duplicated here without importing `policy` -- see `_paper.py`'s
+# `_is_halted` docstring) and refuses to append a fill while halted; the
+# order simply stays "open" and a LATER poll, after `HaltCleared`, may fill
+# normally (ledger determinism is event-based, so replay reproduces).
+# ---------------------------------------------------------------------------
+
+
+def test_order_status_does_not_fill_a_resting_limit_while_halted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, order_id = _submit_resting_buy_limit(monkeypatch)
+
+    through_ts = _T0 + timedelta(days=1)
+    through_bar = _bar(through_ts, open_="50100", high="50150", low="49999.99", close="50050")
+    monkeypatch.setattr(
+        "tradekit.mae._runtime.get_closed_bars",
+        _bars([_bar(_T0, open_="50200", high="50300", low="50100", close="50200.00"), through_bar]),
+    )
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: through_ts + timedelta(hours=1))
+
+    default_ledger().append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=through_ts,
+            type="HaltSet",
+            actor="system:test-harness",
+            run_id=None,
+            schema_ver=1,
+            payload=HaltSetPayload(
+                reason="test-halt", scope="all", set_by="system:test-harness"
+            ).model_dump(mode="json"),
+        )
+    )
+
+    status = broker.order_status(order_id)
+    assert status.status == "open", "a halted account must not fill a resting limit"
+    assert broker.fills(_T0) == [], (
+        "zero FillRecorded while halted, even though the bar traded through"
+    )
+
+    fill_events = [
+        e
+        for e in default_ledger().query(EventFilter(types=["FillRecorded"]))
+        if e.payload.get("order_id") == order_id
+    ]
+    assert fill_events == []
+
+
+def test_order_status_fills_a_resting_limit_after_halt_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, order_id = _submit_resting_buy_limit(monkeypatch)
+
+    through_ts = _T0 + timedelta(days=1)
+    through_bar = _bar(through_ts, open_="50100", high="50150", low="49999.99", close="50050")
+    monkeypatch.setattr(
+        "tradekit.mae._runtime.get_closed_bars",
+        _bars([_bar(_T0, open_="50200", high="50300", low="50100", close="50200.00"), through_bar]),
+    )
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: through_ts + timedelta(hours=1))
+
+    halt_ts = through_ts
+    default_ledger().append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=halt_ts,
+            type="HaltSet",
+            actor="system:test-harness",
+            run_id=None,
+            schema_ver=1,
+            payload=HaltSetPayload(
+                reason="test-halt", scope="all", set_by="system:test-harness"
+            ).model_dump(mode="json"),
+        )
+    )
+    assert broker.order_status(order_id).status == "open"
+    assert broker.fills(_T0) == []
+
+    clear_ts = through_ts + timedelta(minutes=30)
+    default_ledger().append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=clear_ts,
+            type="HaltCleared",
+            actor="system:test-harness",
+            run_id=None,
+            schema_ver=1,
+            payload=HaltClearedPayload(
+                reason="test-clear", halt_event_id=None, cleared_by="system:test-harness"
+            ).model_dump(mode="json"),
+        )
+    )
+
+    status = broker.order_status(order_id)
+    assert status.status == "filled", "after HaltCleared, a later poll must fill normally"
+    assert broker.fills(_T0)[0].price == _LIMIT
+
+
+# ---------------------------------------------------------------------------
+# MED-2 (P3 review, CTO-pinned fix) — token gate narrower than the written
+# pin. §8.2/§15 pins "existence + thesis match + no newer deny"; batch B/C's
+# `_verify_token` only checked existence + allow + hash. This section pins
+# the two missing checks: (a) thesis binding — the presented VerdictToken's
+# `VerdictIssued` event must reference the SAME thesis_id as the order being
+# submitted; (b) no-newer-deny — a LATER `VerdictIssued` for the same
+# thesis_id with `allow=False` invalidates an earlier allow, even though the
+# earlier allow event itself is untouched.
+# ---------------------------------------------------------------------------
+
+
+def test_submit_refuses_a_token_minted_for_a_different_thesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bar = _bar(_T0, open_="50000", high="50500", low="49500", close="50000.00")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-A", verdict_id="v-thesis-a")
+    order_for_thesis_b = OrderRequest(
+        thesis_id="TH-B",
+        account_ref=_ACCOUNT_REF,
+        asset=_ASSET,
+        side="buy",
+        order_type="market",
+        qty=Decimal("0.001"),
+    )
+    token = VerdictToken(verdict_id="v-thesis-a", policy_version_hash=_VERDICT.policy_version_hash)
+
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    with pytest.raises(BrokerTokenRequired):
+        broker.submit(order_for_thesis_b, token)
+
+
+def test_submit_refuses_an_allow_token_superseded_by_a_later_deny_for_the_same_thesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bar = _bar(_T0, open_="50000", high="50500", low="49500", close="50000.00")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-X", verdict_id="v-allow-1", ts_utc=_T0)
+    default_ledger().append(
+        Event(
+            event_id=str(ULID()),
+            ts_utc=_T0 + timedelta(hours=1),
+            type="VerdictIssued",
+            actor="system:test-harness",
+            run_id=None,
+            schema_ver=1,
+            payload=VerdictIssuedPayload(
+                verdict_id="v-deny-1",
+                kind="submit_order",
+                account_ref=_ACCOUNT_REF,
+                thesis_id="TH-X",
+                allow=False,
+                policy_version_hash=_VERDICT.policy_version_hash,
+            ).model_dump(mode="json"),
+        )
+    )
+    order = OrderRequest(
+        thesis_id="TH-X",
+        account_ref=_ACCOUNT_REF,
+        asset=_ASSET,
+        side="buy",
+        order_type="market",
+        qty=Decimal("0.001"),
+    )
+    token = VerdictToken(verdict_id="v-allow-1", policy_version_hash=_VERDICT.policy_version_hash)
+
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    with pytest.raises(BrokerTokenRequired):
+        broker.submit(order, token)
+
+
+def test_submit_accepts_an_allow_token_when_a_later_verdict_is_also_an_allow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later `VerdictIssued(allow=True)` for the same thesis does NOT
+    invalidate an earlier allow — only a later DENY does."""
+    bar = _bar(_T0, open_="50000", high="50500", low="49500", close="50000.00")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-Y", verdict_id="v-allow-1", ts_utc=_T0)
+    _seed_allow_verdict(thesis_id="TH-Y", verdict_id="v-allow-2", ts_utc=_T0 + timedelta(hours=1))
+    order = OrderRequest(
+        thesis_id="TH-Y",
+        account_ref=_ACCOUNT_REF,
+        asset=_ASSET,
+        side="buy",
+        order_type="market",
+        qty=Decimal("0.001"),
+    )
+    token = VerdictToken(verdict_id="v-allow-1", policy_version_hash=_VERDICT.policy_version_hash)
+
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(order, token)
+
+    fills = broker.fills(_T0)
+    assert len(fills) == 1, "the earlier allow token is still valid — no newer DENY exists"

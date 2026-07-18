@@ -209,7 +209,10 @@ def test_execute_order_mints_a_token_that_passes_the_real_verify_token_check(
     account_ref = thesis_kwargs["account_ref"]
     adapter = broker.get(account_ref)
     try:
-        adapter._verify_token(token)  # pragma: no branch — exercised for its side effect only
+        # MED-2 (P3 review): `_verify_token` also checks thesis binding, so
+        # this re-derivation must pass the SAME thesis_id the pipeline's
+        # own ProposedAction/VerdictIssued carried.
+        adapter._verify_token(token, thesis_id)  # pragma: no branch — side effect only
     except BrokerTokenRequired as exc:  # pragma: no cover - defensive
         pytest.fail(f"a token minted from a real allow Verdict must verify: {exc}")
 
@@ -427,7 +430,11 @@ def test_execute_order_for_a_limit_entry_thesis_rests_with_no_fill(
 # ---------------------------------------------------------------------------
 
 
-def _seed_allow_verdict(account_ref: str, token: VerdictToken) -> None:
+def _seed_allow_verdict(
+    account_ref: str, token: VerdictToken, *, thesis_id: str | None = None
+) -> None:
+    """`thesis_id` MUST match the order under test's own `thesis_id` (MED-2
+    thesis binding, P3 review fix) — see `_paper.py._verify_token`."""
     default_ledger().append(
         Event(
             event_id=str(ULID()),
@@ -440,7 +447,7 @@ def _seed_allow_verdict(account_ref: str, token: VerdictToken) -> None:
                 verdict_id=token.verdict_id,
                 kind="submit_order",
                 account_ref=account_ref,
-                thesis_id=None,
+                thesis_id=thesis_id,
                 allow=True,
                 policy_version_hash=token.policy_version_hash,
             ).model_dump(mode="json"),
@@ -477,7 +484,7 @@ def test_cancel_order_on_a_resting_limit_order_appends_order_cancelled(
 ) -> None:
     account_ref = "paper:cancel-resting"
     token = VerdictToken(verdict_id="v-cancel-resting", policy_version_hash="0" * 64)
-    _seed_allow_verdict(account_ref, token)
+    _seed_allow_verdict(account_ref, token, thesis_id="TH-cancel-1")
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake_submit_get_closed_bars)
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _SUBMIT_BAR_START)
 
@@ -501,7 +508,7 @@ def test_cancel_order_on_a_filled_order_refuses_and_appends_nothing(
 ) -> None:
     account_ref = "paper:cancel-filled"
     token = VerdictToken(verdict_id="v-cancel-filled", policy_version_hash="0" * 64)
-    _seed_allow_verdict(account_ref, token)
+    _seed_allow_verdict(account_ref, token, thesis_id="TH-cancel-2")
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake_submit_get_closed_bars)
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _SUBMIT_BAR_START)
 
