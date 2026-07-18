@@ -52,6 +52,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from tradekit.contracts import EventFilter
+
 if TYPE_CHECKING:
     from tradekit.ledger import Ledger
 
@@ -88,19 +90,64 @@ class LedgerModels:
         self._ledger = ledger
 
     def active_theses(self) -> list[ActiveThesis]:
-        raise NotImplementedError(
-            "SPRINT P3 batch E — ledger.models.active_theses (see _models.py docstring)"
-        )
+        # `theses` is the projection table (`_projections.py`) — post-`rebuild()`
+        # read surface, never raw events (module docstring's own pin).
+        con = self._ledger._con
+        rows = con.execute(
+            "SELECT thesis_id, account_ref, strategy_tag FROM theses WHERE state = 'active'"
+        ).fetchall()
+        return [
+            ActiveThesis(thesis_id=row[0], account_ref=row[1], strategy_tag=row[2])
+            for row in rows
+        ]
 
     def account_refs(self) -> list[str]:
-        raise NotImplementedError(
-            "SPRINT P3 batch E — ledger.models.account_refs (see _models.py docstring)"
-        )
+        con = self._ledger._con
+        from_accounts = {
+            row[0] for row in con.execute("SELECT account_ref FROM accounts").fetchall()
+        }
+        from_theses = {
+            row[0]
+            for row in con.execute(
+                "SELECT DISTINCT account_ref FROM theses WHERE account_ref IS NOT NULL"
+            ).fetchall()
+        }
+        refs = {ref for ref in (from_accounts | from_theses) if ref}
+        return sorted(refs)
 
     def latest_grades(self, n: int = 10) -> list[GradeRecord]:
-        raise NotImplementedError(
-            "SPRINT P3 batch E — ledger.models.latest_grades (see _models.py docstring)"
-        )
+        con = self._ledger._con
+        rows = con.execute(
+            "SELECT thesis_id, account_ref, graded_outcome, graded_ts FROM theses"
+            " WHERE graded_ts IS NOT NULL"
+            " ORDER BY graded_ts DESC, thesis_id ASC LIMIT ?",
+            (n,),
+        ).fetchall()
+
+        # `pnl_usd` isn't carried by the `theses` projection (module docstring) —
+        # read it off the owning `ThesisGraded` event. The FIRST ThesisGraded
+        # event for a given thesis_id is the one the (guarded) projection
+        # actually applied (a well-formed log has exactly one anyway), so
+        # `setdefault` — never overwritten by a later duplicate — keeps the
+        # derivation and the projection in agreement.
+        pnl_by_thesis: dict[str, Decimal | None] = {}
+        for event in self._ledger.query(EventFilter(types=["ThesisGraded"])):
+            thesis_id = event.payload.get("thesis_id")
+            if thesis_id is None or thesis_id in pnl_by_thesis:
+                continue
+            pnl = event.payload.get("pnl_usd")
+            pnl_by_thesis[thesis_id] = Decimal(str(pnl)) if pnl is not None else None
+
+        return [
+            GradeRecord(
+                thesis_id=row[0],
+                account_ref=row[1],
+                outcome=row[2],
+                pnl_usd=pnl_by_thesis.get(row[0]),
+                graded_ts=datetime.fromisoformat(row[3]),
+            )
+            for row in rows
+        ]
 
 
 __all__ = ["ActiveThesis", "GradeRecord", "LedgerModels"]

@@ -6,6 +6,13 @@ discipline as every other stubbed verb's CLI test in this codebase.
 `tk wiki add` is REAL (green): `memory._wiki.add_note` has no stub.
 """
 
+# CTO re-point (P3 batch-E dev pass, dev stop-and-flagged): these were
+# stub-era clean-exit pins authored in the SAME batch whose dev pass
+# implements the verbs — intra-batch obsolescence (third occurrence; the
+# batch-D test_cli_fill precedent applies). Flipped to assert the real
+# success path: exit 0, no traceback. Content-level behavior is pinned by
+# the unit tests for each verb, not the CLI shell.
+
 from __future__ import annotations
 
 from typer.testing import CliRunner
@@ -17,33 +24,37 @@ runner = CliRunner()
 
 def test_tk_brief_stub_exits_cleanly_not_a_traceback(tmp_path) -> None:
     result = runner.invoke(app, ["brief"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 1, result.output
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
+    assert "Traceback" not in result.output
     assert "Traceback" not in result.output
 
 
 def test_tk_search_stub_exits_cleanly_not_a_traceback(tmp_path) -> None:
     result = runner.invoke(app, ["search", "halt"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 1, result.output
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
+    assert "Traceback" not in result.output
 
 
-def test_tk_report_memo_stub_exits_cleanly(tmp_path) -> None:
+def test_tk_report_memo_unknown_thesis_fails_cleanly(tmp_path) -> None:
+    """CTO correction to the re-point: an UNKNOWN thesis on an empty ledger
+    is a legitimate clean error (exit nonzero, meaningful message), not a
+    success — the happy path is covered by test_report.py's unit tests."""
     result = runner.invoke(app, ["report", "memo", "TH-1"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 1, result.output
-    assert "not yet implemented" in result.output
+    assert result.exit_code != 0, result.output
+    assert "TH-1" in str(result.exception) or "TH-1" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_tk_report_readiness_stub_exits_cleanly(tmp_path) -> None:
     result = runner.invoke(app, ["report", "readiness"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 0, result.output
 
 
 def test_tk_report_pnl_stub_exits_cleanly(tmp_path) -> None:
     result = runner.invoke(
         app, ["report", "pnl", "paper:alpha"], env={"TK_DATA_DIR": str(tmp_path)}
     )
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 0, result.output
 
 
 def test_tk_wiki_add_is_real_and_writes_a_file(tmp_path) -> None:

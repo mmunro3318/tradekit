@@ -9,6 +9,13 @@ batch-C pass). The explicit `--thesis` path is UNCHANGED (still real,
 still works with zero ledger.models involvement) — a green control below.
 """
 
+# CTO re-point (P3 batch-E dev pass, dev stop-and-flagged): these were
+# stub-era clean-exit pins authored in the SAME batch whose dev pass
+# implements the verbs — intra-batch obsolescence (third occurrence; the
+# batch-D test_cli_fill precedent applies). Flipped to assert the real
+# success path: exit 0, no traceback. Content-level behavior is pinned by
+# the unit tests for each verb, not the CLI shell.
+
 from __future__ import annotations
 
 from typer.testing import CliRunner
@@ -29,8 +36,8 @@ def test_grade_sweep_with_no_thesis_args_exits_cleanly_not_a_traceback(tmp_path)
     change itself, not the accessor's real behavior (that's
     `tests/unit/ledger/test_models.py`'s job)."""
     result = runner.invoke(app, ["grade", "sweep"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 1, result.output
-    assert "not yet implemented" in result.output
+    assert result.exit_code == 0, result.output
+    assert "Traceback" not in result.output
     assert "Traceback" not in result.output
 
 

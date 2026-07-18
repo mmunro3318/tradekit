@@ -151,6 +151,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tradekit import strategies
 from tradekit.mae import _regime, _runtime
 from tradekit.mae._indicators import momentum, volatility, volume
 
@@ -166,21 +167,14 @@ _SCAN_REGIME_N_STATES = 3
 `get_regime`'s own public defaults (mae/__init__.py); the scanner does not
 expose these as agent-facing inputs this sprint."""
 
-_TAG_STRATEGY: dict[str, str | None] = {
-    "oversold": "mean_reversion",
-    "overbought": "mean_reversion",
-    "macd_bullish": "momentum",
-    "macd_bearish": "momentum",
-    "at_support": "mean_reversion",
-    "at_resistance": "mean_reversion",
-    "bb_inside": None,
-    "volume_spike": "breakout",
-    "high_volatility": "breakout",
-}
-"""Signal-tag -> strategy-family map (see module docstring's "Signal tag /
-strategy-family mapping" section) — a session-chosen extrapolation of
-canonical §3's example tags, NOT itself CTO-ratified. `None` means the tag
-carries no strategy affiliation and always survives the regime gate."""
+# SPRINT P3 batch E (ASSUMPTIONS round-21, sprint-doc "one source of truth"):
+# re-derived FROM `tradekit.strategies.TAGS` — the SAME object (import, not a
+# copy), not a re-typed literal, so an edit to the shared registry propagates
+# here without touching this module again (`tests/unit/test_strategies_
+# registry.py`). `tradekit.strategies`'s own module docstring is the mapping's
+# canonical home now; see it for the "session-chosen, not CTO-ratified"
+# provenance note this dict used to carry directly.
+_TAG_STRATEGY: dict[str, str | None] = strategies.TAGS
 
 _BB_POSITION_TAGS: dict[str, str] = {
     "below_lower": "at_support",

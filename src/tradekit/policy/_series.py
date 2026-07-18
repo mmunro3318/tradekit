@@ -70,9 +70,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from tradekit.contracts import Event, EventFilter
+from ulid import ULID
+
+from tradekit.contracts import Event, EventFilter, SeriesClosedPayload
 from tradekit.ledger import Ledger
 from tradekit.policy._dials import PolicyDials
+
+_ACTOR = "system:policy"
 
 _WINDOW = timedelta(days=30)
 
@@ -258,9 +262,39 @@ def maybe_close_series(
     that is not yet complete, OR one that already has a `SeriesClosed`
     event, is a no-op that returns `None` (idempotence: a second call for
     the same closed window never appends a duplicate)."""
-    raise NotImplementedError(
-        "SPRINT P3 batch E — policy._series.maybe_close_series (SeriesClosed emission)"
+    stats = series_stats(ledger, account_ref, series_idx, dials, now)
+    if not stats.complete:
+        return None
+
+    existing = [
+        event
+        for event in ledger.query(EventFilter(types=["SeriesClosed"]))
+        if event.payload.get("account_ref") == account_ref
+        and event.payload.get("series_index") == series_idx
+    ]
+    if existing:
+        return None
+
+    payload = SeriesClosedPayload(
+        account_ref=account_ref,
+        series_index=series_idx,
+        window_start=stats.window_start,
+        window_end=stats.window_end,
+        graded_count=stats.graded_count,
+        void_count=stats.void_count,
+        gate_violations=stats.gate_violations,
+        clean=stats.clean,
     )
+    new_event = Event(
+        event_id=str(ULID()),
+        ts_utc=now,
+        type="SeriesClosed",
+        actor=_ACTOR,
+        run_id=None,
+        schema_ver=1,
+        payload=payload.model_dump(mode="json"),
+    )
+    return ledger.append(new_event)
 
 
 __all__ = ["SeriesStats", "maybe_close_series", "series_index", "series_stats", "window_for"]

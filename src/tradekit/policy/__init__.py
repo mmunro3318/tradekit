@@ -213,6 +213,14 @@ def promotion_status() -> dict[str, Any]:
         _series.series_stats(ledger, account_ref, idx, dials, now) for idx in last_4_indices
     ]
 
+    # SPRINT P3 batch E (ASSUMPTIONS round-21 entry 133, CTO-ratified): the
+    # machine-evaluation point for `SeriesClosed` emission — idempotent, so
+    # calling this for every window in the evaluation lookback on every
+    # `promotion_status()` read is safe (a window that isn't complete yet, or
+    # is already closed, is a no-op).
+    for idx in last_4_indices:
+        _series.maybe_close_series(ledger, account_ref, idx, dials, now)
+
     clean_count = sum(1 for stats in last_4_stats if stats.clean)
     non_void_total = sum(stats.graded_count for stats in last_4_stats)
 
