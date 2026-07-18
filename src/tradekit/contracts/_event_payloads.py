@@ -498,6 +498,43 @@ class OrderCancelledPayload(StrictFrozenModel):
     reason: str | None = None
 
 
+class SeriesClosedPayload(StrictFrozenModel):
+    """Producer: `policy.promotion_status()` (SPRINT P3 batch E, §7.3 —
+    ASSUMPTIONS round-21: the same "read-verb-that-writes" class of call as
+    `PromotionGrantedPayload`/`DemotedPayload` above). Appended AT MOST ONCE
+    per `(account_ref, series_index)` — emitted the first time
+    `promotion_status()` observes `now > window_end` for a series that has
+    no prior `SeriesClosed` event yet (P3 scope is EMISSION + idempotence
+    only; no consumer re-derives the `series` projection from this event
+    this sprint — `policy._series.series_stats` keeps deriving its stats
+    directly from `ThesisGraded`/`GateViolationDetected` at read time, same
+    as P2). Field values mirror `policy._series.SeriesStats` exactly, so a
+    reader never needs a second lookup to know why the window closed the
+    way it did."""
+
+    account_ref: str
+    series_index: int
+    window_start: AwareDatetime
+    window_end: AwareDatetime
+    graded_count: int
+    void_count: int
+    gate_violations: int
+    clean: bool
+
+
+class LessonRecordedPayload(StrictFrozenModel):
+    """Producer: `memory.record_lesson(note, salience)` (SPRINT P3 batch E,
+    DESIGN §11/§4.2). A pointer event only — the research loop (D14) writes
+    the distilled knowledge itself to `docs/wiki/`; this event exists so a
+    lesson is replayable/queryable from the ledger like everything else
+    (§11: "record_lesson ledgers a pointer event so lessons are replayable
+    too"). `salience` is the 1(low)-5(high) integer `tk brief`'s truncation
+    ordering reads (module docstring, `tradekit.memory._brief`)."""
+
+    note: str = Field(min_length=1)
+    salience: int = Field(ge=1, le=5)
+
+
 __all__ = [
     "AccountCreatedPayload",
     "ActionProposedPayload",
@@ -508,6 +545,7 @@ __all__ = [
     "HaltClearedPayload",
     "HaltSetPayload",
     "InvalidationAttestedPayload",
+    "LessonRecordedPayload",
     "MarketSnapshotTakenPayload",
     "OrderAckPayload",
     "OrderCancelledPayload",
@@ -517,6 +555,7 @@ __all__ = [
     "PromotionGrantedPayload",
     "ReconciliationRunPayload",
     "ReviewCompletedPayload",
+    "SeriesClosedPayload",
     "SizingComputedPayload",
     "ThesisActivatedPayload",
     "ThesisApprovedPayload",

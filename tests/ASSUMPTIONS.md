@@ -2293,3 +2293,106 @@ therefore green out of this red-phase file set:
     force appends GateViolationDetected alongside the fill (visibility ->
     series cleanliness -> promotion consequences, F7's actual teeth). The
     dev pass MUST add one additive test pinning exactly that.
+
+## Round-21 -- P3 batch E TDD session (memory + report, 3.7 done-gate,
+SeriesClosed emission, ledger.models, strategies registry), 2026-07-17
+
+RED this session -- `memory._brief.render`, `memory._search.search`,
+`ledger._models.LedgerModels.{active_theses,account_refs,latest_grades}`,
+`policy._series.maybe_close_series`, and all three `report.*` verbs are
+unconditional `NotImplementedError` stubs; every test describes REAL target
+behavior (never `pytest.raises(NotImplementedError)`). GREEN out of this
+red-phase file set (cheap/declarative, same precedent class as
+`broker.create_paper_account`/`SubprocessReviewerAdapter.__init__`):
+`memory.record_lesson` (contract-validate + one ledger append),
+`memory._wiki.add_note` (`tk wiki add`'s file writer), `memory._brief.
+estimate_tokens` (pure arithmetic), `Ledger.models` property construction,
+`tk grade sweep`'s CLI wiring change itself (the guard around the new
+stub), and `tests/replay/test_p3_end_to_end.py`'s entire scan -> thesis ->
+review -> approve -> execute_order -> fill -> grade -> REPLAY chain (every
+verb it drives landed in earlier P3 batches) -- that file only turns red at
+its FINAL two lines (`memory.brief()`/`report.daily_memo()`).
+
+133. **`policy._series.maybe_close_series` is NOT wired into
+     `policy.promotion_status()`'s call graph this batch, by deliberate
+     choice, not an oversight.** `promotion_status()` is already real and
+     green (SPRINT P2 batch D); wiring a brand-new unconditional
+     `NotImplementedError` stub into an already-green, heavily-tested
+     verb's call graph would turn every pre-existing `test_promotion.py`/
+     `test_series.py` scenario that reaches a completed series red too --
+     directly violating this batch's own "726 baseline green, new red
+     NotImplementedError only" verification bar. `tests/unit/policy/
+     test_series_closed.py` calls `maybe_close_series` DIRECTLY instead.
+     FLAGGED for the dev pass: wiring the call site into
+     `promotion_status()` (and updating whichever pre-existing promotion
+     tests that wiring legitimately touches) is real integration work this
+     batch does not attempt, per the sprint-doc addendum's own "emitted by
+     promotion_status" pin -- not silently deferred, named here.
+
+134. **`tests/unit/test_strategies_registry.py`'s two propagation tests
+     (`test_scanner_tag_strategy_is_not_yet_the_shared_registry_object`,
+     `test_registry_edit_propagates_to_the_regime_gate`) are RED via
+     `AssertionError`, not `NotImplementedError` -- the one deliberate
+     deviation from this batch's "new red is NotImplementedError only"
+     default, named in both the module docstring and each test's own
+     docstring.** `tradekit.strategies` (`TAGS`/`FAMILIES`) is real,
+     declarative data seeded verbatim from `mae._scanner._TAG_STRATEGY`'s
+     existing (ASSUMPTIONS 57f) mapping -- there is no stub to call. The
+     re-derivation itself (`_scanner._TAG_STRATEGY`/`_regime.
+     _STRATEGY_TAGS` importing FROM `tradekit.strategies` instead of
+     carrying independent copies) is real integration work against two
+     already-complete, golden-frozen SPRINT P1C modules, left to the dev
+     pass rather than improvised here (rewiring a frozen module's
+     module-level constant is not "adding a stub"). Golden-compatibility
+     (scanner/regime OUTPUT VALUES unchanged once rewired) is the job of
+     the PRE-EXISTING frozen tests in `tests/unit/mae/`, which stayed
+     green throughout this session untouched.
+
+135. **`report.daily_memo(thesis_id: str)` takes a single `thesis_id`, not
+     a date/account.** DESIGN §12.3 only says `daily_memo` renders "the SME
+     §3 practitioner memo" to `docs/reports/`; `docs/research/
+     perplexity-SME.md` §3's own canonical template is headed
+     `DAILY TRADE MEMO — [Date] — [Asset]` and lists exactly one thesis's
+     hypothesis/context/strategy/size/risk/EV/criteria/gate-status fields
+     -- read as a PER-THESIS submission-time memo (the "daily" in the name
+     names WHEN it's produced, not an aggregation key), not a digest across
+     every thesis traded that day. FLAGGED for CTO ratification -- if Mike
+     intends a true daily digest (all theses touched on a given UTC date),
+     the signature and every `tests/unit/report/test_report.py` fixture
+     built against it need to move together.
+
+136. **`ledger.models`/`memory`/`report` all reuse `policy._dials.
+     PolicyDials` for their own dials (`brief_max_tokens`, `wiki_dir`)
+     rather than inventing a second `BaseSettings` loader.** `PolicyDials`
+     is `config.toml`'s one existing loader (`TomlConfigSettingsSource`);
+     the alternative -- a dedicated `memory._dials.MemoryDials` -- would
+     duplicate the `TK_CONFIG_PATH` resolution logic for two fields. This
+     is a cross-module dependency in the OPPOSITE direction from the one
+     the CTO addendum forbids ("policy imports NOTHING from broker or
+     mae") -- `memory`/`ledger` importing FROM `policy._dials` is a
+     read-only data dependency, not `policy` reaching INTO another
+     module's internals. FLAGGED as a session choice, not silently assumed
+     load-bearing.
+
+137. **`memory`'s own clock seam is `tradekit.memory._clock` (module-
+     local, house convention), NEVER `mae._runtime._clock`.** The sprint
+     doc's "sanctioned-consumer" note (`mae._runtime.get_closed_bars`) name
+     ONLY `thesis` and `broker` as permitted cross-module internal
+     consumers of `mae._runtime` -- `memory` reaching into `mae._runtime`
+     for a clock would be an undocumented third consumer, so `memory`
+     grows its own private `_clock()` function instead (same pattern as
+     `policy._context._clock`), monkeypatched by dotted string path
+     exactly like every other module's clock seam.
+
+    **CTO ratification pending** -- entries 133-137 flagged this session,
+    not yet reviewed.
+
+    **CTO ratification (2026-07-18 UTC) — batch-E flags (133-137):** ALL
+    RATIFIED. maybe_close_series: the dev pass WIRES it into
+    promotion_status (the machine-evaluation point, consistent with the
+    read-verb-that-writes ratification); if any frozen promotion test
+    objects on event counts, stop-and-flag — do not leave it unwired.
+    Registry rewire assertion-reds: correct shape for a rewire of frozen
+    modules. daily_memo per-thesis, PolicyDials reuse, memory's private
+    clock seam (mae._runtime stays sanctioned for thesis/broker only):
+    as pinned.

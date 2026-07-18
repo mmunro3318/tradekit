@@ -131,6 +131,17 @@ class PolicyDials(BaseSettings):
     reviewer_timeout_s: int = 120
     reviewer_max_output_bytes: int = 1_048_576
     unresolved_attack_threshold: int = 1
+    # SPRINT P3 batch E (DESIGN §11, sprint-doc addendum: "tk brief token
+    # budget is a hard cap"). `brief_max_tokens` bounds `memory.brief()`'s
+    # rendered output under the token≈len(text)/4 heuristic PINNED by the
+    # addendum (ASSUMPTIONS round-21) — truncation is whole-section,
+    # lowest-salience-first, never mid-sentence. `wiki_dir` is the path seam
+    # `memory.search()`/`tk wiki add` resolve front-matter files under
+    # (relative to the repo root when not absolute; TK_WIKI_DIR env, if
+    # ever added, would be a CLI-layer override, not a dial concern —
+    # deferred, not needed this batch).
+    brief_max_tokens: int = 1500
+    wiki_dir: str = "docs/wiki"
 
     @classmethod
     def settings_customise_sources(

@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal, cast
 import typer
 
 import tradekit
-from tradekit import broker, policy, thesis
+from tradekit import broker, memory, policy, report, thesis
 from tradekit.contracts import AccountConfig, EventFilter, json_schemas
 from tradekit.ledger import default_ledger
 
@@ -30,6 +30,8 @@ promote_app = typer.Typer(no_args_is_help=True)
 account_app = typer.Typer(no_args_is_help=True)
 order_app = typer.Typer(no_args_is_help=True)
 fill_app = typer.Typer(no_args_is_help=True)
+wiki_app = typer.Typer(no_args_is_help=True)
+report_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
@@ -39,6 +41,8 @@ app.add_typer(promote_app, name="promote", help="Promotion ladder (§7.3).")
 app.add_typer(account_app, name="account", help="Named accounts (§8, TD-24).")
 app.add_typer(order_app, name="order", help="Two-phase order pipeline (§8.2, SPRINT P3 batch C).")
 app.add_typer(fill_app, name="fill", help="Advisory/manual fills (§8.4, D16, SPRINT P3 batch D).")
+app.add_typer(wiki_app, name="wiki", help="Research-loop notes (§11, SPRINT P3 batch E).")
+app.add_typer(report_app, name="report", help="Reporting (§12.3, SPRINT P3 batch E).")
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -198,12 +202,16 @@ def thesis_void(
 def grade_sweep(
     thesis_id: Annotated[
         list[str], typer.Option("--thesis", help="thesis_id to grade; repeatable.")
-    ],
+    ] = [],  # noqa: B006 — Typer reads this as the CLI default, never mutated
 ) -> None:
-    """`thesis.grade` over an explicit list of thesis_ids (thin dispatch —
-    auto-discovering every `active` thesis needs a projection query surface
-    this batch doesn't add to the CLI; FLAGGED, see tests/ASSUMPTIONS.md)."""
-    for tid in thesis_id:
+    """`thesis.grade` over an explicit `--thesis` list, OR (SPRINT P3 batch
+    E, closing the batch-C-flagged auto-discovery gap) every currently
+    `active` thesis via `ledger.models.active_theses()` when NO `--thesis`
+    is given — additive: explicit ids still work exactly as before."""
+    ids = list(thesis_id)
+    if not ids:
+        ids = [t.thesis_id for t in _guard_not_implemented(default_ledger().models.active_theses)]
+    for tid in ids:
         result = thesis.grade(tid)
         typer.echo(json.dumps({"thesis_id": tid, "outcome": result["outcome"]}))
 
@@ -405,6 +413,67 @@ def fill_record(
         typer.echo(fill.model_dump_json())
     else:
         typer.echo(f"{fill.order_id} {fill.price} x {fill.qty}")
+
+
+@app.command("brief")
+def tk_brief() -> None:
+    """`memory.brief()` (thin dispatch, DESIGN §11, SPRINT P3 batch E)."""
+    typer.echo(_guard_not_implemented(memory.brief))
+
+
+@app.command("search")
+def tk_search(
+    query: str,
+    k: Annotated[int, typer.Option(help="Max results.")] = 10,
+    as_json: Annotated[bool, typer.Option("--json/--no-json")] = True,
+) -> None:
+    """`memory.search(query, k)` (thin dispatch, DESIGN §11)."""
+    results = _guard_not_implemented(memory.search, query, k)
+    typer.echo(json.dumps(results) if as_json else str(results))
+
+
+@wiki_app.command("add")
+def wiki_add(
+    title: Annotated[str, typer.Option(help="Note title (slugified for the filename).")],
+    body: Annotated[str, typer.Option(help="Note body markdown.")],
+    status: Annotated[
+        str, typer.Option(help="candidate|simulating|rejected|adopted.")
+    ] = "candidate",
+    salience: Annotated[int, typer.Option(help="1 (low) .. 5 (high).")] = 1,
+    provenance: Annotated[str, typer.Option(help="Where this note came from.")] = "",
+) -> None:
+    """`memory._wiki.add_note` — writes a front-matter file under
+    `PolicyDials.load().wiki_dir` (thin dispatch, DESIGN §11)."""
+    from tradekit.memory import _wiki
+    from tradekit.policy._dials import PolicyDials
+
+    dials = PolicyDials.load()
+    try:
+        path = _wiki.add_note(
+            dials.wiki_dir, title, body, status=status, salience=salience, provenance=provenance
+        )
+    except (_wiki.InvalidWikiStatus, ValueError) as exc:
+        typer.echo(f"invalid wiki note: {exc}")
+        raise typer.Exit(code=1) from exc
+    typer.echo(str(path))
+
+
+@report_app.command("memo")
+def report_memo(thesis_id: str) -> None:
+    """`report.daily_memo(thesis_id)` (thin dispatch, DESIGN §12.3)."""
+    typer.echo(_guard_not_implemented(report.daily_memo, thesis_id))
+
+
+@report_app.command("readiness")
+def report_readiness() -> None:
+    """`report.readiness_report()` (thin dispatch, DESIGN §12.3)."""
+    typer.echo(_guard_not_implemented(report.readiness_report))
+
+
+@report_app.command("pnl")
+def report_pnl(account_ref: str) -> None:
+    """`report.pnl_snapshot(account_ref)` (thin dispatch, DESIGN §12.3)."""
+    typer.echo(_guard_not_implemented(report.pnl_snapshot, account_ref))
 
 
 if __name__ == "__main__":

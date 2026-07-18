@@ -103,6 +103,8 @@ module = [
     "tradekit.policy.*",
     "tradekit.broker.*",
     "tradekit.review.*",
+    "tradekit.memory.*",
+    "tradekit.report.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

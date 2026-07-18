@@ -236,4 +236,31 @@ def series_stats(
     )
 
 
-__all__ = ["SeriesStats", "series_index", "series_stats", "window_for"]
+def maybe_close_series(
+    ledger: Ledger, account_ref: str, series_idx: int, dials: PolicyDials, now: datetime
+) -> str | None:
+    """SPRINT P3 batch E (sprint-doc addendum): `SeriesClosed` EMISSION +
+    idempotence. Unconditional `NotImplementedError` stub this batch — NOT
+    called from `policy.promotion_status()` yet (that real, already-green
+    verb is deliberately left untouched by this batch's red phase, so the
+    pre-existing promotion/series test suites stay green; wiring this
+    helper INTO `promotion_status()`'s call graph is the dev pass's job,
+    together with whatever `promotion_status()` test updates that wiring
+    requires — flagged in tests/ASSUMPTIONS.md round-21, not silently
+    assumed here).
+
+    DESIGN PIN (CTO addendum, binding on the dev pass): if
+    `series_stats(ledger, account_ref, series_idx, dials, now).complete` is
+    True AND no `SeriesClosed` event already exists for THIS exact
+    `(account_ref, series_index)` pair, append exactly one `SeriesClosed`
+    (`contracts.SeriesClosedPayload`, fields mirroring the `SeriesStats`
+    the check itself just computed) and return the new event_id. A window
+    that is not yet complete, OR one that already has a `SeriesClosed`
+    event, is a no-op that returns `None` (idempotence: a second call for
+    the same closed window never appends a duplicate)."""
+    raise NotImplementedError(
+        "SPRINT P3 batch E — policy._series.maybe_close_series (SeriesClosed emission)"
+    )
+
+
+__all__ = ["SeriesStats", "maybe_close_series", "series_index", "series_stats", "window_for"]

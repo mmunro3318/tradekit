@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from tradekit.contracts import ChainReport, Event, EventFilter
-from tradekit.ledger import _db, _hash, _projections
+from tradekit.ledger import _db, _hash, _models, _projections
 
 
 class Ledger:
@@ -148,6 +148,14 @@ class Ledger:
                 _projections.rebuild(con, events)
 
         _db.with_write_retry(_apply)
+
+    @property
+    def models(self) -> _models.LedgerModels:
+        """Typed read-model accessors (DESIGN §4.2; SPRINT P3 batch E) —
+        constructed fresh each access (cheap; no cached state of its own,
+        mirrors `broker.get()`'s own "cheap routing/construction" status),
+        bound to THIS ledger instance's connection."""
+        return _models.LedgerModels(self)
 
     @contextlib.contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
