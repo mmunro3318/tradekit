@@ -2514,3 +2514,10 @@ proven red against the pre-fix code, then green).
 
     **CTO ratification pending** -- entries 138-141 flagged this session
     (P3 review fix pass), not yet reviewed.
+
+    **CTO ratification (2026-07-18 UTC) — round-22 (138-141): ALL
+    RATIFIED as implemented.** The halt-gate on resting fills preserves
+    ledger determinism (fills are recorded events; replay reproduces the
+    log, not the poll timing). Token thesis-binding fails closed on
+    legacy None. Phantom-ledger-fill reconcile direction closes the §15
+    asymmetry ahead of P4. Streaming subprocess caps deferred to P4.
