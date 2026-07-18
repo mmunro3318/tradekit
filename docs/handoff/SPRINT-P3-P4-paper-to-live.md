@@ -112,6 +112,64 @@ for broker/ too — add to the pyproject override).
 - broker/ layout: __init__ verbs exactly per §4.2 (get, execute_order,
   reconcile, record_manual_fill) + internals _pipeline.py/_paper.py/
   _manual.py/_alpaca.py (alpaca adapter = P4, stub now).
+
+## Addendum 2 — CTO pins for P4-PAPER scope (2026-07-18, Mike: "P4, paper only")
+
+Live keys/rotations remain Mike-blocked; everything below is executable now.
+
+### P4-paper batch A: AlpacaBroker (dress-rehearsal adapter)
+
+- `src/tradekit/broker/_alpaca.py`: `AlpacaBroker` implements BrokerPort
+  against the TRADING API. Base URLs: paper `https://paper-api.alpaca.markets/v2`
+  / live `https://api.alpaca.markets/v2`. Routing: `alpaca-paper:*` →
+  paper base + env ALPACA_API_KEY_ID/SECRET (lazy, per the data provider's
+  pattern); `live:alpaca` → live base but FAIL-CLOSED: requires dial
+  `live_trading_enabled` (default false) AND env ALPACA_LIVE_KEY_ID/SECRET,
+  else typed `LiveTradingDisabled` — this replaces the TEMPORARY
+  live:→PaperBroker routing and lands the round-19 pinned test (live: never
+  resolves to PaperBroker again).
+- **Fixtures mirror REALITY, pre-captured by the CTO** (2026-07-18 probe,
+  scratchpad `alpaca_real_shapes.json`; a $10 BTC/USD paper order ran the
+  full lifecycle): order POST → `status: "pending_new"` with the full
+  36-key order object; GET → `filled`, `filled_qty`/`filled_avg_price` as
+  STRINGS; fills via `GET /v2/account/activities?activity_types=FILL`
+  (string decimals, `transaction_time` ISO-Z, order_id linkage, NO fee
+  fields on crypto paper fills). Embed the captured JSONs in the respx
+  fixtures with a capture-date comment. fees_usd at FillRecorded time comes
+  from `tradekit.costs` (Alpaca paper reports no per-fill crypto fee —
+  document as provisional, ASSUMPTIONS-26 spirit).
+- Token verification: extract the ledger check into a SHARED
+  `broker/_tokens.py` used by PaperBroker AND AlpacaBroker (one
+  implementation), and CLOSE THE SUBMIT-TIME HALT SEAM while at it: the
+  shared verifier also refuses (BrokerTokenRequired, reason "halted") when
+  an unresolved HaltSet exists — a halt landing between verdict and submit
+  now blocks at every adapter.
+- Status mapping: alpaca `new/pending_new/accepted/partially_filled` →
+  "open"; `filled` → "filled"; `canceled/expired/rejected/...` →
+  "rejected"/"cancelled" per our OrderStatus vocabulary (read it; pin the
+  table in the docstring). Partial fills: MVP records fills from activities
+  as they appear (cum_qty tracked); no synthetic completion.
+- Conformance: the SAME tests/contract suite gains an "alpaca-paper" case
+  driven entirely by respx fixtures (zero network in tests). scripts/
+  smoke_alpaca_paper.py = the Mike-runnable live rehearsal (CTO's probe
+  already validated the path; script re-runs it printing lifecycle stages).
+- reconcile works unchanged over AlpacaBroker.fills() (activities-derived).
+
+### P4-paper batch B: seam hardening (review-round-6 process note)
+
+- Ring-3 seam scenarios (tests/replay/test_p4_seams.py): submit-time halt
+  (halt after verdict, before submit → adapter refuses); advisory
+  reconcile × phantom fill; token × demotion window (document: re-evaluation
+  at execute_order + no-newer-deny bound it; scenario asserts a post-
+  demotion execute_order re-evaluates and denies via R-002).
+- **No-auto-resume on the live path, structurally**: HaltSetPayload gains
+  `live_path: bool = False`; reconcile sets it true when the account_ref is
+  live-prefixed; `policy.resume()` REFUSES live_path halts unless called
+  with `confirm_live=True` (CLI: `tk policy resume --live-confirm`, the
+  Mike-manual step). Pinned by tests.
+- Streaming subprocess caps (round-22 LOW): Popen incremental read with a
+  running byte budget + kill on breach; the tmp-stub-executable test gains
+  an oversized-flood case proving the process is killed early.
 - VerdictToken: policy.evaluate's allow Verdict carries a token =
   sha256(verdict_id + policy hash); broker.submit validates token against
   the ledgered VerdictIssued event (existence + thesis match + no newer
