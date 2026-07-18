@@ -63,7 +63,16 @@ class OrderRequest(FrozenModel):
 
 class OrderAck(FrozenModel):
     order_id: str
-    status: Literal["accepted", "rejected"]
+    # "accepted"/"rejected" — PaperBroker/ManualBroker's own submission-ack
+    # vocabulary (§8.3/§8.4, unchanged). "open"/"filled"/"canceled" —
+    # AlpacaBroker's ADDITIVE widening (SPRINT P4-PAPER batch A/B): its own
+    # `submit()` echoes the venue's OWN order status (via ALPACA_STATUS_MAP,
+    # `broker._alpaca`) rather than a fixed "accepted" literal, since the
+    # POST /v2/orders response already carries a real, venue-observed
+    # lifecycle status (e.g. "pending_new" -> our "open") that would
+    # otherwise be silently discarded. Additive, backward compatible — every
+    # existing "accepted"/"rejected" producer/consumer is unaffected.
+    status: Literal["accepted", "open", "filled", "canceled", "rejected"]
     ts_utc: AwareDatetime
     venue_order_id: str | None = None
 

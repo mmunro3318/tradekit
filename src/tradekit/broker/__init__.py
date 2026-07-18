@@ -75,12 +75,10 @@ def get(account_ref: str) -> BrokerPort:
     """`"paper:*"` -> `PaperBroker` (SPRINT P3 batch B, real).
 
     `"alpaca-paper:*"` -> `AlpacaBroker` bound to Alpaca's PAPER trading
-    base URL + the paper env key names (SPRINT P4-PAPER batch A, addendum
-    2) -- the dress-rehearsal adapter; every METHOD on it is still a
-    `NotImplementedError` stub this batch (`_alpaca.py`'s own module
-    docstring), so calling any of them still fails red until the batch-B
-    dev pass lands the real bodies -- same "declarative routing is real,
-    methods stay red" split `ManualBroker` went through in SPRINT P3
+    base URL + the paper env key names (SPRINT P4-PAPER, addendum 2) -- the
+    dress-rehearsal adapter; every method on it is real (`_alpaca.py`'s own
+    module docstring) -- same "declarative routing is real, methods land
+    with the dev pass" split `ManualBroker` went through in SPRINT P3
     batch D.
 
     `"live:*"` -> the FAIL-CLOSED live-venue gate (SPRINT P4-PAPER batch A,
@@ -126,11 +124,10 @@ def get(account_ref: str) -> BrokerPort:
             secret_env=ALPACA_LIVE_SECRET_ENV,
         )
     if account_ref.startswith("advisory:"):
-        # SPRINT P3 batch D: ManualBroker is instantiable now (declarative
-        # resolution, same "cheap" status as PaperBroker's own routing) --
-        # every METHOD on it is still a NotImplementedError stub this batch
-        # (see _manual.py's module docstring), so calling any of them still
-        # fails red until the dev pass lands the real bodies.
+        # SPRINT P3 batch D: ManualBroker is real -- every method on it is a
+        # real implementation now (see _manual.py's module docstring), not
+        # a NotImplementedError stub (that split ended with batch D's own
+        # dev pass; this comment was stale, SPRINT P4-PAPER batch A cleanup).
         return ManualBroker(account_ref=account_ref)
     raise NotImplementedError(
         f"tradekit.broker.get({account_ref!r}): no adapter resolves this account_ref prefix"

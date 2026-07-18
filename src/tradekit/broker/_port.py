@@ -28,6 +28,7 @@ from tradekit.contracts import (
     Position,
     VerdictToken,
 )
+from tradekit.mae._data.errors import ProviderRequestError
 
 
 class BrokerTokenRequired(Exception):
@@ -64,6 +65,40 @@ class LiveTradingDisabled(Exception):
     `"live:"` never again resolves to `PaperBroker` (the round-19 pin,
     re-pointed this batch). Canonical home alongside `BrokerTokenRequired`/
     `NoQuoteAvailable`/`AdvisoryOnly` for the same identity-match reason."""
+
+
+class BrokerCredentialsMissing(ProviderRequestError):
+    """Raised by EVERY `AlpacaBroker` method (SPRINT P4-PAPER, round-23 CTO
+    ratification + adjudication addendum: no-creds is loud everywhere,
+    never a fabricated default -- a $0 `account()` or an empty `fills()`
+    returned when the venue was never asked is exactly the fabrication
+    class ASSUMPTIONS 71 exists to kill) when this account's own
+    `key_id_env`/`secret_env` environment variables are absent -- the
+    pre-HTTP credential guard (mirrors `mae._data.alpaca_data.
+    AlpacaDataProvider.get_bars`'s "fail before the request" pattern,
+    ASSUMPTIONS 35); in `submit()` it is checked AFTER token verification
+    (§8.2/§15 -- an unauthorized caller with no allow-verdict is refused on
+    THAT grounds first, never leaking "which env var is missing") but
+    BEFORE any HTTP call. Canonical home in `broker._port`
+    alongside `BrokerTokenRequired`/`AdvisoryOnly`/`LiveTradingDisabled`/
+    `NoQuoteAvailable`, for the same identity-match reason -- a `broker`-
+    native named type per round-23's ratification ("broker-local typed
+    `BrokerCredentialsMissing` in _port.py, never import mae._data.errors
+    across the module boundary" for `_alpaca.py` itself), rather than
+    reusing `mae._data.errors.ProviderRequestError` bare.
+
+    Subclasses `ProviderRequestError` -- a deliberate, documented exception
+    to the ratification's "never import mae._data.errors" wording (this ONE
+    declaration, here in `_port.py`, is the only place `broker` touches that
+    module): `tests/unit/broker/test_alpaca_broker.py::
+    test_submit_refuses_before_any_http_call_when_env_keys_are_absent` (a
+    FROZEN, pre-existing test, written before the round-23 ratification
+    landed) asserts `pytest.raises(ProviderRequestError)` verbatim, and a
+    sibling, unrelated exception type would silently fail to match it by
+    class identity. Subclassing is the only way to satisfy BOTH that frozen
+    assertion AND the ratification's "broker-native named type" intent at
+    once -- flagged here, not silently resolved, per the dev-pass's own
+    "stop and flag anything not resolvable within scope" rule."""
 
 
 class NoQuoteAvailable(Exception):
@@ -103,6 +138,7 @@ class BrokerPort(Protocol):
 
 __all__ = [
     "AdvisoryOnly",
+    "BrokerCredentialsMissing",
     "BrokerPort",
     "BrokerTokenRequired",
     "LiveTradingDisabled",

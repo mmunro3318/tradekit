@@ -398,7 +398,9 @@ class OrderAckPayload(StrictFrozenModel):
 
     order_id: str
     thesis_id: str
-    status: Literal["accepted", "rejected"]
+    # Additive widening (SPRINT P4-PAPER batch A/B) — mirrors
+    # `contracts.OrderAck.status`'s own widening; see that field's comment.
+    status: Literal["accepted", "open", "filled", "canceled", "rejected"]
     ts_utc: AwareDatetime
     venue_order_id: str | None = None
 

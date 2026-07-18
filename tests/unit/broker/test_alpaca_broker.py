@@ -44,6 +44,7 @@ from tradekit.broker._port import BrokerTokenRequired
 from tradekit.contracts import (
     AssetRef,
     Event,
+    EventFilter,
     HaltSetPayload,
     OrderRequest,
     VerdictIssuedPayload,
@@ -348,18 +349,28 @@ def test_fills_returns_typed_list_ascending_from_activities(respx_mock: object) 
     assert fills[0].qty == Decimal("0.000153355")
 
 
-def test_reconcile_over_alpaca_broker_fixtures_vs_seeded_ledger_both_directions() -> None:
+def test_reconcile_over_alpaca_broker_fixtures_vs_seeded_ledger_both_directions(
+    respx_mock: object,
+) -> None:
     """Deliverable pin: `reconcile` must run UNCHANGED over `AlpacaBroker`
     (module docstring's "reconcile() compatibility" note) — this seeds a
     ledger `FillRecorded` matching `ACTIVITIES_FIXTURE`'s own
     `(order_id, ts_utc, qty)` triple and calls `broker.reconcile(account_
     ref)`, which resolves the adapter via `broker.get()` and calls `adapter.
-    fills(...)` internally. Currently RED: `AlpacaBroker.fills` is a
-    `NotImplementedError` stub, so `reconcile` itself blows up before it can
-    compare either direction (forward: broker-fill-not-on-ledger: MED-3
-    reverse: ledger-fill-not-on-broker) — both directions are therefore
-    exercised by ONE red test this batch, per the deliverable's own
-    phrasing ("both directions")."""
+    fills(...)` internally over a respx route returning the captured
+    activities fixture (dev-pass fix, round-23 adjudication authorization:
+    "registering the missing /account/activities respx route — fixture
+    mechanism only"). The formerly-red `pytest.raises(NotImplementedError)`
+    wrapper is gone with the stub it wrapped; what it always pinned — BOTH
+    reconcile directions running over this adapter (forward:
+    broker-fill-not-on-ledger, MED-3 reverse: ledger-fill-not-on-broker) —
+    is now asserted directly: the seeded ledger fill and the fixture's
+    broker fill match on the exact triple in BOTH directions, so the run
+    records `ReconciliationRun(result="ok")` with zero mismatches and NO
+    auto-halt (a mismatch in EITHER direction would flip result to
+    "mismatch" and append `HaltSet` — `_pipeline.reconcile`'s own pinned
+    behavior, already conformance-tested against fakes in
+    test_reconcile.py; this test's job is the AlpacaBroker wiring)."""
     from tradekit import broker as _broker
     from tradekit.contracts import FillRecordedPayload
 
@@ -389,8 +400,27 @@ def test_reconcile_over_alpaca_broker_fixtures_vs_seeded_ledger_both_directions(
         )
     )
 
-    with pytest.raises(NotImplementedError):
-        _broker.reconcile(account_ref)
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account/activities").mock(
+        return_value=httpx.Response(200, json=ACTIVITIES_FIXTURE)
+    )
+
+    _broker.reconcile(account_ref)
+
+    runs = [
+        e
+        for e in default_ledger().query(EventFilter(types=["ReconciliationRun"]))
+        if e.payload.get("account_ref") == account_ref
+    ]
+    assert len(runs) == 1
+    assert runs[0].payload["result"] == "ok", (
+        "the seeded ledger fill and the fixture's broker fill match on the exact "
+        "(order_id, ts_utc, qty) triple in BOTH directions — any mismatch here means "
+        "AlpacaBroker.fills() is not producing reconcile-comparable Fill shapes"
+    )
+    assert runs[0].payload["mismatches"] == []
+    assert list(default_ledger().query(EventFilter(types=["HaltSet"]))) == [], (
+        "a clean two-directional reconcile must never auto-halt"
+    )
 
 
 # ---------------------------------------------------------------------------

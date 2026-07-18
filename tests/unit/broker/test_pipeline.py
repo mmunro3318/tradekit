@@ -29,9 +29,11 @@ against them, rather than transcribing a hand-computed ATR/Kelly number.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import httpx
 import pytest
 from ulid import ULID
 
@@ -307,7 +309,7 @@ def test_execute_order_refuses_a_thesis_not_in_approved_state(
 
 
 def test_execute_order_r011_denies_the_fourth_live_trade_after_three_confirmed_fills(
-    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event, respx_mock
 ) -> None:
     """FLAGGED (ASSUMPTIONS round-18): this test exercises the FULL
     live-tier wiring end-to-end (policy._context.assemble's account_tier +
@@ -317,19 +319,44 @@ def test_execute_order_r011_denies_the_fourth_live_trade_after_three_confirmed_f
     P3 batch C's temporary `"live:"` -> `PaperBroker` routing (ASSUMPTIONS
     round-18) as its fill simulator.
 
-    RE-RED this batch (SPRINT P4-PAPER batch A, addendum 2, ASSUMPTIONS
-    round-23): that temporary routing is GONE — `"live:"` now hits the
-    fail-closed `LiveTradingDisabled` gate (`broker.get`'s new routing
-    table) before `execute_order` ever reaches a fillable adapter, since
-    neither the `live_trading_enabled` dial nor the live env keys are set
-    in this test. This is EXPECTED and ACCOUNTED (not a regression this
-    batch introduced silently) — R-011's own live-sequence-decrement
-    semantics have no real fillable "live:" adapter to exercise
-    end-to-end until SPRINT P4-PAPER batch B lands `AlpacaBroker`'s real
-    body; re-wiring this test (dial+live-keys monkeypatch + respx
-    fixtures matching `test_alpaca_broker.py`'s captured shapes) is batch
-    B/C scope, flagged here rather than silently left green-but-lying via
-    a bypass."""
+    RE-WIRED this batch (SPRINT P4-PAPER batch A/B, addendum 2, ASSUMPTIONS
+    round-23 — PRE-AUTHORIZED re-wire, the ONE test edit this dev pass is
+    allowed beyond `_alpaca.py`/`_port.py`/`broker/__init__.py`): that
+    temporary routing is GONE — `"live:"` now hits the fail-closed
+    `LiveTradingDisabled` gate unless BOTH `PolicyDials.live_trading_enabled`
+    is true AND `ALPACA_LIVE_KEY_ID`/`ALPACA_LIVE_SECRET` are present, in
+    which case it resolves to a real `AlpacaBroker` bound to the LIVE base
+    URL. This test now supplies exactly that (`PolicyDials.load`
+    monkeypatched to return `live_trading_enabled=True`, fake live env keys)
+    plus respx routes standing in for Alpaca's trading API — a `POST
+    {LIVE_BASE}/orders` route that mints a fresh order id per call (fixture
+    shape mirrors `test_alpaca_broker.py`'s own `ORDER_SUBMIT_FIXTURE`), and
+    a `GET {LIVE_BASE}/orders/{id}` route that reports that same order
+    "filled" (mirrors `ORDER_GET_FILLED_FIXTURE`) — so `execute_order`'s
+    single-poll step observes a real fill and activates each thesis, driving
+    the SAME live-sequence-decrement/R-011 semantics this test has always
+    pinned, now through the real dress-rehearsal adapter instead of
+    `PaperBroker` standing in for it.
+
+    ASSERTIONS otherwise UNCHANGED, with ONE documented, necessary
+    exception: `ack.status == "accepted"` -> `ack.status == "open"`.
+    `AlpacaBroker.submit()`'s returned `OrderAck.status` echoes Alpaca's own
+    venue-observed order status via `ALPACA_STATUS_MAP` (a FROZEN,
+    unmodifiable pin — `test_alpaca_broker.py::
+    test_submit_posts_orders_and_returns_typed_ack` asserts `ack.status ==
+    "open"` for the identical code path) rather than the fixed `"accepted"`
+    literal `PaperBroker.submit` always returns; `ALPACA_STATUS_MAP`'s
+    output vocabulary never contains `"accepted"` at all, so the original
+    literal is structurally unreachable once this test exercises the real
+    adapter. The rule-catalog/PipelineDenied/R-011 assertions — this test's
+    actual subject matter — are byte-for-byte unchanged."""
+    from tradekit.broker._alpaca import (
+        ALPACA_LIVE_BASE_URL,
+        ALPACA_LIVE_KEY_ID_ENV,
+        ALPACA_LIVE_SECRET_ENV,
+    )
+    from tradekit.policy._dials import PolicyDials
+
     account_ref = "live:r011-boundary"
     default_ledger().append(
         make_event(
@@ -356,9 +383,55 @@ def test_execute_order_r011_denies_the_fourth_live_trade_after_three_confirmed_f
         for _ in range(4)
     ]
 
+    # Fail-closed conjunction (round-23): both the dial AND the live env
+    # keys must be present before "live:" resolves to a real AlpacaBroker.
+    monkeypatch.setenv(ALPACA_LIVE_KEY_ID_ENV, "AKFAKELIVE00000000000")
+    monkeypatch.setenv(ALPACA_LIVE_SECRET_ENV, "fakeLiveSecretXYZ")
+    monkeypatch.setattr(
+        PolicyDials, "load", classmethod(lambda cls: PolicyDials(live_trading_enabled=True))
+    )
+
+    _next_order_id = iter(f"r011-order-{i}" for i in range(1, 5))
+
+    def _submit_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": next(_next_order_id),
+                "status": "pending_new",
+                "submitted_at": "2026-01-25T00:00:00.000000000Z",
+                "filled_qty": "0",
+                "filled_avg_price": None,
+                "symbol": "BTC/USD",
+                "side": "buy",
+                "qty": "0.25",
+            },
+        )
+
+    def _status_response(request: httpx.Request) -> httpx.Response:
+        order_id = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            json={
+                "id": order_id,
+                "status": "filled",
+                "filled_qty": "0.25",
+                "filled_avg_price": "100",
+                "filled_at": "2026-01-25T00:00:01.000000000Z",
+                "symbol": "BTC/USD",
+                "side": "buy",
+                "qty": "0.25",
+            },
+        )
+
+    respx_mock.post(f"{ALPACA_LIVE_BASE_URL}/orders").mock(side_effect=_submit_response)
+    respx_mock.get(url__regex=rf"{re.escape(ALPACA_LIVE_BASE_URL)}/orders/.+").mock(
+        side_effect=_status_response
+    )
+
     for thesis_id in thesis_ids[:3]:
         ack = broker.execute_order(thesis_id)
-        assert ack.status == "accepted"
+        assert ack.status == "open"  # see docstring's "ASSERTIONS otherwise UNCHANGED" note
 
     with pytest.raises(PipelineDenied) as excinfo:
         broker.execute_order(thesis_ids[3])

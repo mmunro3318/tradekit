@@ -2648,3 +2648,55 @@ proven red against the pre-fix code, then green).
     replacing the removed temporary routing) is PRE-AUTHORIZED for the dev
     pass — fixture mechanism only, assertions unchanged. Stale advisory
     comment in broker/__init__: dev pass fixes.
+
+    **CTO adjudication addendum (2026-07-18, dev-pass round) — round-23
+    follow-ups, all implemented:**
+    - **Accepted as implemented:** the additive `OrderAck.status`/
+      `OrderAckPayload.status` Literal widening ("accepted" | "open" |
+      "filled" | "canceled" | "rejected" — AlpacaBroker's submit echoes the
+      mapped venue status instead of a fixed "accepted");
+      `BrokerCredentialsMissing` SUBCLASSING `mae._data.errors.
+      ProviderRequestError` with the one cross-boundary import confined to
+      `_port.py` (the frozen `test_submit_refuses_before_any_http_call_
+      when_env_keys_are_absent` asserts `pytest.raises(
+      ProviderRequestError)` by class identity — subclassing is the only
+      way to satisfy both that frozen assertion and the "broker-native
+      named type" ratification at once); the R-011 rewire including its one
+      unreachable-literal assertion fix (`ack.status == "accepted"` ->
+      `"open"` — ALPACA_STATUS_MAP's output vocabulary never contains
+      "accepted"); the broker/__init__ staleness cleanups.
+    - **REJECTED: read-verb graceful degradation on missing credentials.**
+      The dev pass initially had `account()`/`positions()`/`order_status()`/
+      `fills()` return zero balances / `[]` / `"rejected"` when env keys
+      were absent (to survive the generic conformance cases, which supplied
+      no per-adapter environment). Adjudicated as FABRICATED DATA — the
+      exact class ASSUMPTIONS 71/`NoQuoteAvailable` exist to kill (a $0
+      account reads as a real broke account; an empty fills list reads as
+      "reconciled clean"). **Pinned rule: no-creds is LOUD on every
+      method** — all five `AlpacaBroker` methods raise
+      `BrokerCredentialsMissing` before any HTTP call when either env var
+      is absent; there is no graceful-degrade path anywhere on this
+      adapter.
+    - **Pinned rule: conformance builders own their environmental setup.**
+      The thing that forced degradation was a HARNESS limitation, so the
+      harness was fixed (authorized test edit): `tests/contract/
+      test_broker_port.py`'s CASE_BUILDERS now take `(monkeypatch,
+      respx_mock)` (same convention as `test_marketdata_port.py`'s
+      builders); the "alpaca-paper" builder seeds monkeypatched env keys
+      and registers respx routes so the adapter runs its honest code path
+      offline, exactly like a real venue session. Order-lifecycle +
+      activities routes read `docs/research/alpaca-paper-shapes-2026-07-18.
+      json` (the capture source-of-truth) directly; the `/account`,
+      `/positions`, and order-not-found (HTTP 404, `{"code": 40410000,
+      ...}`) shapes are NOT in the capture and are flagged in the builder's
+      docstring as Alpaca-DOCUMENTED rather than CTO-captured. Suite-body
+      assertions untouched.
+    - **AUTHORIZED and applied:**
+      `test_reconcile_over_alpaca_broker_fixtures_vs_seeded_ledger_both_
+      directions` registers the previously-missing `/account/activities`
+      respx route (the real `fills()` implementation had exposed the test's
+      reliance on the stub's `NotImplementedError`); the stub-era
+      `pytest.raises(NotImplementedError)` wrapper is replaced by direct
+      assertions of what it always pinned — both reconcile directions run
+      over the real adapter, the seeded-vs-fixture triples match, result
+      is "ok" with zero mismatches, no auto-halt.

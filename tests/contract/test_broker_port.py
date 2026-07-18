@@ -35,11 +35,19 @@ prescribes the dev pass's real behavior).
 
 SPRINT P4-PAPER batch A adds the "alpaca-paper" case (`_build_alpaca_
 paper_case`, TD-18's "one factory entry" property — the ONLY change this
-suite itself needs for a new adapter). `AlpacaBroker`'s five methods are
-`NotImplementedError` stubs this batch (`src/tradekit/broker/_alpaca.py`'s
-own module docstring — batch B lands the real bodies), so every "alpaca-
-paper" case below is expected RED this batch, same status "paper" cases
-had in SPRINT P3 batch A before PaperBroker's own dev pass landed.
+suite itself needs for a new adapter). Dev-pass update (round-23
+adjudication addendum, PRE-AUTHORIZED test edit: "conformance builders own
+their environmental setup"): `AlpacaBroker`'s five methods are REAL now and
+every one of them raises `BrokerCredentialsMissing` without credentials
+(no-creds is loud everywhere — never a fabricated zero-balance/empty-list
+default), so the "alpaca-paper" builder seeds monkeypatched env keys AND
+registers respx routes mirroring the CTO-captured shapes
+(docs/research/alpaca-paper-shapes-2026-07-18.json, same fixtures
+`tests/unit/broker/test_alpaca_broker.py` embeds) — the adapter then runs
+its honest code path offline, exactly like a real venue session. Builders
+therefore take `(monkeypatch, respx_mock)` (mirroring
+`test_marketdata_port.py`'s own builder signature); the suite BODIES —
+the actual conformance assertions — are untouched.
 """
 
 from __future__ import annotations
@@ -50,6 +58,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import httpx
 import pytest
 
 from tradekit.broker._paper import PaperBroker
@@ -66,7 +75,9 @@ class Case:
     factory: Callable[[], BrokerPort]
 
 
-def _build_paper_case() -> BrokerPort:
+def _build_paper_case(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: Any
+) -> BrokerPort:
     """SPRINT P3 batch B's first real `CASE_BUILDERS` entry: seeds a fresh
     `AccountCreated` on the (per-test, `TK_DATA_DIR`-isolated, autouse
     fixture) default ledger via the already-real `broker.create_paper_account`
@@ -74,7 +85,13 @@ def _build_paper_case() -> BrokerPort:
     `account_ref` — "a fresh instance per test", per `Case`'s own docstring.
     A fresh `account_ref` per call (ULID suffix) avoids
     `AccountAlreadyExists` across the multiple cases pytest builds from this
-    one factory (one per parametrized test function)."""
+    one factory (one per parametrized test function). `monkeypatch`/
+    `respx_mock` are unused here (a paper account is a pure ledger
+    projection, no env/HTTP surface) — the shared builder signature exists
+    for `_build_alpaca_paper_case`, which owns real environmental setup
+    (round-23 adjudication addendum), mirroring `test_marketdata_port.py`'s
+    own per-builder-fixture convention."""
+    del monkeypatch, respx_mock  # signature parity only — see docstring
     from ulid import ULID
 
     from tradekit import broker
@@ -91,15 +108,41 @@ def _build_paper_case() -> BrokerPort:
     return PaperBroker(account_ref=account_ref)
 
 
-def _build_alpaca_paper_case() -> BrokerPort:
-    """SPRINT P4-PAPER batch A's `CASE_BUILDERS` entry for the dress-
-    rehearsal adapter: a fresh `account_ref` per call (ULID suffix, same
-    "fresh instance per test" discipline as `_build_paper_case`), bound to
+def _build_alpaca_paper_case(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: Any
+) -> BrokerPort:
+    """SPRINT P4-PAPER's `CASE_BUILDERS` entry for the dress-rehearsal
+    adapter: a fresh `account_ref` per call (ULID suffix, same "fresh
+    instance per test" discipline as `_build_paper_case`), bound to
     Alpaca's PAPER base URL + the paper env key names. No `AccountCreated`
     seed needed here (unlike `PaperBroker`'s ledger-projection `account()`,
-    `AlpacaBroker`'s real body will read Alpaca's own `/account` endpoint,
-    not a ledger event) — irrelevant anyway this batch since every method
-    is a `NotImplementedError` stub."""
+    `AlpacaBroker` reads Alpaca's own endpoints — venue truth, round-23).
+
+    Environmental setup (round-23 adjudication addendum: "conformance
+    builders own their environmental setup" — the generic suite bodies must
+    stay adapter-agnostic and untouched): every `AlpacaBroker` method
+    raises `BrokerCredentialsMissing` without credentials (no-creds is loud
+    everywhere), so this builder seeds fake env keys (monkeypatched, same
+    literals as `test_alpaca_broker.py`'s autouse fixture) and registers
+    respx routes for the four endpoints the suite may touch, shaped off the
+    CTO-captured docs/research/alpaca-paper-shapes-2026-07-18.json
+    lifecycle — so the adapter runs its honest offline code path exactly
+    like a real venue session. The `submit` conformance case never reaches
+    HTTP at all (the bogus token refuses first) and respx's pytest fixture
+    does not require every registered route to be called, so unused routes
+    per individual test are fine. Shapes NOT in the capture (the 2026-07-18
+    probe covered the order lifecycle + activities only), flagged as
+    Alpaca-DOCUMENTED rather than CTO-captured: (a) `/account` and
+    `/positions` bodies (string-decimal money fields, Alpaca's own account/
+    positions object convention — the same string discipline the captured
+    lifecycle shows for `filled_qty`/`filled_avg_price`); (b) the
+    unknown-order GET: Alpaca's documented order-not-found error body
+    (`{"code": 40410000, "message": ...}`, HTTP 404) — `order_status` maps
+    any unrecognized/absent status to `"rejected"` (fail closed,
+    ALPACA_STATUS_MAP's own catch-all rule)."""
+    import json
+    from pathlib import Path
+
     from ulid import ULID
 
     from tradekit.broker._alpaca import (
@@ -107,6 +150,49 @@ def _build_alpaca_paper_case() -> BrokerPort:
         ALPACA_PAPER_KEY_ID_ENV,
         ALPACA_PAPER_SECRET_ENV,
         AlpacaBroker,
+    )
+
+    # Fixture provenance: read the CTO-captured shapes from their SOURCE OF
+    # TRUTH file directly (tests/ is not an importable package, so
+    # test_alpaca_broker.py's embedded copies can't be imported here — and
+    # reading the capture itself is strictly more honest anyway).
+    shapes_path = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "research"
+        / "alpaca-paper-shapes-2026-07-18.json"
+    )
+    shapes = json.loads(shapes_path.read_text(encoding="utf-8"))
+    order_get_fixture = shapes["order_get"]
+    activities_fixture = shapes["activities"]
+
+    monkeypatch.setenv(ALPACA_PAPER_KEY_ID_ENV, "AKFAKE00000000000000")
+    monkeypatch.setenv(ALPACA_PAPER_SECRET_ENV, "fakeSecretValueXYZ")
+
+    # /account and /positions shapes: the string-decimal field convention of
+    # Alpaca's account/positions objects (equity/cash/buying_power and
+    # qty/avg_entry_price arrive as STRINGS, same discipline the captured
+    # order lifecycle shows for filled_qty/filled_avg_price).
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account").mock(
+        return_value=httpx.Response(
+            200,
+            json={"equity": "500.00", "cash": "500.00", "buying_power": "500.00"},
+        )
+    )
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/positions").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account/activities").mock(
+        return_value=httpx.Response(200, json=activities_fixture)
+    )
+    order_id = order_get_fixture["id"]
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/{order_id}").mock(
+        return_value=httpx.Response(200, json=order_get_fixture)
+    )
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/order-does-not-exist").mock(
+        return_value=httpx.Response(
+            404, json={"code": 40410000, "message": "order not found"}
+        )
     )
 
     account_ref = f"alpaca-paper:conformance-suite-{ULID()}"
@@ -120,15 +206,21 @@ def _build_alpaca_paper_case() -> BrokerPort:
 
 # One entry per BrokerPort adapter this suite conforms — the ONLY place a
 # future adapter needs to be added (TD-18 "one factory entry" property).
-CASE_BUILDERS: dict[str, Callable[[], BrokerPort]] = {
+# Builders take (monkeypatch, respx_mock) — each owns its environmental
+# setup (round-23 adjudication addendum), same convention as
+# test_marketdata_port.py's CASE_BUILDERS.
+CASE_BUILDERS: dict[str, Callable[[pytest.MonkeyPatch, Any], BrokerPort]] = {
     "paper": _build_paper_case,
     "alpaca-paper": _build_alpaca_paper_case,
 }
 
 
 @pytest.fixture(params=list(CASE_BUILDERS), ids=list(CASE_BUILDERS))
-def case(request: pytest.FixtureRequest) -> Case:
-    return Case(id=request.param, factory=CASE_BUILDERS[request.param])
+def case(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, respx_mock: Any
+) -> Case:
+    builder = CASE_BUILDERS[request.param]
+    return Case(id=request.param, factory=lambda: builder(monkeypatch, respx_mock))
 
 
 def test_account_returns_account_state_with_decimal_fields(case: Case) -> None:
