@@ -3004,3 +3004,15 @@ barrier simulator), 2026-07-19
      (c) limit_price = last closed bar's close; bars must be real BarSeries
      fixtures in tests. (d) Any provider exception in the HUD bar fetch degrades
      to a failed data_integrity gate (grade wait), never escapes build_state.
+
+159. hud-orderbook T5 red (2026-07-19): (a) sizing seam RENAMED size_qty ->
+     `sizing_info(symbol, limit_price, equity_usd)` returning duck-typed
+     .qty/.stop_distance_usd/.r_multiple_target — ONE real mae.size_position
+     call powers both quantity and the ATR bracket (ratified; single seam,
+     no split). (b) `scan_setup(symbol)` seam returns an object with
+     .signal_tags: list[str]; default wraps the real scan_markets match for
+     the symbol (empty list when no match survives). (c) Gate-order test
+     asserts relative order of present gates only; a passing `sizing` row is
+     optional. (d) AC-4 golden superseded by AC-11 ATR-bracket golden
+     (stop 0.24900, 2R: SL 8.05100, TP 8.79800, pnl 5.90/-3.07, dist
+     6.00/-3.00) — CTO re-derived independently pre-freeze.
