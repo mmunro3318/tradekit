@@ -2,6 +2,23 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, day 3 cont.) — T5 real funnel wiring; tk hud LIVE
+
+- **T5 shipped** (red e8728f9 -> green 2c7c3c6 -> fix c15d6ba): sizing seam
+  -> sizing_info (one real mae.size_position call powers qty 8dp ROUND_DOWN
+  + ATR bracket SL=limit-stop, TP=limit+2R); scan_setup seam (real
+  scan_markets, macd_bullish+volume_spike 1.5, regime-gated); gate order
+  open-position -> data_integrity -> setup -> sizing -> policy_verdict;
+  CLI --equity required (never guess account equity). ASSUMPTIONS 159.
+- **Smoke-tested against live Kraken**: first run caught ProviderRangeError
+  (1h x 90d scan = 2160 bars > 720 OHLC cap) -> setup scan moved to 4h
+  (540 bars, doctrine-consistent); provider errors in scan/sizing now
+  degrade to failed gates per error map. Second run clean: LINK+ETH graded
+  wait (no confirmed setup right now — honest), placeholder rendered.
+- tk hud is now PRODUCTION-USABLE: `uv run tk hud --equity 5000` emits the
+  full advisory HUD. Remaining before first prop trade: thesis provenance
+  (tickets carry interim-thesis ids), sell-side emissions, review round.
+
 ## 2026-07-19 (Fable, day 3) — hud-orderbook shipped T1-T4 (design a85053c -> green fa0d3e4)
 
 - **Pivot executed**: post-UIA-grade-C, built the advisory HUD per handoff.
