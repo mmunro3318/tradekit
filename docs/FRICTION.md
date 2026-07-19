@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-07-19 — Kraken Desktop has no UIA accessibility tree (grade C) `uia,bridge,kraken`
+- **Symptom:** UIA probe sees only title-bar chrome; zero child HWNDs; no renderer process
+- **Cause:** KrakenDesktop.exe is a single-process custom GPU-rendered native app (not Electron/WebView2); no UIA provider for content
+- **Solution:** design U4 STOP triggered: UIA write path abandoned pre-build; pivot to vision-executor design round; probe artifact docs/research/uia-probe-kraken-2026-07-19.json documents evidence
+
 ## 2026-07-19 — test_import_guard reload dance leaves stale tradekit.bridge attr `test,imports`
 - **Symptom:** later same-session tests comparing exception identity via 'from tradekit import bridge' see corrupted classes
 - **Cause:** sys.modules reload/monkeypatch-undo in T2 import-guard test leaves parent package attribute stale

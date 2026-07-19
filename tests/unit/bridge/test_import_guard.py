@@ -44,12 +44,22 @@ class TestRealSessionGuard:
     """AC-10: constructing the REAL session (not fixture-injected) raises
     BridgeError with the install hint when the bridge group is absent."""
 
-    def test_real_session_raises_bridge_error(self) -> None:
+    def test_real_session_raises_bridge_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Simulate the bridge group being absent regardless of the live
+        # venv (T7 installed pywinauto for real, which made the original
+        # unconditional assertion environment-dependent): a None entry in
+        # sys.modules makes `import pywinauto` raise ImportError.
+        monkeypatch.setitem(sys.modules, "pywinauto", None)
         with pytest.raises(BridgeError):
             real_session()
 
-    def test_real_session_error_names_install_command(self) -> None:
+    def test_real_session_error_names_install_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Hint must name `uv sync --group bridge` verbatim per AC-10 so a
         user can copy-paste the fix directly from the error."""
+        monkeypatch.setitem(sys.modules, "pywinauto", None)
         with pytest.raises(BridgeError, match=r"uv sync --group bridge"):
             real_session()

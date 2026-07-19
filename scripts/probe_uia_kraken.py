@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -76,8 +77,38 @@ def main(argv: list[str] | None = None) -> int:
     lands with T7 against a live Kraken Desktop; this batch pins the pure
     helpers above (importable without a live app) and the argument surface
     (`--help` must work standalone on any machine, per T6's done criterion)."""
-    _parse_args(argv)
-    raise NotImplementedError("probe_uia_kraken.main: real attach lands with T7")
+    args = _parse_args(argv)
+    from tradekit.bridge._elementmap import grade_exposure, load_element_map
+    from tradekit.bridge._session import real_session
+
+    session = real_session()
+    root = session.root()
+    print("attached; dumping tree (Electron trees are large — patience)...")
+    tree = dump_tree(root)
+
+    grade = "ungraded"
+    if args.element_map:
+        element_map = load_element_map(args.element_map)
+        grade = grade_exposure(root, element_map)
+
+    out = args.out or (
+        "docs/research/uia-probe-kraken-"
+        + datetime.now(UTC).strftime("%Y-%m-%d")
+        + ".json"
+    )
+    artifact = {
+        "app_version": "unverified",
+        "captured_utc": datetime.now(UTC).isoformat(),
+        "exposure_grade": grade,
+        "tree": tree,
+    }
+    Path(out).write_text(json.dumps(artifact, indent=1), encoding="utf-8")
+
+    def _count(t: dict) -> int:
+        return 1 + sum(_count(c) for c in t.get("children", []))
+
+    print(f"nodes={_count(tree)} grade={grade} -> {out}")
+    return 0
 
 
 if __name__ == "__main__":
