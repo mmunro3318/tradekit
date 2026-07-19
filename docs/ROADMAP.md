@@ -185,9 +185,9 @@ docs/research/kraken-prop-report1-2026-07-19.md (venue mechanics).
 
 ### M5.3 Execution Bridge + advisory HUD — BRIDGE-UIA (design v2 4ad7d85; may interleave with M5.2)
 Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
-- [ ] T1: bridge contracts payloads
-- [ ] T2: bridge skeleton (errors/session/elementmap/grade/import guard)
-- [ ] T3: panel text parser
+- [X] T1: bridge contracts payloads
+- [X] T2: bridge skeleton (errors/session/elementmap/grade/import guard)
+- [X] T3: panel text parser
 - [ ] T4: read verbs over FakeUiaSession
 - [ ] T5: tk bridge snapshot CLI
 - [ ] T6: pywinauto session + probe script + dep group
