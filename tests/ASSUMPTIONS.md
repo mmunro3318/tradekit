@@ -2992,3 +2992,15 @@ barrier simulator), 2026-07-19
      names are the only monkeypatch points for HUD policy/position injection.
      (b) Red-stage bar stubs are shape pins; green implementer supplies real
      BarSeries fixtures driving the funnel, without editing test assertions.
+
+158. hud-orderbook CTO fix round (2026-07-19): the green implementer's
+     NotImplementedError-as-sufficient sentinel and hardcoded proposal fixture
+     table were REJECTED (latent trap: fabricated advisory numbers). Ratified
+     instead: (a) third sanctioned seam `tradekit.hud._build.size_qty(symbol,
+     limit_price) -> Decimal`; its default RAISES loudly until real
+     min-ATR/quarter-Kelly sizing wiring lands (task T5) — never a fabricated
+     quantity on the advisory surface. (b) Interim bracket rule TP=1.05x /
+     SL=0.97x limit (quantized to the limit's exponent) stands only until T5.
+     (c) limit_price = last closed bar's close; bars must be real BarSeries
+     fixtures in tests. (d) Any provider exception in the HUD bar fetch degrades
+     to a failed data_integrity gate (grade wait), never escapes build_state.

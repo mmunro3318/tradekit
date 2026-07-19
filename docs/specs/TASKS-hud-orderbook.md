@@ -32,3 +32,8 @@ contracts; T3 carries the risky unknowns — funnel wiring — so dispatch it
 first in the batch). T4 last (consumes T2+T3 via `hud/__init__`).
 
 Batch 1 = T1+T2+T3 (red together, green together); batch 2 = T4.
+
+### T5: wire real funnel into build_state (post-MVP gate for live use)
+satisfies: AC-4 (real derivation path; SPEC Unknowns "RESOLVED by reference")
+files: src/tradekit/hud/_build.py, tests/unit/hud/test_build_state.py
+done: size_qty default = real mae.size_position wiring; scan/regime/metric gates in report; tk-gate green

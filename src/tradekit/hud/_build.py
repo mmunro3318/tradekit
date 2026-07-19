@@ -28,28 +28,10 @@ _TIMEFRAME = "1h"
 _LOOKBACK_DAYS = 30
 _MIN_BARS = 20
 _FEE_RATE = Decimal("0.0004")  # 4 bps/side (ASSUMPTIONS 144)
+# Interim bracket rule (ASSUMPTIONS 158): TP/SL derived off the limit
+# price until real thesis/sizing funnel wiring lands (T5).
 _TP_MULT = Decimal("1.05")
 _SL_MULT = Decimal("0.97")
-
-# Fixed proposal fixture for symbols this batch's funnel drives to a
-# passing setup (LINK/USD is the AC-4 golden worked example). A symbol
-# absent from this table falls back to a generic derivation off its last
-# closed bar — real regime/metric-chain wiring is out of scope for this
-# batch (SPEC §Unknowns register: "existing sizing/thesis outputs...
-# RESOLVED by reference"; not yet rewired here).
-_PROPOSAL_FIXTURE: dict[str, tuple[Decimal, Decimal]] = {
-    "LINK/USD": (Decimal("8.30000"), Decimal("12")),
-}
-
-
-class _StubSufficient:
-    """Sentinel: the sanctioned `get_closed_bars` red-stage stub raised
-    `NotImplementedError` (ASSUMPTIONS 157b) — treated as "bars sufficient,
-    no live fixture wired yet", distinct from a real insufficient-data gap
-    (`None`) or a real `BarSeries`."""
-
-
-_STUB_SUFFICIENT = _StubSufficient()
 
 
 @dataclass(frozen=True)
@@ -103,42 +85,35 @@ def _default_open_position_symbols() -> set[str]:
     return symbols
 
 
-# Test seams (ASSUMPTIONS 157a). Tests monkeypatch these two module
+def _default_size_qty(symbol: str, limit_price: Decimal) -> Decimal:
+    """ASSUMPTIONS 158: real min-ATR/quarter-Kelly sizing wiring lands with
+    the funnel task (T5). Until then the default is LOUD — never a
+    fabricated quantity on an advisory surface Mike transcribes from."""
+    raise RuntimeError(
+        "hud sizing is not wired yet (ASSUMPTIONS 158 / task T5) — "
+        "size_qty must be provided before advisory tickets can be built"
+    )
+
+
+# Test seams (ASSUMPTIONS 157a/158). Tests monkeypatch these module
 # attributes directly; production code below calls them via this module's
 # own namespace so the seam takes effect.
 evaluate_policy = _default_evaluate_policy
 open_position_symbols = _default_open_position_symbols
+size_qty = _default_size_qty
 
 
-def _fetch_bars(symbol: str) -> BarSeries | _StubSufficient | None:
-    """`None` signals "insufficient/gap" (AC-6). `NotImplementedError` is
-    the sanctioned red-stage bar-stub shape pin (ASSUMPTIONS 157b) — caught
-    here and treated as "sufficient", since the stub exists to drive the
-    funnel without a live data source, not to express a real data gap. Any
-    other exception (e.g. a malformed `BarSeries` from a test fixture) is a
-    genuine data problem, not a bug to propagate (AC-6: no exception ever
-    escapes `build_state`). Returns ``_STUB_SUFFICIENT`` for the
-    `NotImplementedError` case since that stub signals "sufficient, no live
-    wiring yet" rather than a real data gap; `None` means insufficient."""
+def _fetch_bars(symbol: str) -> BarSeries | None:
+    """`None` signals "insufficient/gap" (AC-6): too few bars, or the
+    provider raised — either way the symbol degrades to a visible failed
+    `data_integrity` gate, never an escaping exception."""
     try:
         series = mae_runtime.get_closed_bars(symbol, _TIMEFRAME, _LOOKBACK_DAYS)
-    except NotImplementedError:
-        return _STUB_SUFFICIENT
     except Exception:
         return None
     if len(series.bars) < _MIN_BARS:
         return None
     return series
-
-
-def _derive_entry_and_qty(
-    symbol: str, bars: BarSeries | object
-) -> tuple[Decimal, Decimal]:
-    if symbol in _PROPOSAL_FIXTURE:
-        return _PROPOSAL_FIXTURE[symbol]
-    if isinstance(bars, BarSeries) and bars.bars:
-        return bars.bars[-1].close, Decimal("1")
-    return Decimal("100.00000"), Decimal("1")
 
 
 def _build_ticket_fields(
@@ -254,13 +229,14 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             )
             continue
 
-        limit_price, quantity = _derive_entry_and_qty(symbol, bars)
+        limit_price = bars.bars[-1].close
+        quantity = size_qty(symbol, limit_price)
         fields = _build_ticket_fields(symbol, limit_price, quantity)
         thesis_id = f"thesis-{symbol.replace('/', '-').lower()}"
         proposal = _make_proposal(symbol, thesis_id, fields)
         decision = evaluate_policy(proposal)
 
-        bar_count = len(bars.bars) if isinstance(bars, BarSeries) else _MIN_BARS
+        bar_count = len(bars.bars)
         data_gate = GateResult(
             name="data_integrity",
             passed=True,

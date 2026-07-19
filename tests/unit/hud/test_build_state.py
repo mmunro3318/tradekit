@@ -4,20 +4,14 @@ Determinism seams (sanctioned, per DESIGN §Test seams): monkeypatch ONLY
 ``mae._runtime.get_closed_bars`` and ``mae._runtime.clock`` — never mock
 tradekit internals directly.
 
-ASSUMPTION-CANDIDATE (flagged for CTO ratification, see report): the
-funnel→policy wiring does not exist yet, so this dispatch pins two new
-module-level seams on the not-yet-written ``tradekit.hud._build`` module
-for these tests to monkeypatch:
+Sanctioned module-level seams on ``tradekit.hud._build`` (RATIFIED,
+tests/ASSUMPTIONS.md 157a/158):
 
-  - ``tradekit.hud._build.evaluate_policy(proposal) -> _PolicyDecision``
-    where ``_PolicyDecision`` has ``.allowed: bool``, ``.verdict_id: str | None``,
-    ``.rationale: str``.
-  - ``tradekit.hud._build.open_position_symbols() -> set[str]``
-
-These are NOT in SPEC-hud-orderbook.md's interface pins — they are the
-test-writer's best-effort expression of AC-5/AC-7 given the funnel wiring
-is unbuilt. Implementer may rename/reshape at green stage only via CTO
-ratification; flagged as ASSUMPTIONS-candidate #1 in the batch report.
+  - ``evaluate_policy(proposal)`` -> object with ``.allowed: bool``,
+    ``.verdict_id: str | None``, ``.rationale: str``.
+  - ``open_position_symbols() -> set[str]``
+  - ``size_qty(symbol, limit_price) -> Decimal`` (real-sizing default is
+    loud-until-wired per ASSUMPTIONS 158; tests always patch it).
 """
 
 from __future__ import annotations
@@ -26,6 +20,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+
 from tradekit.hud import build_state
 
 CAPTURED_AT = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
@@ -61,18 +56,52 @@ def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mae_runtime, "clock", lambda: CAPTURED_AT)
 
 
-def _patch_bars_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SEAM: mae._runtime.get_closed_bars returns enough bars for the
-    funnel to produce a passing setup for LINK/USD (buy, limit 8.30000,
-    tp 8.71500, sl 8.05100, qty 12)."""
+def _fixture_series(symbol: str, n_bars: int):
+    """Valid ascending hourly BarSeries whose last close is 8.30000 — the
+    AC-4 golden entry price (limit = last close, pinned)."""
+    from datetime import timedelta
+
+    from tradekit.contracts import AssetRef, Bar, BarSeries
+
+    bars = [
+        Bar(
+            ts_open=CAPTURED_AT - timedelta(hours=n_bars - i),
+            open=Decimal("8.30000"),
+            high=Decimal("8.40000"),
+            low=Decimal("8.20000"),
+            close=Decimal("8.30000"),
+            volume=Decimal("1000"),
+        )
+        for i in range(n_bars)
+    ]
+    return BarSeries(
+        asset=AssetRef(
+            symbol=symbol,
+            venue="kraken",
+            asset_class="crypto",
+            tick_size=Decimal("0.00001"),
+        ),
+        timeframe="1h",
+        bars=bars,
+        source="test-fixture",
+    )
+
+
+def _patch_setup_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEAM: mae._runtime.get_closed_bars returns a real, valid 24-bar
+    series (last close 8.30000) and the sanctioned sizing seam
+    ``tradekit.hud._build.size_qty`` returns qty 12, driving the funnel to
+    the AC-4 golden setup (buy LINK/USD limit 8.30000 tp 8.71500 sl
+    8.05100 qty 12)."""
+    import tradekit.hud._build as hud_build
     import tradekit.mae._runtime as mae_runtime
 
-    def _fake_get_closed_bars(symbol: str, timeframe: str, lookback_days: int):
-        raise NotImplementedError(
-            "test seam stub — implementer wires real BarSeries fixture"
-        )
-
-    monkeypatch.setattr(mae_runtime, "get_closed_bars", _fake_get_closed_bars)
+    monkeypatch.setattr(
+        mae_runtime,
+        "get_closed_bars",
+        lambda symbol, timeframe, lookback_days: _fixture_series(symbol, 24),
+    )
+    monkeypatch.setattr(hud_build, "size_qty", lambda symbol, limit_price: Decimal("12"))
 
 
 class TestAC4AllowedProposalBuildsTicketWithGoldenArithmetic:
@@ -88,7 +117,7 @@ class TestAC4AllowedProposalBuildsTicketWithGoldenArithmetic:
 
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
-        _patch_bars_sufficient(monkeypatch)
+        _patch_setup_sufficient(monkeypatch)
 
         state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
 
@@ -114,7 +143,7 @@ class TestAC5PolicyRefusalYieldsNoTicketAndFailedGate:
 
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _RefuseDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
-        _patch_bars_sufficient(monkeypatch)
+        _patch_setup_sufficient(monkeypatch)
 
         state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
 
@@ -135,13 +164,10 @@ class TestAC6InsufficientBarsYieldsWaitNoException:
         failed "data_integrity" gate naming the gap; no exception escapes
         build_state."""
         import tradekit.hud._build as hud_build
-
         import tradekit.mae._runtime as mae_runtime
 
         def _too_few_bars(symbol: str, timeframe: str, lookback_days: int):
-            from tradekit.contracts import BarSeries
-
-            return BarSeries(symbol=symbol, timeframe=timeframe, bars=())
+            return _fixture_series(symbol, 3)
 
         monkeypatch.setattr(mae_runtime, "get_closed_bars", _too_few_bars)
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
@@ -169,7 +195,7 @@ class TestAC7OpenPositionYieldsHoldNoTicket:
 
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: {"LINK/USD"})
-        _patch_bars_sufficient(monkeypatch)
+        _patch_setup_sufficient(monkeypatch)
 
         state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
 
@@ -189,7 +215,7 @@ class TestAC8Determinism:
 
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
-        _patch_bars_sufficient(monkeypatch)
+        _patch_setup_sufficient(monkeypatch)
 
         state_1 = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
         state_2 = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
