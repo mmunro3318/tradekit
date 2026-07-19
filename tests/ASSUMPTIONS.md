@@ -2943,3 +2943,17 @@ barrier simulator), 2026-07-19
     C = >=1 unresolvable. (b) `parse_qty` deliberately NOT added in T3:
     qty grammar is pinned in T4 against `_read.py`'s actual needs —
     no invented surface (test-writer flag, CTO-ratified).
+
+155. **bridge-read batch 2 flags ratified (red phase, 2026-07-20):**
+    (a) POSITIONS_TABLE rows = resolved node's children in on-screen
+    order; each row's children = 5 cells [symbol, side, qty,
+    entry_price, unrealized_pnl_usd] read via .value — PLACEHOLDER
+    grammar pending T7's real tree (re-freeze through the golden gate).
+    (b) by:"path" selector value = list of name strings resolved as
+    unique-name ordered descent from root. (c) `snapshot()` gains a
+    required `captured_at: AwareDatetime` keyword (caller/CLI supplies
+    it; driver never wall-clocks) — spec-pin amendment; red tests
+    assert presence only this batch. (d) `_read._load_element_map_for_
+    session` is an ACCEPTED internal seam (default-map resolution lands
+    with T7's real map); (e) AC-12 drift check lives at the CLI layer,
+    driver surface unchanged.
