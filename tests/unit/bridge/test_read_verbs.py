@@ -36,6 +36,8 @@ map resolution testable at all.
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime as _dt
 from decimal import Decimal
 
 import pytest
@@ -45,8 +47,11 @@ from tradekit.bridge import AmbiguousElement, AppNotFound, ElementMapMiss, read_
 from tradekit.bridge._elementmap import ElementMap, Selector
 from tradekit.contracts import PropPanelSnapshot, PropPositionRow, TicketReadback
 
+CAPTURED_AT = _dt(2026, 7, 20, 12, 0, tzinfo=UTC)
+
 
 def _use_map(monkeypatch: pytest.MonkeyPatch, element_map: ElementMap) -> None:
+
     monkeypatch.setattr(
         "tradekit.bridge._read._load_element_map_for_session", lambda session: element_map
     )
@@ -87,9 +92,7 @@ def _base_map(**selector_overrides: Selector) -> ElementMap:
         "POSITIONS_TABLE": Selector(by="path", value=["Panel", "PositionsGrid"]),
     }
     selectors.update(selector_overrides)
-    return ElementMap(
-        app_version="1.0.0", captured_utc="2026-07-19T00:00:00Z", selectors=selectors
-    )
+    return ElementMap(app_version="1.0.0", captured_utc="2026-07-19T00:00:00Z", selectors=selectors)
 
 
 def _base_tree(*, positions: list[object] | None = None) -> object:
@@ -134,7 +137,7 @@ class TestSnapshotGolden:
         session = FakeUiaSession(tree)
         _use_map(monkeypatch, _base_map())
 
-        result = snapshot(session=session)
+        result = snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert result.captured_at.tzinfo is not None, "captured_at must be timezone-aware"
         expected = PropPanelSnapshot(
@@ -175,7 +178,7 @@ class TestSnapshotAppNotFound:
         session = FakeUiaSession(None, app_present=False)
         _use_map(monkeypatch, _base_map())
         with pytest.raises(AppNotFound):
-            snapshot(session=session)
+            snapshot(session=session, captured_at=CAPTURED_AT)
 
 
 class TestSnapshotElementMapMiss:
@@ -203,7 +206,7 @@ class TestSnapshotElementMapMiss:
         _use_map(monkeypatch, _base_map())
 
         with pytest.raises(ElementMapMiss) as excinfo:
-            snapshot(session=session)
+            snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert excinfo.value.selector == "BALANCE"
         assert excinfo.value.hint
@@ -233,7 +236,7 @@ class TestSnapshotAmbiguousElement:
         _use_map(monkeypatch, _base_map())
 
         with pytest.raises(AmbiguousElement) as excinfo:
-            snapshot(session=session)
+            snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert excinfo.value.selector == "BALANCE"
         assert excinfo.value.count == 2
@@ -248,7 +251,7 @@ class TestSnapshotEmptyPositions:
         session = FakeUiaSession(tree)
         _use_map(monkeypatch, _base_map())
 
-        result = snapshot(session=session)
+        result = snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert result.positions == ()
 
@@ -265,7 +268,7 @@ class TestSnapshotTwoPositionRowsOrder:
         session = FakeUiaSession(tree)
         _use_map(monkeypatch, _base_map())
 
-        result = snapshot(session=session)
+        result = snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert [row.symbol for row in result.positions] == ["TSLA", "AAPL"]
         assert result.positions[0].qty == Decimal("5")
@@ -335,7 +338,7 @@ class TestReadOnlyCallLog:
         session = FakeUiaSession(tree)
         _use_map(monkeypatch, _base_map())
 
-        snapshot(session=session)
+        snapshot(session=session, captured_at=CAPTURED_AT)
 
         assert session.calls, "expected at least one recorded call"
         for call in session.calls:

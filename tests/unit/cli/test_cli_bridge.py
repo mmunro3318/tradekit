@@ -58,7 +58,7 @@ class TestBridgeSnapshotSuccess:
     ) -> None:
         """AC-9 CONTRACT: exit 0, stdout is ONLY the snapshot JSON, Decimal
         fields serialize as strings (never float)."""
-        monkeypatch.setattr("tradekit.bridge.snapshot", lambda: _snapshot())
+        monkeypatch.setattr("tradekit.bridge.snapshot", lambda **kw: _snapshot())
 
         result = runner.invoke(app, ["bridge", "snapshot"])
 
@@ -78,7 +78,7 @@ class TestBridgeSnapshotAppAbsent:
     ) -> None:
         """AC-9 CONTRACT: Kraken Desktop absent -> exit 2, one-line message."""
 
-        def _raise() -> PropPanelSnapshot:
+        def _raise(**kw: object) -> PropPanelSnapshot:
             from tradekit import bridge as bridge_module
 
             raise bridge_module.AppNotFound("Kraken Desktop not running")
@@ -100,7 +100,7 @@ class TestBridgeSnapshotParseFailure:
         """AC-9 CONTRACT: a `PanelParseError` -> exit 3, message names both
         the field and the raw text."""
 
-        def _raise() -> PropPanelSnapshot:
+        def _raise(**kw: object) -> PropPanelSnapshot:
             from tradekit import bridge as bridge_module
 
             raise bridge_module.PanelParseError("BALANCE", "5 000,00")
@@ -122,7 +122,7 @@ class TestBridgeSnapshotMapDrift:
         """AC-12 BEHAVIOR: a map/app_version mismatch is visible (stderr)
         but does not block the read -- exit 0, snapshot JSON still on
         stdout, warning text isolated to stderr."""
-        monkeypatch.setattr("tradekit.bridge.snapshot", lambda: _snapshot())
+        monkeypatch.setattr("tradekit.bridge.snapshot", lambda **kw: _snapshot())
         monkeypatch.setattr(
             "tradekit.cli.main._check_bridge_map_drift",
             lambda: "warning: element map app_version 1.0.0 != connected app 1.1.0",
@@ -139,7 +139,7 @@ class TestBridgeSnapshotMapDrift:
 class TestBridgeSnapshotNoDrift:
     def test_no_drift_emits_no_stderr_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """AC-12 BEHAVIOR (negative case): matching versions -> silent stderr."""
-        monkeypatch.setattr("tradekit.bridge.snapshot", lambda: _snapshot())
+        monkeypatch.setattr("tradekit.bridge.snapshot", lambda **kw: _snapshot())
 
         result = runner.invoke(app, ["bridge", "snapshot"])
 

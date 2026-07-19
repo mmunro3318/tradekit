@@ -19,6 +19,16 @@ class TestImportWithoutPywinauto:
         """SEAM: simulate pywinauto not installed (module import raises)
         and re-import tradekit.bridge fresh — the package import itself
         must not touch pywinauto at all (AC-10)."""
+        # Restore-parent-attr guard (green-bridge-2 finding): the fresh
+        # importlib.import_module below rebinds the ATTRIBUTE
+        # `tradekit.bridge` on the persistent top-level package; monkeypatch
+        # only restores sys.modules entries. Register the attr restore
+        # FIRST so teardown re-points the attribute chain at the original
+        # module object (keeps dotted-string monkeypatching in later tests
+        # honest).
+        import tradekit
+
+        monkeypatch.setattr(tradekit, "bridge", sys.modules["tradekit.bridge"])
         monkeypatch.setitem(sys.modules, "pywinauto", None)
         for mod in list(sys.modules):
             if mod == "tradekit.bridge" or mod.startswith("tradekit.bridge."):

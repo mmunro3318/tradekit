@@ -9,6 +9,7 @@ the experiment registry (TD-20). Exit codes: 0 ok, 1 failed check/denial,
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
@@ -520,7 +521,7 @@ def bridge_snapshot() -> None:
     from tradekit import bridge as bridge_module
 
     try:
-        result = bridge_module.snapshot()
+        result = bridge_module.snapshot(captured_at=datetime.now(UTC))
     except bridge_module.AppNotFound:
         typer.echo("Kraken Desktop not running", err=True)
         raise typer.Exit(code=2) from None
