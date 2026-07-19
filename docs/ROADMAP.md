@@ -79,7 +79,7 @@
 
 - [X] Sharpe/Sortino/Calmar/PF/expectancy (net-of-costs) from trade log — conventions pinned in `mae/_metrics.py` docstring, hand-derived golden vectors
 - [X] Deflated Sharpe (closed-form, in-house) + n≥30 gate + provisional penalized-Sharpe regime (G1)
-- [ ] Walk-forward evaluator (2× IS/OOS flag) — lands with the backtest engine (P1C follow-on; bar-based, not trade-log-based)
+- [ ] Walk-forward evaluator (2× IS/OOS flag) — MOVED to M5.2 (backtest engine, SPRINT-P5-PROP)
 - [X] `compute_strategy_metrics` verb wiring incl. warnings taxonomy
 
 ### M1.4 Sizing & regime — done 2026-07-17 (P1C)
@@ -157,6 +157,40 @@
 - [ ] `verify_claim` second-model verification of the snapshot (D4) — MVP COMPLETE
 
 ---
+
+## P5-PROP — Kraken Prop program (pivot 2026-07-19)
+
+Context: Mike holds Kraken Prop Starter Eval 1 ($5,000; MDL $150/day off
+00:30 UTC balance snapshot, MDD $300 static lifetime, target $500; fees
+4bps/side + 0.033%/day funding per 4h). NO API for Prop (probe-confirmed:
+scripts/smoke_kraken_probe.py; zero PROP pairs in public APIs) — execution
+is advisory-HUD / execution-bridge; autonomy gated on Kraken's written
+stop-persistence answer. Design authority: docs/handoff/SPRINT-P5-PROP.md +
+docs/research/prop-questionnaire-answers-CTO-2026-07-18.md (binding) +
+docs/research/kraken-prop-report1-2026-07-19.md (venue mechanics).
+
+### M5.1 Prop dials + evaluation barrier simulator (SPRINT-P5-PROP batch A)
+- [ ] AccountConfig/PolicyDials prop block (mdl/mdd/target/fees/internal buffers; None=disabled)
+- [ ] R-017/R-018 wired to internal walls (50/70% MDL, 40% MDD reserve)
+- [ ] `tradekit.prop.simulate_evaluation` Monte Carlo (absorbing barriers, ≥10k paths, seeded)
+- [ ] Headline: `recommended_max_risk_frac` clearing ruin ≤2%/mo (Q.A.8)
+
+### M5.2 Backtest / walk-forward engine (absorbs M1.3 open box; batches B–D)
+- [ ] StrategySpec/CostModel contracts (scanner-vocabulary entries; one fee canon with M5.1)
+- [ ] `mae._backtest` bar loop (candle-close signals, next-open entry, stop-wins-ambiguous, delayed-entry stress)
+- [ ] Anchored walk-forward driver + embargo
+- [ ] Experiment registry (append-only; feeds n_trials → DSR deflation honestly)
+- [ ] Kraken OHLC provider + historical CSV ingest + tick collector started
+- [ ] Baseline suite on BTC/ETH: buy-and-hold, random-entry-same-exit, SMA trend (Q.L.207)
+
+### M5.3 Execution Bridge + advisory HUD (after M5.1/M5.2)
+- [ ] `BridgeBroker` port: outbox order tickets / inbox fill reports, executor-agnostic
+- [ ] Reconcile integration + screenshot cross-check protocol
+- [ ] Blocked-external: Kraken support answers (API access; stop persistence = autonomy gate)
+
+### M5.4 Strategy #1 (pullback-continuation family, Q.E.56)
+- [ ] tradekit Substrate Contract doc (CTO) for GPT design sequence
+- [ ] Strategy #1 spec → M5.2 validation → Q.M.256 robustness gates → paper
 
 ## P5+ — Deferred (designed, not built)
 

@@ -2,6 +2,26 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, late) — Prop recon complete; SPRINT-P5-PROP designed
+
+- **Prop API hunt CLOSED (negative)**: Pro key sees main wallet only;
+  Prop settings page has no API section (Mike-confirmed in UI); zero
+  PROP pairs in public spot/futures APIs; docs/llms.txt has no Prop
+  surface. Support ticket pending (API access + stop persistence).
+- **Kraken Desktop recon (computer-use, read tier)**: Prop board =
+  separate "XXX PROP" instrument suite (BTC/ETH/NEAR/LINK/... PROP),
+  order ticket routes via Accounts selector ("Starter Eval 1");
+  panel confirms $5,000 / MDL $150 / MDD $300 / target $500; ETH
+  spot-vs-PROP basis ~2bps observed. Claude = read-only observer
+  (harness tier + policy: never executes trades); executor = Mike or
+  Codex via future execution bridge.
+- **SPRINT-P5-PROP authored** (docs/handoff/SPRINT-P5-PROP.md): M5.1
+  prop dials + barrier Monte Carlo (headline: recommended_max_risk_frac);
+  M5.2 backtest/walk-forward engine (absorbs M1.3 box; StrategySpec in
+  scanner vocabulary, experiment registry starts, Kraken data ingest);
+  M5.3 execution bridge/HUD; M5.4 strategy #1. ROADMAP P5-PROP section
+  added; memory updated. Open flags listed in sprint doc §ASSUMPTIONS.
+
 ## 2026-07-19 (Fable) — Prop-strategy questionnaire answered (CTO), Kraken GO verdict
 
 - **Answered GPT 5.6 Sol's 378-question prop-strategy discovery sheet**:
