@@ -255,3 +255,5 @@ rows, wrong-tier collisions) in the pin list, not just spec-named errors.
 | Test quality | B | AC-1 tab assertion + AC-6 exception path gaps (both fixed post-review) |
 | Doctrine | B+ | seams sanctioned/real; sell-path + provenance now in T5 scope |
 Per-agent: test-writer B+, implementer B (NotImplementedError trap caught at CTO gate), CTO fix round A-. Verdict: ACCEPT (pass-with-fixes, all MED fixes applied same round).
+
+Round 10b — hud-orderbook batch 2 (tk hud CLI): CTO inline review. Correctness A (atomic write, clock seam, exit 4), safety A (advisory-only; size_qty loud default makes production `tk hud` fail loud until T5 — intended), test quality A- (writer caught nothing to flag; implementer correctly STOPPED on the basename collision instead of hacking import mode — exemplary). Verdict: ACCEPT.

@@ -25,3 +25,12 @@ tk-learn promotes solved+generalizable entries to global memory.
 - **Symptom:** P5-PROP batch A (red) commit denied: hook runs pytest and denies on any failure, no escape for the house (red) failing-test convention
 - **Cause:** commit_gate.py written without the CLAUDE.md '(red) commits' exception — enforcement drifted from house law
 - **Solution:** hook now allows commits whose git command contains the literal '(red)' marker (still runs/blocks everything else); red commits stay auditable via the commit message convention
+
+## 2026-07-19 — pytest basename collision (hud batch 2)
+tests/unit/hud/test_cli.py collided with tests/unit/cli/test_cli.py under
+pytest prepend import mode (no __init__.py in test tree) — full-suite
+collection error while targeted runs passed. Fix: renamed to
+test_hud_cli.py. Rule going forward: test basenames must be unique across
+the whole tests/ tree (or move the tree to importlib mode as an infra task).
+Also re-hit: PreToolUse commit-gate deny blocks the ENTIRE chained Bash
+command — keep `git commit` in its own call.

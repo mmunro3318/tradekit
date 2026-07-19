@@ -217,5 +217,5 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [x] T1: HUD contracts
 - [x] T2: render (OSO-mirror + scan report)
 - [x] T3: build_state (funnel walk + grade rule)
-- [ ] T4: hud verbs + tk hud CLI
+- [x] T4: hud verbs + tk hud CLI
 - [ ] T5: wire real funnel into build_state
