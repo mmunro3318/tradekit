@@ -188,9 +188,9 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [X] T1: bridge contracts payloads
 - [X] T2: bridge skeleton (errors/session/elementmap/grade/import guard)
 - [X] T3: panel text parser
-- [ ] T4: read verbs over FakeUiaSession
-- [ ] T5: tk bridge snapshot CLI
-- [ ] T6: pywinauto session + probe script + dep group
+- [X] T4: read verbs over FakeUiaSession
+- [X] T5: tk bridge snapshot CLI
+- [X] T6: pywinauto session + probe script + dep group
 - [ ] T7: live probe run + artifact + fixture re-freeze (MIKE-GATED: app open)
 
 ### M5.3b Execution Bridge write path (feature 3+4, after bridge-read + probe grade A/B)
