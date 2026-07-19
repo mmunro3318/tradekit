@@ -2,6 +2,24 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, day 3 finale) — hud-ack shipped; loop rehearsed; ops codified
+
+- **hud-ack** (spec -> red e9c0fa9 -> green 6daf171, ASSUMPTIONS 160):
+  `tk hud --serve` = live HUD + POST /ack. Confirm click = BINDING chain
+  (thesis draft->submit->ReviewCompleted(human confirm)->approve -> fresh
+  policy verdict -> AdvisoryTicketAcked); policy refusal at click = 409
+  STOP (never send stale orders); Failed books technical failure only.
+- **Dress rehearsal PASSED** (scripts/rehearse_hud_ack.py, temp ledger):
+  full event chain + verify_chain OK. Steps 1-3 of the first-trade path
+  are done; what remains is a real ticket + Mike's hands.
+- **Codified for successor models**: docs/OPERATIONS.md (daily loop,
+  cadence=<=2x/day after 4h closes, day-5 inactivity rule),
+  docs/design/STRATEGY-BACKLOG.md (S1 live; S2 pullback-continuation
+  first fallback; S3 breakout; S4 restricted reversion; MS-PAXG-1 basis
+  research plan), HANDOFF-2026-07-20-ops-ready.md (GPT/Codex/lower-tier
+  seam).
+- UI aesthetic parked per Mike ("80's vibe") — Claude Design later.
+
 ## 2026-07-19 (Fable, day 3 close) — merge to main; HUD polish sprint
 
 - Merged feature/bridge-read + feature/hud-orderbook to main (4302f6c, one
