@@ -2,6 +2,23 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, day 3 close) — merge to main; HUD polish sprint
+
+- Merged feature/bridge-read + feature/hud-orderbook to main (4302f6c, one
+  merge — bridge-read was an ancestor); branches deleted local+remote.
+  README rewritten to current state. Mike's CLAUDE.md edits committed.
+- Fixed missing limit prices: Kraken pair map lacked RENDER/PAXG/XRP/AVAX/
+  AKT (XRP legacy XXRPZUSD result key, live-verified). All 11 greenlist
+  symbols now scan clean, zero provider errors.
+- Palette v2 "twilight upon the parking lot" (spec addendum 2): carbon/
+  tungsten/graphite surfaces, neon #ff7a1a thin / burnt #c1581f thick,
+  #ffb25e sodium-lamp radial falloff in the title bar. tk hud --open
+  (AC-14) + success confirmation line on stdout.
+- T-PAGE-1 pagination backlog logged (cursor-based, since-semantics trap).
+  HUD-ACK designed (serve mode, confirm/failed buttons, no veto button —
+  bot experience preserved); spec+implement = next session's first batch.
+- .claude/.codex gitignored. Gate green throughout.
+
 ## 2026-07-19 (Fable, day 3 cont.) — T5 real funnel wiring; tk hud LIVE
 
 - **T5 shipped** (red e8728f9 -> green 2c7c3c6 -> fix c15d6ba): sizing seam
