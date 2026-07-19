@@ -34,6 +34,7 @@ SPRINT P2 batch A additive surface (thesis-lifecycle payload models):
     ratified pattern). See ``_event_payloads.py`` and ``tests/ASSUMPTIONS.md``.
 """
 
+from tradekit.contracts._bridge import PropPanelSnapshot, PropPositionRow, TicketReadback
 from tradekit.contracts._event_payloads import (
     AccountCreatedPayload,
     ActionProposedPayload,
@@ -149,6 +150,8 @@ __all__ = [
     "Predicate",
     "PromotionConfirmedPayload",
     "PromotionGrantedPayload",
+    "PropPanelSnapshot",
+    "PropPositionRow",
     "PropSimResult",
     "PropSimSpec",
     "ProposedAction",
@@ -168,6 +171,7 @@ __all__ = [
     "ThesisGradedPayload",
     "ThesisRejectedPayload",
     "ThesisSubmittedPayload",
+    "TicketReadback",
     "TradeModel",
     "TradeRecord",
     "Verdict",
