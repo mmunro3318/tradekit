@@ -9,6 +9,8 @@ the experiment registry (TD-20). Exit codes: 0 ok, 1 failed check/denial,
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -538,6 +540,45 @@ def bridge_snapshot() -> None:
     if warning:
         typer.echo(warning, err=True)
     typer.echo(result.model_dump_json())
+
+
+@app.command("hud")
+def hud_scan(
+    symbols: Annotated[
+        str, typer.Option("--symbols", help="Comma-separated pairs (default: 11-pair greenlist).")
+    ] = "",
+    out: Annotated[
+        Path, typer.Option("--out", help="HTML output path.")
+    ] = Path("docs/hud/hud.html"),
+) -> None:
+    """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10).
+    Writes a static HTML report to `--out` (atomic replace); exit 4 if the
+    write fails, leaving any pre-existing target untouched.
+    """
+    from tradekit import hud
+    from tradekit.mae import _runtime as mae_runtime
+
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else list(
+        hud.DEFAULT_SYMBOLS
+    )
+
+    captured_at = mae_runtime.clock()
+    state = hud.build_state(symbol_list, captured_at=captured_at)
+    html = hud.render(state)
+
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(html)
+            os.replace(tmp_name, out)
+        except OSError:
+            os.remove(tmp_name)
+            raise
+    except OSError as exc:
+        typer.echo(f"failed to write {out}: {exc}", err=True)
+        raise typer.Exit(code=4) from exc
 
 
 if __name__ == "__main__":
