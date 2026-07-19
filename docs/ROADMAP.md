@@ -183,7 +183,17 @@ docs/research/kraken-prop-report1-2026-07-19.md (venue mechanics).
 - [ ] Kraken OHLC provider + historical CSV ingest + tick collector started
 - [ ] Baseline suite on BTC/ETH: buy-and-hold, random-entry-same-exit, SMA trend (Q.L.207)
 
-### M5.3 Execution Bridge + advisory HUD (after M5.1/M5.2)
+### M5.3 Execution Bridge + advisory HUD — BRIDGE-UIA (design v2 4ad7d85; may interleave with M5.2)
+Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
+- [X] T1: bridge contracts payloads
+- [X] T2: bridge skeleton (errors/session/elementmap/grade/import guard)
+- [X] T3: panel text parser
+- [X] T4: read verbs over FakeUiaSession
+- [X] T5: tk bridge snapshot CLI
+- [X] T6: pywinauto session + probe script + dep group
+- [ ] T7: live probe run + artifact + fixture re-freeze (MIKE-GATED: app open)
+
+### M5.3b Execution Bridge write path (feature 3+4, after bridge-read + probe grade A/B)
 - [ ] `BridgeBroker` port: outbox order tickets / inbox fill reports, executor-agnostic
 - [ ] Reconcile integration + screenshot cross-check protocol
 - [ ] Blocked-external: Kraken support answers (API access; stop persistence = autonomy gate)
@@ -202,3 +212,10 @@ docs/research/kraken-prop-report1-2026-07-19.md (venue mechanics).
 - [ ] Red-team strategy tournaments (SCOPE vision)
 - [ ] Options asset class (Mike: maybe; Alpaca supports)
 - [ ] Phase-2 hardening: single-writer key-holding daemon (TD-19)
+
+### hud-orderbook (advisory HUD)
+- [x] T1: HUD contracts
+- [x] T2: render (OSO-mirror + scan report)
+- [x] T3: build_state (funnel walk + grade rule)
+- [x] T4: hud verbs + tk hud CLI
+- [x] T5: wire real funnel into build_state

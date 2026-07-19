@@ -2932,3 +2932,87 @@ barrier simulator), 2026-07-19
     direction is pinned so the golden (exit at exactly D2 00:30 excluded
     from D2's snapshot) enforces ONE behavior. Revisit only if Kraken
     support answers otherwise (support ticket already pending).
+
+154. **bridge-read batch 1 flags ratified (red phase, 2026-07-20):**
+    (a) `grade_exposure` re-resolves every logical selector against the
+    LIVE tree by cascade `automation_id -> name -> path` (the map's
+    stored `by` records how the probe found it, but grading must not
+    trust stale probe metadata — the signature takes the tree precisely
+    to re-resolve). Grade A requires every target resolvable at the
+    automation_id tier; B = all resolvable, >=1 only via name/path;
+    C = >=1 unresolvable. (b) `parse_qty` deliberately NOT added in T3:
+    qty grammar is pinned in T4 against `_read.py`'s actual needs —
+    no invented surface (test-writer flag, CTO-ratified).
+
+155. **bridge-read batch 2 flags ratified (red phase, 2026-07-20):**
+    (a) POSITIONS_TABLE rows = resolved node's children in on-screen
+    order; each row's children = 5 cells [symbol, side, qty,
+    entry_price, unrealized_pnl_usd] read via .value — PLACEHOLDER
+    grammar pending T7's real tree (re-freeze through the golden gate).
+    (b) by:"path" selector value = list of name strings resolved as
+    unique-name ordered descent from root. (c) `snapshot()` gains a
+    required `captured_at: AwareDatetime` keyword (caller/CLI supplies
+    it; driver never wall-clocks) — spec-pin amendment; red tests
+    assert presence only this batch. (d) `_read._load_element_map_for_
+    session` is an ACCEPTED internal seam (default-map resolution lands
+    with T7's real map); (e) AC-12 drift check lives at the CLI layer,
+    driver surface unchanged.
+
+156. **Sol-audit amendments ratified (2026-07-20, external audit of
+    STRATEGY-PROCEDURE):** (a) CONFIRMED DEFECT (MED): `_deflated_
+    sharpe`'s SR* scales the expected-max term by the candidate's own
+    estimator variance (denom/(n-1)), not the Bailey-LdP cross-trial
+    dispersion V[SR_trials] — DSR is overstated (anti-conservative)
+    when tried variants disperse. Fix pinned into M5.2: experiment
+    registry stores per-trial SR; V[SR_trials] computed from it;
+    current proxy allowed ONLY with a "dsr_dispersion_proxy" warning
+    until >=2 registry trials exist. (b) HMM state labels currently
+    derive from vol-variance rank alone (ratified 2026-07-16, now
+    AMENDED): relabeling from state-conditional return mean/persistence
+    + OOS utility is scheduled with M5.2 regime work; until then,
+    labels are treated as vol-tiers, not semantic market calls.
+    (c) Sharpe: trade-level sqrt(trades/year) annualization stays
+    display-only; DSR/PSR remain on non-annualized trade SR (already
+    true); bar-level marked-to-market daily Sharpe becomes primary
+    when M5.2 equity curves exist. Stage-5 tiebreak expectancy
+    normalized in R/bps, not fixed dollars. (d) v1 exclusion list
+    rationale is SCOPE/DATA-based, not "debunked" (OFI/stat-arb have
+    real evidence at other horizons/infrastructures); tick/book
+    collection (Q.F.83 collector, greenlist 11 pairs) preserves the
+    option to revisit. (e) DSR 0.5 = internal screening policy; 0.95 =
+    literature-grade bar required for live promotion. ADX-25 and
+    100/50-trade minimums documented as house rails, not laws.
+    (f) Prop profit target is per-plan spec input (never hard-coded);
+    re-verify on purchase screen per plan.
+
+157. hud-orderbook batch 1 (2026-07-19): (a) `tradekit.hud._build.evaluate_policy`
+     and `tradekit.hud._build.open_position_symbols` are SANCTIONED module-level
+     test seams (alongside mae._runtime.clock/get_closed_bars); their defaults
+     must be the real policy evaluation and real open-position query — the seam
+     names are the only monkeypatch points for HUD policy/position injection.
+     (b) Red-stage bar stubs are shape pins; green implementer supplies real
+     BarSeries fixtures driving the funnel, without editing test assertions.
+
+158. hud-orderbook CTO fix round (2026-07-19): the green implementer's
+     NotImplementedError-as-sufficient sentinel and hardcoded proposal fixture
+     table were REJECTED (latent trap: fabricated advisory numbers). Ratified
+     instead: (a) third sanctioned seam `tradekit.hud._build.size_qty(symbol,
+     limit_price) -> Decimal`; its default RAISES loudly until real
+     min-ATR/quarter-Kelly sizing wiring lands (task T5) — never a fabricated
+     quantity on the advisory surface. (b) Interim bracket rule TP=1.05x /
+     SL=0.97x limit (quantized to the limit's exponent) stands only until T5.
+     (c) limit_price = last closed bar's close; bars must be real BarSeries
+     fixtures in tests. (d) Any provider exception in the HUD bar fetch degrades
+     to a failed data_integrity gate (grade wait), never escapes build_state.
+
+159. hud-orderbook T5 red (2026-07-19): (a) sizing seam RENAMED size_qty ->
+     `sizing_info(symbol, limit_price, equity_usd)` returning duck-typed
+     .qty/.stop_distance_usd/.r_multiple_target — ONE real mae.size_position
+     call powers both quantity and the ATR bracket (ratified; single seam,
+     no split). (b) `scan_setup(symbol)` seam returns an object with
+     .signal_tags: list[str]; default wraps the real scan_markets match for
+     the symbol (empty list when no match survives). (c) Gate-order test
+     asserts relative order of present gates only; a passing `sizing` row is
+     optional. (d) AC-4 golden superseded by AC-11 ATR-bracket golden
+     (stop 0.24900, 2R: SL 8.05100, TP 8.79800, pnl 5.90/-3.07, dist
+     6.00/-3.00) — CTO re-derived independently pre-freeze.

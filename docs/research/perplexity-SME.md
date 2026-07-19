@@ -1,6 +1,6 @@
 <img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
 
-# You are acting as a subject-matter expert in quantitative trading, retail brokerage/exchange APIs, and trading-system design. I'm a developer building an open framework ("tradekit") that equips LLM agents to research, hypothesize, paper-trade, and eventually execute small live trades under deterministic, non-bypassable gates. I've attached the scope document (SCOPE.md). I am NOT finance-savvy beyond basics, so: correct my design's misconceptions bluntly, cite sources, and prefer practitioner-standard answers over novel ones. Where my document's numbers or assumptions are wrong or non-standard, say so explicitly.
+# You are acting as a subject-matter expert in quantitative trading, retail brokerage/exchange APIs, and trading-system design. I'm a developer building an open framework ("tradekit") that equips LLM agents to research, hypothesize, paper-trade, and eventually execute small live trades under deterministic, non-bypassable gates. I've attached the scope document (SCOPE.md). I am NOT finance-savvy beyond basics, so: correct my design's misconceptions bluntly, cite rces, and prefer practitioner-standard answers over novel ones. Where my document's numbers or assumptions are wrong or non-standard, say so explicitly.
 
 Standing context you should internalize from the attachment: Alpaca is the execution venue (paper + live stocks + crypto); analysis engine uses Kraken/Binance public + Alpaca + CoinGecko + yfinance; position sizing is min(quarter-Kelly, ATR-normalized); every position starts as a "thesis contract" with explicit numeric success/failure criteria graded arithmetically; live access is earned via a paper-trading promotion ladder; MVP live bankroll is \$50–100.
 
@@ -17,31 +17,30 @@ Opening questions:
 
 Now let me provide comprehensive answers to all six questions.
 
-***
+---
 
 ## 1. Thesis Contract: Pre-Registration Fields
 
 Professional systematic traders use **pre-trade research notes (PTRNs)** or **trade memos**. The canonical fields are :
 
-
-| Field | What to record | Example |
-| :-- | :-- | :-- |
-| `asset` | Symbol + exchange | BTC-USD / Alpaca |
-| `direction` | Long / Short / Neutral | Long |
-| `entry_condition` | Exact trigger (price, indicator level) | Close > 20-day high AND RSI(14) < 70 |
-| `target` | Numeric price or % move | +8% from entry |
-| `horizon` | Concrete time bound | ≤5 trading days |
-| `size` | Dollar amount + method | \$12, quarter-Kelly |
-| `invalidation_condition` | Pre-set structural reason thesis is wrong | If BTC breaks \$57k support before entry |
-| `stop_loss` | Price-based exit | Entry × 0.94 |
-| `expected_value` | (P(win) × reward) − (P(lose) × risk) | explicit number |
-| `rationale` | Falsifiable catalyst | FOMC rate hold → risk-on |
+| Field                      | What to record                            | Example                                 |
+| :------------------------- | :---------------------------------------- | :-------------------------------------- |
+| `asset`                  | Symbol + exchange                         | BTC-USD / Alpaca                        |
+| `direction`              | Long / Short / Neutral                    | Long                                    |
+| `entry_condition`        | Exact trigger (price, indicator level)    | Close > 20-day high AND RSI(14) < 70    |
+| `target`                 | Numeric price or % move                   | +8% from entry                          |
+| `horizon`                | Concrete time bound                       | ≤5 trading days                        |
+| `size`                   | Dollar amount + method                    | \$12, quarter-Kelly                     |
+| `invalidation_condition` | Pre-set structural reason thesis is wrong | If BTC breaks\$57k support before entry |
+| `stop_loss`              | Price-based exit                          | Entry × 0.94                           |
+| `expected_value`         | (P(win) × reward) − (P(lose) × risk)   | explicit number                         |
+| `rationale`              | Falsifiable catalyst                      | FOMC rate hold → risk-on               |
 
 **Invalidation vs stop-loss are genuinely distinct** — this is practitioner-standard, not novel. An *invalidation condition* is structural ("if the catalyst I cited doesn't materialize by date X, the thesis was wrong regardless of price"), while a *stop-loss* is price-based ("if price reaches Y, exit to cap loss"). Professional quant shops like Renaissance and Two Sigma pre-register both separately. Your design collapses them into one concept — **split them**. A thesis can be invalidated before the stop is hit (e.g., earnings release changes the structure), and your grader should distinguish `graded: invalidated` (no prediction value) from `graded: stopped_out` (prediction was wrong on price).[^1]
 
 For grading, use **arithmetic success criteria only**: "price reached target within horizon = PASS; stop hit or horizon expired at loss = FAIL; invalidation triggered = VOID (excluded from win-rate stats)." The VOID category is critical — including invalidated trades in your win-rate numerator inflates edge .
 
-***
+---
 
 ## 2. Promotion Criteria \& Sample Sizes
 
@@ -71,7 +70,7 @@ The "3 of 4" structure is fine as a *threshold gate* but the series themselves n
 - No gate violations across all series
 - Most recent series = clean (your design already has this — correct)
 
-***
+---
 
 ## 3. Daily Decision One-Pager
 
@@ -111,20 +110,20 @@ GATE STATUS:    [Pass / Fail — which gates checked]
 
 Your SCOPE.md lists the fields correctly but doesn't mandate the EV calculation be **explicit and numeric** in the memo — add that. Vague "looks good" rationale must fail adversarial review automatically.
 
-***
+---
 
 ## 4. Metrics Gates \& Overfitting Checks
 
 ### Minimum thresholds at retail scale
 
-| Metric | Minimum to consider | Notes |
-| :-- | :-- | :-- |
-| Sharpe ratio (annualized) | ≥ 0.5 (paper), ≥ 0.75 (live) | Below 0.5 = fees/slippage will destroy it live |
-| Sortino ratio | ≥ 1.0 | Better than Sharpe for non-normal return distributions |
-| Profit factor | ≥ 1.3 | Gross profit / gross loss |
-| Expectancy | > 0 after fees | Must be positive post-cost |
-| Max drawdown | < 20% (paper), < 15% (live) | Conservative for small account |
-| Win rate | Context-dependent | A 40% win rate with 3:1 RR is fine; mandate both |
+| Metric                    | Minimum to consider            | Notes                                                  |
+| :------------------------ | :----------------------------- | :----------------------------------------------------- |
+| Sharpe ratio (annualized) | ≥ 0.5 (paper), ≥ 0.75 (live) | Below 0.5 = fees/slippage will destroy it live         |
+| Sortino ratio             | ≥ 1.0                         | Better than Sharpe for non-normal return distributions |
+| Profit factor             | ≥ 1.3                         | Gross profit / gross loss                              |
+| Expectancy                | > 0 after fees                 | Must be positive post-cost                             |
+| Max drawdown              | < 20% (paper), < 15% (live)    | Conservative for small account                         |
+| Win rate                  | Context-dependent              | A 40% win rate with 3:1 RR is fine; mandate both       |
 
 These thresholds are consensus minimums among retail-focused practitioners like Van Tharp and documented in the *Quantitative Trading* literature (Chan, 2009) .
 
@@ -135,7 +134,7 @@ Your SCOPE.md mentions "overfit bands" but doesn't specify the mechanism. **Two 
 1. **Walk-forward analysis:** Train on data up to date T, test on T → T+N, slide forward. If in-sample Sharpe is 2× out-of-sample, it's overfit .
 2. **Deflated Sharpe Ratio (DSR):** Bailey \& López de Prado (2014) — adjusts Sharpe downward based on number of strategies tested, non-normality of returns, and strategy length. Free implementation in `mlfinlab` and `pyfolio` . **This is the single most important overfitting check for a multi-strategy system like yours.** Your SCOPE doesn't mention it by name — add it explicitly.
 
-***
+---
 
 ## 5. Small-Account Realities at \$50–100
 
@@ -148,20 +147,17 @@ This is where I need to be most blunt: **at \$50–100, almost every short-term 
 - Spread on illiquid stocks: 0.1–0.5% per side — material on small positions
 - Slippage on market orders for fractional shares: effectively 0 on large-caps
 
-
 ### Alpaca crypto costs
 
 - Alpaca charges **0–0.25% per side** on crypto depending on tier
 - On a \$10 crypto trade: ~\$0.05 per side = \$0.10 round-trip = 1% of position
 - **This is enormous.** A strategy needing >2% edge just to break even is not viable at this size
 
-
 ### What remains viable at \$50–100
 
 - **Long-only momentum on liquid large-cap ETFs (SPY, QQQ, GLD):** spreads negligible, Alpaca zero commission, hold multi-day to amortize any slippage
 - **Multi-day swing trades with clear thesis (3–10 day holds):** friction is fixed cost amortized over larger move
 - **Paper trading for data collection:** your primary purpose at this scale — the bankroll is tuition, as your doc correctly states
-
 
 ### What is *not* viable
 
@@ -171,7 +167,7 @@ This is where I need to be most blunt: **at \$50–100, almost every short-term 
 
 **Your SCOPE correctly identifies "self-funding KPI is a capital-growth milestone, not something the MVP bankroll can hit."** This is accurate and important — many builders miss this. The \$50–100 phase is purely pipeline proof, not edge proof.
 
-***
+---
 
 ## 6. Advisory Mode \& Loss-Recovery Bias
 
@@ -193,19 +189,19 @@ This is a documented cognitive bias — traders after a drawdown systematically 
 
 With ~\$9.1k total across both pools and being down \$1.2k (~13%), you are technically at the threshold where professional risk management would **pause new risk-taking** and audit existing positions. The advisory pipeline reviewing your own theses through attack/defense is the right instinct — but only works if you actually submit theses *before* trading, not after the fact to rationalize positions already taken.
 
-***
+---
 
 ## Design Flags Summary
 
-| \# | Issue in SCOPE.md | Correction |
-| :-- | :-- | :-- |
-| 1 | Invalidation and stop-loss conflated | Split into separate fields; VOID invalidated trades from win-rate |
-| 2 | "3 clean series of 4" undefined series length | Define series as time-bounded (30 days) with minimum 10 trades each |
-| 3 | No minimum total trade count for promotion | Require ≥30 non-void graded trades across series |
-| 4 | "Overfit bands" not specified | Mandate walk-forward analysis + Deflated Sharpe Ratio explicitly |
-| 5 | No EV calculation required in memo | Mandate explicit numeric EV in every thesis |
-| 6 | Sizing algorithm not prohibited from using PnL history | Explicitly block PnL-state inputs to the sizing function |
-| 7 | Advisory drawdown circuit breaker not mentioned | Add: ≥10% portfolio drawdown = no new advisory positions |
+| \# | Issue in SCOPE.md                                      | Correction                                                          |
+| :- | :----------------------------------------------------- | :------------------------------------------------------------------ |
+| 1  | Invalidation and stop-loss conflated                   | Split into separate fields; VOID invalidated trades from win-rate   |
+| 2  | "3 clean series of 4" undefined series length          | Define series as time-bounded (30 days) with minimum 10 trades each |
+| 3  | No minimum total trade count for promotion             | Require ≥30 non-void graded trades across series                   |
+| 4  | "Overfit bands" not specified                          | Mandate walk-forward analysis + Deflated Sharpe Ratio explicitly    |
+| 5  | No EV calculation required in memo                     | Mandate explicit numeric EV in every thesis                         |
+| 6  | Sizing algorithm not prohibited from using PnL history | Explicitly block PnL-state inputs to the sizing function            |
+| 7  | Advisory drawdown circuit breaker not mentioned        | Add: ≥10% portfolio drawdown = no new advisory positions           |
 
 : https://www.investopedia.com/terms/t/trade-ticket.asp
 
@@ -224,4 +220,3 @@ With ~\$9.1k total across both pools and being down \$1.2k (~13%), you are techn
 <div align="center">⁂</div>
 
 [^1]: SCOPE.md
-

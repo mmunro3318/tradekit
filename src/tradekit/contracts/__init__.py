@@ -34,6 +34,7 @@ SPRINT P2 batch A additive surface (thesis-lifecycle payload models):
     ratified pattern). See ``_event_payloads.py`` and ``tests/ASSUMPTIONS.md``.
 """
 
+from tradekit.contracts._bridge import PropPanelSnapshot, PropPositionRow, TicketReadback
 from tradekit.contracts._event_payloads import (
     AccountCreatedPayload,
     ActionProposedPayload,
@@ -81,6 +82,7 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._hud import AdvisoryTicket, GateResult, HudState, ScanReportEntry
 from tradekit.contracts._marketdata import (
     TIMEFRAME_SECONDS,
     Bar,
@@ -111,6 +113,7 @@ __all__ = [
     "AccountCreatedPayload",
     "AccountState",
     "ActionProposedPayload",
+    "AdvisoryTicket",
     "AssetRef",
     "Bar",
     "BarSeries",
@@ -127,11 +130,13 @@ __all__ = [
     "Fill",
     "FillRecordedPayload",
     "Friction",
+    "GateResult",
     "GateViolationDetectedPayload",
     "GlobalCrypto",
     "Grade",
     "HaltClearedPayload",
     "HaltSetPayload",
+    "HudState",
     "InvalidationAttestedPayload",
     "InvalidationSpec",
     "LessonRecordedPayload",
@@ -149,6 +154,8 @@ __all__ = [
     "Predicate",
     "PromotionConfirmedPayload",
     "PromotionGrantedPayload",
+    "PropPanelSnapshot",
+    "PropPositionRow",
     "PropSimResult",
     "PropSimSpec",
     "ProposedAction",
@@ -157,6 +164,7 @@ __all__ = [
     "ReviewCompletedPayload",
     "RuleHit",
     "RunManifest",
+    "ScanReportEntry",
     "ScriptedTradeModel",
     "SeriesClosedPayload",
     "SizingComputedPayload",
@@ -168,6 +176,7 @@ __all__ = [
     "ThesisGradedPayload",
     "ThesisRejectedPayload",
     "ThesisSubmittedPayload",
+    "TicketReadback",
     "TradeModel",
     "TradeRecord",
     "Verdict",

@@ -9,6 +9,9 @@ the experiment registry (TD-20). Exit codes: 0 ok, 1 failed check/denial,
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
@@ -32,6 +35,7 @@ order_app = typer.Typer(no_args_is_help=True)
 fill_app = typer.Typer(no_args_is_help=True)
 wiki_app = typer.Typer(no_args_is_help=True)
 report_app = typer.Typer(no_args_is_help=True)
+bridge_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
@@ -43,6 +47,9 @@ app.add_typer(order_app, name="order", help="Two-phase order pipeline (§8.2, SP
 app.add_typer(fill_app, name="fill", help="Advisory/manual fills (§8.4, D16, SPRINT P3 batch D).")
 app.add_typer(wiki_app, name="wiki", help="Research-loop notes (§11, SPRINT P3 batch E).")
 app.add_typer(report_app, name="report", help="Reporting (§12.3, SPRINT P3 batch E).")
+app.add_typer(
+    bridge_app, name="bridge", help="UIA prop-panel reconcile aid (SPEC-bridge-read, feature 1+2)."
+)
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -492,6 +499,90 @@ def report_readiness() -> None:
 def report_pnl(account_ref: str) -> None:
     """`report.pnl_snapshot(account_ref)` (thin dispatch, DESIGN §12.3)."""
     typer.echo(_guard_not_implemented(report.pnl_snapshot, account_ref))
+
+
+def _check_bridge_map_drift() -> str | None:
+    """AC-12: detect the connected app's `app_version` drifting from the
+    element map's own `app_version` and return a warning string (or None).
+    RED stub for T5 — GREEN work compares the two versions (S2's window-title
+    parse / "unverified" provenance flag); returns None for now so the CLI
+    never emits a false-positive warning while unimplemented. Test-writer
+    -invented internal seam (flagged, not a spec pin) — tests monkeypatch it
+    directly rather than driving real drift through the (also-stubbed)
+    driver."""
+    return None
+
+
+@bridge_app.command("snapshot")
+def bridge_snapshot() -> None:
+    """`tk bridge snapshot` — read-only prop-panel reconcile aid (AC-9/AC-12).
+    Exit 0 + pure-JSON `PropPanelSnapshot` on stdout; exit 2 if Kraken Desktop
+    isn't running; exit 3 on a panel parse failure (field + raw text named);
+    exit 4 on an element-map resolution failure (`ElementMapMiss` /
+    `AmbiguousElement` / any other `BridgeError` — fix round F5).
+    A map/app_version drift warning (AC-12) goes to stderr only, never stdout.
+    """
+    from tradekit import bridge as bridge_module
+
+    try:
+        result = bridge_module.snapshot(captured_at=datetime.now(UTC))
+    except bridge_module.AppNotFound:
+        typer.echo("Kraken Desktop not running", err=True)
+        raise typer.Exit(code=2) from None
+    except bridge_module.PanelParseError as exc:
+        typer.echo(f"parse failure: field={exc.field} raw={exc.raw_text!r}", err=True)
+        raise typer.Exit(code=3) from exc
+    except bridge_module.BridgeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=4) from exc
+
+    warning = _check_bridge_map_drift()
+    if warning:
+        typer.echo(warning, err=True)
+    typer.echo(result.model_dump_json())
+
+
+@app.command("hud")
+def hud_scan(
+    equity: Annotated[
+        str,
+        typer.Option(..., "--equity", help="Account equity USD (required — never guessed)."),
+    ],
+    symbols: Annotated[
+        str, typer.Option("--symbols", help="Comma-separated pairs (default: 11-pair greenlist).")
+    ] = "",
+    out: Annotated[
+        Path, typer.Option("--out", help="HTML output path.")
+    ] = Path("docs/hud/hud.html"),
+) -> None:
+    """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10/AC-13).
+    Writes a static HTML report to `--out` (atomic replace); exit 4 if the
+    write fails, leaving any pre-existing target untouched.
+    """
+    from tradekit import hud
+    from tradekit.mae import _runtime as mae_runtime
+
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else list(
+        hud.DEFAULT_SYMBOLS
+    )
+
+    captured_at = mae_runtime.clock()
+    state = hud.build_state(symbol_list, captured_at=captured_at, equity_usd=Decimal(equity))
+    html = hud.render(state)
+
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(html)
+            os.replace(tmp_name, out)
+        except OSError:
+            os.remove(tmp_name)
+            raise
+    except OSError as exc:
+        typer.echo(f"failed to write {out}: {exc}", err=True)
+        raise typer.Exit(code=4) from exc
 
 
 if __name__ == "__main__":

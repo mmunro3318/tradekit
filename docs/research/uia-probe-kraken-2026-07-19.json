@@ -1,0 +1,76 @@
+{
+ "app_version": "unverified",
+ "captured_utc": "2026-07-19T14:09:19.541163+00:00",
+ "exposure_grade": "C",
+ "tree": {
+  "node_id": "42-657422",
+  "role": "Window",
+  "name": "Kraken",
+  "automation_id": "",
+  "value": "Kraken",
+  "children": [
+   {
+    "node_id": "42-657422-3--2147483647-657422--2-0",
+    "role": "TitleBar",
+    "name": "",
+    "automation_id": "",
+    "value": "",
+    "children": [
+     {
+      "node_id": "42-657422-3--2147483646-12792-351601395-0",
+      "role": "MenuBar",
+      "name": "System",
+      "automation_id": "MenuBar",
+      "value": "System",
+      "children": [
+       {
+        "node_id": "42-657422-3--2147483646-1368-351601395-1",
+        "role": "MenuItem",
+        "name": "System",
+        "automation_id": "",
+        "value": "System",
+        "children": []
+       }
+      ]
+     },
+     {
+      "node_id": "42-657422-3--2147483647-657422--2-2",
+      "role": "Button",
+      "name": "Minimize",
+      "automation_id": "",
+      "value": "Minimize",
+      "children": []
+     },
+     {
+      "node_id": "42-657422-3--2147483647-657422--2-3",
+      "role": "Button",
+      "name": "Restore",
+      "automation_id": "",
+      "value": "Restore",
+      "children": []
+     },
+     {
+      "node_id": "42-657422-3--2147483647-657422--2-5",
+      "role": "Button",
+      "name": "Close",
+      "automation_id": "",
+      "value": "Close",
+      "children": []
+     }
+    ]
+   }
+  ]
+ },
+ "investigation": {
+  "verdict": "GRADE C \u2014 no accessibility tree exists to map (design U4 STOP)",
+  "evidence": [
+   "UIA dump: 7 nodes, all window chrome (TitleBar/MenuBar/Min/Restore/Close); zero content nodes",
+   "descendants() double-pass (a11y wake attempt): 6 elements, unchanged \u2014 no lazy Chromium tree",
+   "EnumChildWindows: ZERO child HWNDs under top-level 'Window Class' \u2014 no Chrome_RenderWidgetHostHWND / Chrome_WidgetWin / WebView2 host",
+   "Process: single KrakenDesktop.exe (C:/Program Files/Kraken Desktop), no renderer child processes, install dir is the bare exe",
+   "Conclusion: custom GPU-rendered UI (not Electron/WebView); no AccessKit/UIA provider responding beyond the native frame"
+  ],
+  "s3_resolution": "no accessibility activation flag applies \u2014 the app is not Chromium-based",
+  "consequence": "BRIDGE-UIA write path (feature 3) DEAD as designed-for; per design U4 fall back to the vision-executor sketch as a NEW design round. Read-side reconcile aid pivots to screenshot/vision (Claude read-tier or VLM) instead of tree parsing."
+ }
+}

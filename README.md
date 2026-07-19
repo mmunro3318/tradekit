@@ -40,13 +40,14 @@ print(m.edge_verdict, m.dsr, m.warnings)   # DESIGN §9.4 gates, G1 small-sample
 
 ## What works right now
 
-| Capability | Where |
-|---|---|
-| Frozen, typed contracts for every cross-module payload (thesis contract, predicate DSL, events, orders, grades…) + JSON Schema export | `tradekit.contracts` |
-| Append-only, hash-chained event ledger — tamper with *any* column and `verify_chain` names the row; FTS5 search; rebuildable projections; run-id stamping | `tradekit.ledger` |
-| Strategy-edge math: expectancy/PF/Sharpe/Sortino/Calmar/drawdown + Deflated Sharpe with trials penalty and the small-sample provisional regime | `tradekit.mae.compute_strategy_metrics` |
-| Tick-grid `quantize` (float noise can never flip a grading predicate) | `tradekit.contracts.quantize` |
-| CLI audit surface | `tradekit.cli` (`tk`) |
+
+| Capability                                                                                                                                                  | Where                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Frozen, typed contracts for every cross-module payload (thesis contract, predicate DSL, events, orders, grades…) + JSON Schema export                      | `tradekit.contracts`                    |
+| Append-only, hash-chained event ledger — tamper with *any* column and `verify_chain` names the row; FTS5 search; rebuildable projections; run-id stamping | `tradekit.ledger`                       |
+| Strategy-edge math: expectancy/PF/Sharpe/Sortino/Calmar/drawdown + Deflated Sharpe with trials penalty and the small-sample provisional regime              | `tradekit.mae.compute_strategy_metrics` |
+| Tick-grid`quantize` (float noise can never flip a grading predicate)                                                                                        | `tradekit.contracts.quantize`           |
+| CLI audit surface                                                                                                                                           | `tradekit.cli` (`tk`)                   |
 
 Not yet built: market data, indicators, regime/scanner, policy gates, thesis lifecycle, brokers, review, reporting. Each has a pinned interface and an execution plan in `docs/handoff/`.
 

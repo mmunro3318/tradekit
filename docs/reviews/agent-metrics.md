@@ -223,3 +223,37 @@ drifted — hook now exempts (red) commits; enforcement follows written
 law, not vice versa. (2) The reviewer ran live probes, not just reading
 — both MEDs were demonstrated, not conjectured; keep requiring that.
 
+## Round 9 — 2026-07-20 — bridge-read feature review (fec24cc..6a08c16, fixes in next commit)
+
+Reviewer: tk-reviewer (top model). Pre-registered focus: element-resolution
+correctness + read-only discipline. 9 probes executed (P1-P7 + ordering +
+CLI purity). Verdict: **FIX-FIRST** — 2 HIGH (split-brain resolver:
+grade-vs-read divergence would have FALSELY graded C at the U4 gate;
+ambiguity fall-through), 5 MED (boundary error typing, CLI catch gaps ->
+exit 4 pinned, dead _pywinauto wiring, silent AC-12 stub, F6 tier-start),
+2 LOW logged for T7/S1. All fixed same-session + discriminating tests
+(866 green).
+
+| Agent | Grade | Note |
+|---|---|---|
+| red-bridge-1 | B+ | clean goldens/flags; no path/ambiguity probes — both HIGHs invisible to its suite |
+| red-bridge-2 | B+ | flag discipline + stream-purity pins; no adversarial fixtures; AC-8 test vacuous (LOW) |
+| green-bridge-1 | C | resolver contradicts own docstring; 2/3 tiers; duplication = root cause of both HIGHs |
+| green-bridge-2 | B- | correct on tested paths; solid import-guard diagnosis; dead stub wiring + bare errors across boundary |
+| fix-bridge-read | A | all 7 items exactly as adjudicated, added the missing adversarial coverage, nothing weakened |
+
+Process: reviewer ran live probes again (both HIGHs demonstrated). Lesson
+for red dispatches: REQUIRE adversarial fixtures (ambiguity, malformed
+rows, wrong-tier collisions) in the pin list, not just spec-named errors.
+
+
+## Round 10 — hud-orderbook batch 1 (2026-07-19)
+| Dimension | Grade | Note |
+|---|---|---|
+| Correctness | A- | golden arithmetic exact; fabricated thesis_id docked (fixed: interim prefix + rendered warning) |
+| Safety | A | zero I/O/clock/execution; loud size_qty default |
+| Test quality | B | AC-1 tab assertion + AC-6 exception path gaps (both fixed post-review) |
+| Doctrine | B+ | seams sanctioned/real; sell-path + provenance now in T5 scope |
+Per-agent: test-writer B+, implementer B (NotImplementedError trap caught at CTO gate), CTO fix round A-. Verdict: ACCEPT (pass-with-fixes, all MED fixes applied same round).
+
+Round 10b — hud-orderbook batch 2 (tk hud CLI): CTO inline review. Correctness A (atomic write, clock seam, exit 4), safety A (advisory-only; size_qty loud default makes production `tk hud` fail loud until T5 — intended), test quality A- (writer caught nothing to flag; implementer correctly STOPPED on the basename collision instead of hacking import mode — exemplary). Verdict: ACCEPT.

@@ -2,6 +2,46 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, day 3 cont.) — T5 real funnel wiring; tk hud LIVE
+
+- **T5 shipped** (red e8728f9 -> green 2c7c3c6 -> fix c15d6ba): sizing seam
+  -> sizing_info (one real mae.size_position call powers qty 8dp ROUND_DOWN
+  + ATR bracket SL=limit-stop, TP=limit+2R); scan_setup seam (real
+  scan_markets, macd_bullish+volume_spike 1.5, regime-gated); gate order
+  open-position -> data_integrity -> setup -> sizing -> policy_verdict;
+  CLI --equity required (never guess account equity). ASSUMPTIONS 159.
+- **Smoke-tested against live Kraken**: first run caught ProviderRangeError
+  (1h x 90d scan = 2160 bars > 720 OHLC cap) -> setup scan moved to 4h
+  (540 bars, doctrine-consistent); provider errors in scan/sizing now
+  degrade to failed gates per error map. Second run clean: LINK+ETH graded
+  wait (no confirmed setup right now — honest), placeholder rendered.
+- tk hud is now PRODUCTION-USABLE: `uv run tk hud --equity 5000` emits the
+  full advisory HUD. Remaining before first prop trade: thesis provenance
+  (tickets carry interim-thesis ids), sell-side emissions, review round.
+
+## 2026-07-19 (Fable, day 3) — hud-orderbook shipped T1-T4 (design a85053c -> green fa0d3e4)
+
+- **Pivot executed**: post-UIA-grade-C, built the advisory HUD per handoff.
+  Design/spec/tasks committed (static HTML render target chosen over
+  FastAPI/Textual); AC-1..10; T1-T5.
+- **Batch 1 (contracts + render + build_state)**: red 2525531, green e9805da,
+  CTO fix round d9ef3f8 REJECTED implementer's NotImplementedError-as-success
+  sentinel + hardcoded proposal fixture (fabricated advisory numbers = money
+  hazard) -> real BarSeries fixtures, third sanctioned seam size_qty with
+  LOUD default (ASSUMPTIONS 158). Review round 10 ACCEPT w/ fixes (be70f94):
+  tab-count assertion, exception-path test, interim-provenance warning on
+  tickets, gate-reason fidelity.
+- **Batch 2 (tk hud CLI)**: red 8c6ef7d, green fa0d3e4. Implementer correctly
+  STOPPED on pytest basename collision (test_cli.py x2) instead of hacking
+  import mode; CTO renamed to test_hud_cli.py. Atomic temp+replace write,
+  exit 4, clock via mae._runtime only.
+- **Known intended limitation**: production `tk hud` fails loud until T5
+  (real sizing/funnel wiring) — no fabricated quantities on the surface Mike
+  transcribes into the prop account. T5 is next session's first batch, then
+  the one compliant inactivity-clock trade.
+- Gate green at a4e2d6d (890+ tests). Collector confirmed live (hour-14
+  parquet growing).
+
 ## 2026-07-19 (Fable, night 2) — P5-PROP batch A shipped (red 4343b0b -> green 1c4cb14)
 
 - **ASSUMPTIONS round-26 (143-153)**: all four sprint-flagged ambiguities
