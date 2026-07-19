@@ -219,3 +219,44 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [x] T3: build_state (funnel walk + grade rule)
 - [x] T4: hud verbs + tk hud CLI
 - [x] T5: wire real funnel into build_state
+
+## Backlog — provider pagination (next sprint)
+
+### T-PAGE-1: multi-page bar fetch for Kraken/Alpaca (>720-bar ranges)
+**Problem:** `ProviderRangeError` is currently a hard wall (ASSUMPTIONS
+31/33) — any caller asking for more than 720 Kraken bars (or Alpaca with
+a `next_page_token`) in one logical range gets refused outright. hud's
+setup scan worked around this by shrinking to 4h bars; longer lookbacks
+(e.g. 90d @ 1h for other verbs) will hit the same wall.
+
+**Mike's chunking idea (correct instinct, mechanism differs per provider):**
+split any requested range into ≤720-bar windows and concatenate. Note for
+the implementer: this is NOT simple page-index slicing — Kraken's OHLC
+`since` param is a unix-timestamp CURSOR, not an offset/page number
+(sprint-doc trap, ASSUMPTIONS 31: "Kraken's `since` semantics differ per
+call, do not improvise"). The real pagination loop is cursor-based:
+
+```
+bars = []
+cursor = start
+while cursor < end:
+    window_end = min(cursor + MAX_BARS_PER_CALL * tf_seconds, end)
+    page = provider.get_bars(asset, timeframe, cursor, window_end)  # <= 720 bars
+    bars += page.bars
+    if not page.bars:
+        break  # provider returned nothing further; stop, don't spin
+    cursor = page.bars[-1].ts_open + tf_seconds  # advance past the last bar returned
+```
+Alpaca's `next_page_token` is a literal opaque cursor Alpaca hands back —
+loop while it's non-null, passing it into the next request; do not
+attempt Kraken-style timestamp math there.
+
+**Scope:** `src/tradekit/mae/_data/kraken.py::get_bars`,
+`src/tradekit/mae/_data/alpaca_data.py` equivalent, `_runtime.py` callers
+unaffected (same `BarSeries` return shape — pagination is invisible above
+this layer). Guardrails: cap total pages (e.g. refuse >20 pages / ~14400
+bars) so a caller typo doesn't spin forever; empty-page and duplicate-bar
+(cursor off-by-one) cases need explicit tests; `stale=False` still never
+degrades silently per existing doctrine.
+**Est:** one tk-spec → tk-tasks → implement batch, red-line free (mae/
+touch but no policy/broker/money-path).
