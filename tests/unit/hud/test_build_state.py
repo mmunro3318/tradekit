@@ -407,3 +407,59 @@ class TestGateOrderMatchesPinnedSequence:
         assert observed_positions == sorted(observed_positions), (
             f"gate order {gate_names} does not respect pinned sequence {pinned_order}"
         )
+
+
+class TestProviderErrorsInSetupAndSizingDegradeToWait:
+    def test_scan_provider_error_degrades_to_failed_setup_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error map: a raising scan_setup degrades to a failed setup gate
+        (grade wait) naming the error class; policy is never called."""
+        import tradekit.hud._build as hud_build
+
+        _patch_setup_sufficient(monkeypatch)
+
+        def _boom(symbol: str):
+            raise RuntimeError("scan feed down")
+
+        called: list[str] = []
+        monkeypatch.setattr(hud_build, "scan_setup", _boom)
+        monkeypatch.setattr(
+            hud_build, "evaluate_policy", lambda p: called.append("x") or _AllowDecision()
+        )
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=Decimal("5000"))
+
+        assert state.tickets == ()
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        assert entry.grade == "wait"
+        gate = next(g for g in entry.gates if g.name == "setup")
+        assert gate.passed is False
+        assert "RuntimeError" in gate.observed
+        assert called == []
+
+    def test_sizing_provider_error_degrades_to_failed_sizing_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error map: a raising sizing_info degrades to a failed sizing gate
+        (grade wait) naming the error class; no ticket, no exception."""
+        import tradekit.hud._build as hud_build
+
+        _patch_setup_sufficient(monkeypatch)
+
+        def _boom(symbol: str, limit_price, equity_usd):
+            raise ValueError("insufficient daily bars for ATR")
+
+        monkeypatch.setattr(hud_build, "sizing_info", _boom)
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda p: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=Decimal("5000"))
+
+        assert state.tickets == ()
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        assert entry.grade == "wait"
+        gate = next(g for g in entry.gates if g.name == "sizing")
+        assert gate.passed is False
+        assert "ValueError" in gate.observed

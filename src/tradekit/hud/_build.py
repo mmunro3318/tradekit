@@ -29,6 +29,11 @@ _LOOKBACK_DAYS = 30
 _MIN_BARS = 20
 _FEE_RATE = Decimal("0.0004")  # 4 bps/side (ASSUMPTIONS 144)
 _SETUP_FILTERS = {"macd_signal": "bullish", "volume_spike": 1.5}
+# Setup scan runs at 4h: the scanner's 90-day lookback at 1h implies 2160
+# bars > Kraken's 720-bar OHLC call cap (ProviderRangeError, smoke-tested
+# 2026-07-19); 4h -> 540 bars fits, and matches the doctrine's 4h/1h
+# structure (STRATEGY-PROCEDURE stage 2).
+_SETUP_TIMEFRAME = "4h"
 
 
 @dataclass(frozen=True)
@@ -123,7 +128,7 @@ def _default_scan_setup(symbol: str) -> _SetupResult:
     from tradekit import mae
 
     result = mae.scan_markets(
-        "crypto", [_TIMEFRAME], filters=_SETUP_FILTERS, symbols=[symbol], regime_gate=True
+        "crypto", [_SETUP_TIMEFRAME], filters=_SETUP_FILTERS, symbols=[symbol], regime_gate=True
     )
     for match in result["matches"]:
         if match.get("symbol") == symbol:
@@ -291,7 +296,15 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
             rationale="sufficient closed bar history",
         )
 
-        setup = scan_setup(symbol)
+        # Error map: a provider/scan failure degrades to a failed setup
+        # gate (grade wait), never an escaping exception.
+        try:
+            setup = scan_setup(symbol)
+        except Exception as exc:
+            setup = _SetupResult(signal_tags=[])
+            setup_error = f"provider error: {type(exc).__name__}"
+        else:
+            setup_error = ""
         if not setup.signal_tags:
             report.append(
                 ScanReportEntry(
@@ -303,9 +316,10 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
                         GateResult(
                             name="setup",
                             passed=False,
-                            observed="signal_tags=[]",
+                            observed=setup_error or "signal_tags=[]",
                             threshold=">= 1 surviving signal_tag",
-                            rationale=f"no surviving setup signal tags for {symbol} "
+                            rationale=setup_error
+                            or f"no surviving setup signal tags for {symbol} "
                             "(absent or dropped by regime gate)",
                         ),
                     ),
@@ -323,7 +337,17 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
             rationale="setup confirmed",
         )
 
-        sizing = sizing_info(symbol, limit_price, equity_usd)
+        try:
+            sizing = sizing_info(symbol, limit_price, equity_usd)
+        except Exception as exc:
+            sizing = SizingInfo(
+                qty=Decimal("0"),
+                stop_distance_usd=Decimal("0"),
+                r_multiple_target=Decimal("0"),
+            )
+            sizing_error = f"provider error: {type(exc).__name__}"
+        else:
+            sizing_error = ""
         if sizing.qty <= 0:
             report.append(
                 ScanReportEntry(
@@ -336,9 +360,10 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
                         GateResult(
                             name="sizing",
                             passed=False,
-                            observed=f"qty={sizing.qty}",
+                            observed=sizing_error or f"qty={sizing.qty}",
                             threshold="qty > 0",
-                            rationale=f"sizing recommended no position for {symbol}",
+                            rationale=sizing_error
+                            or f"sizing recommended no position for {symbol}",
                         ),
                     ),
                     grade="wait",
