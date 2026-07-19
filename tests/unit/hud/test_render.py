@@ -34,7 +34,7 @@ FIELD_LABELS_IN_ORDER = (
     "Review & Buy",
 )
 
-PALETTE_TOKENS = ("#121212", "#1d1d1f", "#c1581f", "#8a3b12")
+PALETTE_TOKENS = ("#0b0b0c", "#161618", "#ff7a1a", "#c1581f", "#ffb25e")
 FORBIDDEN_KRAKEN_BLUE = "#5741d9"
 
 

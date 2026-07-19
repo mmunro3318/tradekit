@@ -16,16 +16,18 @@ from tradekit.contracts import AdvisoryTicket, HudState, ScanReportEntry
 
 _CSS = """
 :root {
-  --bg: #121212;
-  --panel: #1d1d1f;
-  --field: #2a2a2c;
+  --bg: #0b0b0c;
+  --panel: #161618;
+  --field: #1f1f22;
   --text: #e8e6e3;
   --muted: #9a948d;
-  --accent: #c1581f;
-  --accent-deep: #8a3b12;
+  --neon: #ff7a1a;
+  --burnt: #c1581f;
+  --glow: #ffb25e;
   --buy: #c1581f;
   --sell: #7d2e2e;
   --warn: #d9a441;
+  --fail: #7d2e2e;
 }
 * { box-sizing: border-box; }
 body {
@@ -33,12 +35,21 @@ body {
   color: var(--text);
   font-family: system-ui, sans-serif;
   margin: 0;
-  padding: 1.5rem;
+  padding: 0;
 }
+.title-bar {
+  background: radial-gradient(
+    ellipse at top, var(--glow) 0%, var(--neon) 18%, var(--bg) 55%
+  );
+  border-bottom: 1px solid var(--neon);
+  padding: 1.25rem 1.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+.page-body { padding: 0 1.5rem 1.5rem; }
 h1, h2 { color: var(--text); }
 .panel {
   background: var(--panel);
-  border: 1px solid var(--accent-deep);
+  border: 1px solid var(--neon);
   border-radius: 8px;
   padding: 1rem;
   margin-bottom: 1.5rem;
@@ -47,18 +58,22 @@ h1, h2 { color: var(--text); }
   display: flex;
   justify-content: space-between;
   background: var(--field);
-  border: 1px solid var(--accent-deep);
+  border: 1px solid var(--neon);
   border-radius: 4px;
   padding: 0.4rem 0.6rem;
   margin: 0.3rem 0;
 }
 .field-label { color: var(--muted); }
 .field-value { color: var(--text); font-weight: 600; }
-.tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.5rem; }
+.tabs {
+  display: flex; flex-wrap: wrap; gap: 0.25rem;
+  margin-bottom: 0.5rem; border-bottom: 1px solid var(--neon);
+}
 .tabs label {
   padding: 0.4rem 0.8rem;
   background: var(--field);
-  border: 1px solid var(--accent-deep);
+  border: 1px solid var(--neon);
+  border-bottom: none;
   border-radius: 6px 6px 0 0;
   cursor: pointer;
   color: var(--muted);
@@ -68,13 +83,29 @@ input.tab-radio { display: none; }
 .buy-side { color: var(--buy); }
 .sell-side { color: var(--sell); }
 .warn { color: var(--warn); }
-button.primary-buy { background: var(--buy); color: var(--text); border: none; }
-button.primary-sell { background: var(--sell); color: var(--text); border: none; }
+button.primary-buy, button.primary-sell {
+  background: var(--burnt); color: var(--text); border: none;
+  padding: 0.5rem 1rem; border-radius: 4px;
+}
+button[type="button"]:not(.primary-buy):not(.primary-sell) {
+  background: var(--field); color: var(--text); border: 1px solid var(--neon);
+  border-radius: 4px; padding: 0.5rem 1rem;
+}
 table.report { width: 100%; border-collapse: collapse; }
 table.report th, table.report td {
-  border: 1px solid var(--accent-deep);
+  border: 1px solid var(--neon);
   padding: 0.3rem 0.5rem;
   text-align: left;
+}
+.gate-pass { color: var(--neon); }
+.gate-fail { color: var(--fail); }
+.grade-chip {
+  background: var(--burnt);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-weight: 600;
+  display: inline-block;
 }
 """
 
@@ -149,7 +180,8 @@ def _ticket_panel(ticket: AdvisoryTicket) -> str:
 def _report_row(entry: ScanReportEntry) -> str:
     indicators_html = ", ".join(f"{_esc(name)}={_esc(value)}" for name, value in entry.indicators)
     gates_html = "".join(
-        f"<li>{_esc(gate.name)}: {'PASS' if gate.passed else 'FAIL'} "
+        f'<li><span class="{"gate-pass" if gate.passed else "gate-fail"}">'
+        f"{_esc(gate.name)}: {'PASS' if gate.passed else 'FAIL'}</span> "
         f"(observed {_esc(gate.observed)} vs {_esc(gate.threshold)}) — {_esc(gate.rationale)}</li>"
         for gate in entry.gates
     )
@@ -159,7 +191,7 @@ def _report_row(entry: ScanReportEntry) -> str:
       <td>{_esc(entry.timeframe)}</td>
       <td>{indicators_html}</td>
       <td><ul>{gates_html}</ul></td>
-      <td>{_esc(entry.grade)}</td>
+      <td><span class="grade-chip">{_esc(entry.grade)}</span></td>
       <td>{_esc(entry.grade_rationale)}</td>
     </tr>
     """
@@ -203,7 +235,8 @@ def render(state: HudState) -> str:
 </style>
 </head>
 <body>
-<h1>Advisory order book</h1>
+<div class="title-bar"><h1>Advisory order book</h1></div>
+<div class="page-body">
 <div class="panel">
 {tickets_html}
 </div>
@@ -219,6 +252,7 @@ def render(state: HudState) -> str:
 </table>
 </div>
 <p>Generated at {_esc(state.generated_at)}</p>
+</div>
 </body>
 </html>
 """
