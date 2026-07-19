@@ -92,6 +92,14 @@ from tradekit.contracts._marketdata import (
 )
 from tradekit.contracts._metrics import StrategyMetrics, TradeRecord
 from tradekit.contracts._predicates import InvalidationSpec, Predicate
+from tradekit.contracts._prop import (
+    EmpiricalTradeModel,
+    ParametricTradeModel,
+    PropSimResult,
+    PropSimSpec,
+    ScriptedTradeModel,
+    TradeModel,
+)
 from tradekit.contracts._quantize import quantize
 from tradekit.contracts._review import ReviewArtifact, Verification
 from tradekit.contracts._schemas import json_schemas
@@ -112,6 +120,7 @@ __all__ = [
     "CriteriaOutcome",
     "DemotedPayload",
     "EVBlock",
+    "EmpiricalTradeModel",
     "EntrySpec",
     "Event",
     "EventFilter",
@@ -134,17 +143,21 @@ __all__ = [
     "OrderRequest",
     "OrderStatus",
     "OrderSubmittedPayload",
+    "ParametricTradeModel",
     "PolicyVersionLoadedPayload",
     "Position",
     "Predicate",
     "PromotionConfirmedPayload",
     "PromotionGrantedPayload",
+    "PropSimResult",
+    "PropSimSpec",
     "ProposedAction",
     "ReconciliationRunPayload",
     "ReviewArtifact",
     "ReviewCompletedPayload",
     "RuleHit",
     "RunManifest",
+    "ScriptedTradeModel",
     "SeriesClosedPayload",
     "SizingComputedPayload",
     "StrategyMetrics",
@@ -155,6 +168,7 @@ __all__ = [
     "ThesisGradedPayload",
     "ThesisRejectedPayload",
     "ThesisSubmittedPayload",
+    "TradeModel",
     "TradeRecord",
     "Verdict",
     "VerdictIssuedPayload",

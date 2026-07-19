@@ -2787,3 +2787,116 @@ bodies instead of a typed error.
     404-on-order_status is the one venue answer that maps to a typed
     OrderStatus; everything else non-2xx/malformed RAISES. The
     live-promotion blocker from review round 7 is closed pre-live.
+
+## Round-26 — P5-PROP batch A red-phase pins (prop dials + evaluation
+barrier simulator), 2026-07-19
+
+143. **Prop dial block defaults to `None`/disabled (TD-24 convention);
+    venue numbers live in `config.toml`.** New `PolicyDials` fields
+    `prop_mdl_pct` / `prop_mdd_pct` / `prop_profit_target_pct` /
+    `prop_fee_side_bps` / `prop_funding_daily_pct` /
+    `internal_daily_soft_frac` / `internal_daily_hard_frac` /
+    `internal_mdd_reserve_frac` are all `Decimal | None = None` in code —
+    disabled unless configured, never coerced to a sentinel (entry 99
+    discipline). The committed `config.toml` sets the Kraken Prop Starter
+    values (0.03 / 0.06 / 0.10 / 4 bps / 0.00033 daily; buffers
+    0.50 / 0.70 / 0.40 per Q.H.122–123/130–131). Report-1 §6/§8 is the
+    venue source of truth for the first five.
+
+144. **Internal-wall resolution for `prop:*` accounts (R-017/R-018
+    wiring).** `policy.prop_account_walls(dials)` is the ONE resolution
+    point: returns `(daily_wall_frac, lifetime_wall_frac)` =
+    `(prop_mdl_pct × internal_daily_hard_frac,
+    prop_mdd_pct × (1 − internal_mdd_reserve_frac))` — Starter numbers:
+    (0.021, 0.036). Returns `None` (walls disabled, R-017/R-018 emit
+    `not_configured`) unless ALL four inputs are set. The 50% soft frac is
+    NOT an R-rule — it is a HUD/advisory threshold (later batch); only the
+    hard wall denies. Venue numbers (3%/6%) remain the OUTER truth the
+    simulator models; R-rules enforce only the internal walls.
+
+145. **Barrier semantics (venue-exact, Report-1 §6; each is a golden):**
+    (a) MDL floor for a day = `snapshot_balance × (1 − mdl_pct)` where
+    `snapshot_balance` is the BALANCE (realized only, fees/funding
+    applied, open positions excluded) at 00:30 UTC; day 1's snapshot is
+    the starting balance. (b) Breach comparisons are ANTI-PERMISSIVE at
+    the boundary: equity `<=` floor breaches (both MDL and MDD) — the
+    venue's "falls $3,000 or more" wording on the $100k worked example.
+    NOTE the deliberate asymmetry with R-017/R-018's `<=` ALLOWS
+    convention (entry 99 lineage): internal walls are OUR dials (generous
+    to us at the boundary is safe because they sit far inside the venue
+    walls); the simulator models the VENUE's barrier, where assuming
+    breach at equality is the conservative direction. (c) MDD floor =
+    `starting_balance × (1 − mdd_pct)`, STATIC for the account's life —
+    never trails peak equity. (d) Profit target: equity `>=`
+    `starting_balance × (1 + profit_target_pct)` absorbs into "passed"
+    (venue force-flattens); subsequent scripted trades are ignored.
+    (e) All three barriers are absorbing; first hit in ledger-event time
+    order wins.
+
+146. **Fee/funding accrual pins (venue-exact where documented, flagged
+    where not):** (a) commission = `side_notional × fee_side_bps/10_000`
+    per side, where entry-side notional = `TradeRecord.size_usd` and
+    exit-side notional = `size_usd × exit_price/entry_price`; (b) funding
+    = `entry_notional × funding_daily_pct/6` charged at each UTC clock
+    mark in {00,04,08,12,16,20}h with `entry_ts < mark < exit_ts`
+    (exclusive both ends: a position closed exactly at a mark is not
+    charged at it; funding on ENTRY notional, not marked-to-market —
+    PLACEHOLDER pending Report 2's microstructure numbers); (c) every
+    ledger application (fee, funding charge, realized P&L) is quantized
+    to the cent, ROUND_HALF_EVEN, at application time (matches
+    event-sourced ledger reality; 0.165 → 0.16); (d) ledger events apply
+    in timestamp order — entry fee at entry_ts, funding at marks,
+    realized P&L then exit fee at exit_ts; (e) fees and funding reduce
+    balance and therefore count toward MDL and MDD (Report-1 §6/§8).
+
+147. **Scripted-mode breach granularity (LIMITATION, deliberate):**
+    `ScriptedTradeModel` replays a fixed `TradeRecord` sequence as ONE
+    deterministic path and evaluates barriers on the realized-balance
+    ledger at each ledger event — there is no intratrade
+    unrealized-equity path in scripted mode (TradeRecord carries no
+    intratrade marks), so an intratrade adverse excursion that would have
+    breached the venue's real-time equity check is NOT detected. This
+    makes scripted-mode results OPTIMISTIC on breach probability; it is a
+    golden/replay seam and a backtest→barriers bridge, not the risk
+    canon. Parametric mode shares the granularity (per-trade resolution)
+    — modeling intratrade MAE is a flagged future refinement, NOT
+    improvised in batch A.
+
+148. **Parametric mode uses INDEPENDENT per-trade draws (batch-A flag
+    resolved):** no serial-correlation dial in v1 — serial dependence
+    enters via `EmpiricalTradeModel`'s BLOCK bootstrap (block length is a
+    spec field there), keeping one mechanism per concern. Parametric
+    risk_frac is a fraction of CURRENT balance at entry (multiplicative
+    walk); win pays `risk × payoff_ratio`, loss costs `risk`, exactly
+    `trades_per_day` trades per day spaced `hold_hours` apart.
+
+149. **Zero-edge sanity envelope (batch-A flag resolved — CTO
+    derivation):** for a multiplicative driftless walk (win_rate 0.5,
+    payoff 1.0, fees/funding zero) between static absorbing barriers,
+    gambler's-ruin in LOG space gives
+    `pass_prob ≈ |ln(1−mdd)| / (|ln(1−mdd)| + ln(1+target))` — Starter
+    numbers: 0.06188/(0.06188+0.09531) = 0.3936 (additive approximation
+    0.375 is the sanity cross-check). Envelope test uses risk_frac 0.005
+    with trades_per_day 4 so the worst daily move (2%) can NEVER reach
+    the 3% MDL — MDL provably non-binding, isolating the two-barrier
+    result; pinned envelope `0.36 <= pass_prob <= 0.43` with horizon long
+    enough that `pass_prob + ruin_prob >= 0.99`. Negative-edge companion
+    (win_rate 0.45): `ruin_prob > pass_prob`. Seeded, so deterministic
+    once green — the envelope tolerates estimator noise + step-overshoot
+    bias, not flakiness.
+
+150. **`recommended_max_risk_frac` ladder + monthly normalization
+    (Q.A.8):** parametric mode only (`None` otherwise). Ladder =
+    risk_frac in {0.0025, 0.005, 0.0075, 0.010, 0.0125, 0.015, 0.0175,
+    0.020}; for each rung the engine re-runs the spec with that
+    risk_frac (same seed derivation) and computes monthly ruin
+    `1 − (1 − ruin_prob)^(30/horizon_days)`; recommendation = the
+    LARGEST rung with monthly ruin `<= 0.02`, or `None` if no rung
+    clears (never "the least-bad rung" — fail closed).
+
+151. **Prop-basis placeholder (batch-A flag resolved as PLACEHOLDER):**
+    spot-vs-PROP instrument basis default 2 bps, observed ONCE (ETH,
+    2026-07-19 Kraken Desktop screen) — ratified as
+    placeholder-pending-Report-2; it is a `CostModel` slot consumed in
+    batch B, recorded here so the number's provenance is on the record
+    before it gets load-bearing.

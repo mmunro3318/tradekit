@@ -194,6 +194,15 @@ def policy_version_hash(dials: PolicyDials, rule_ids: list[str]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def prop_account_walls(dials: PolicyDials) -> tuple[Decimal, Decimal] | None:
+    """Internal-wall resolution for `prop:*` accounts (ASSUMPTIONS 144):
+    `(prop_mdl_pct * internal_daily_hard_frac,
+    prop_mdd_pct * (1 - internal_mdd_reserve_frac))`, or `None` (walls
+    disabled -> R-017/R-018 `not_configured`) unless all four inputs are
+    set. RED-phase stub (P5-PROP batch A) — green pass implements."""
+    raise NotImplementedError("batch A green pass implements this (RED stub)")
+
+
 def resolve_account_dial(
     account_value: Decimal | None, dial_default: Decimal | None
 ) -> Decimal | None:
@@ -211,5 +220,6 @@ __all__ = [
     "PolicyDials",
     "canonical_dump",
     "policy_version_hash",
+    "prop_account_walls",
     "resolve_account_dial",
 ]
