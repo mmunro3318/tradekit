@@ -47,6 +47,13 @@ _SYMBOL_TO_KRAKEN_PAIR: dict[str, str] = {
     "NEAR/USD": "NEARUSD",
     "TAO/USD": "TAOUSD",
     "EIGEN/USD": "EIGENUSD",
+    # Remaining greenlist pairs, verified against the LIVE /0/public/OHLC
+    # endpoint on 2026-07-19 (XRP is a legacy listing: X/Z result key).
+    "RENDER/USD": "RENDERUSD",
+    "PAXG/USD": "PAXGUSD",
+    "XRP/USD": "XRPUSD",
+    "AVAX/USD": "AVAXUSD",
+    "AKT/USD": "AKTUSD",
 }
 _KRAKEN_RESULT_KEY: dict[str, str] = {
     "XBTUSD": "XXBTZUSD",
@@ -56,6 +63,11 @@ _KRAKEN_RESULT_KEY: dict[str, str] = {
     "NEARUSD": "NEARUSD",
     "TAOUSD": "TAOUSD",
     "EIGENUSD": "EIGENUSD",
+    "RENDERUSD": "RENDERUSD",
+    "PAXGUSD": "PAXGUSD",
+    "XRPUSD": "XXRPZUSD",
+    "AVAXUSD": "AVAXUSD",
+    "AKTUSD": "AKTUSD",
 }
 
 # Kraken OHLC returns at most this many bars per call; beyond it callers must
