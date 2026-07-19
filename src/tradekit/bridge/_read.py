@@ -10,11 +10,14 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from tradekit.bridge._elementmap import ElementMap, Selector
-from tradekit.bridge._errors import AmbiguousElement, ElementMapMiss, PanelParseError
+from tradekit.bridge._elementmap import ElementMap, Selector, resolve_selector
+from tradekit.bridge._errors import PanelParseError
 from tradekit.bridge._parse import parse_money
 from tradekit.bridge._session import UiaNode, UiaSession, real_session
 from tradekit.contracts import PropPanelSnapshot, PropPositionRow, TicketReadback
+
+_POSITION_SIDES = {"long", "short"}
+_TICKET_SIDES = {"buy", "sell"}
 
 
 def _load_element_map_for_session(session: UiaSession) -> ElementMap:
@@ -26,51 +29,12 @@ def _load_element_map_for_session(session: UiaSession) -> ElementMap:
     raise NotImplementedError("bridge._load_element_map_for_session: T7 real map work")
 
 
-def _walk(n: UiaNode) -> list[UiaNode]:
-    out = [n]
-    for child in n.children():
-        out.extend(_walk(child))
-    return out
-
-
 def _resolve(root: UiaNode, name: str, selector: Selector) -> UiaNode:
     """Resolve a single logical selector against the live tree via the
-    automation_id -> name -> path cascade (ASSUMPTIONS 154a/155b).
-
-    `by:"path"`: value is a list of `name` strings; each is resolved as
-    the unique node anywhere in the previous match's subtree carrying
-    that `name`, root-relative ordered descent (ASSUMPTIONS 155b).
-    """
-    if selector.by == "path":
-        assert isinstance(selector.value, list)
-        current = root
-        for step in selector.value:
-            candidates = [n for n in _walk(current) if n.name == step]
-            if len(candidates) == 0:
-                raise ElementMapMiss(name, f"no node named {step!r} in subtree")
-            if len(candidates) > 1:
-                raise AmbiguousElement(name, len(candidates))
-            current = candidates[0]
-        return current
-
-    value = selector.value
-    assert isinstance(value, str)
-    all_nodes = _walk(root)
-    by_aid = [n for n in all_nodes if n.automation_id == value]
-    if len(by_aid) == 1:
-        return by_aid[0]
-    if len(by_aid) > 1:
-        raise AmbiguousElement(name, len(by_aid))
-
-    by_name = [n for n in all_nodes if n.name == value]
-    if len(by_name) == 1:
-        return by_name[0]
-    if len(by_name) > 1:
-        raise AmbiguousElement(name, len(by_name))
-
-    nearby_roles = sorted({n.role for n in all_nodes})
-    hint = f"no node with automation_id/name {value!r}; nearby roles: {nearby_roles}"
-    raise ElementMapMiss(name, hint)
+    unified cascade in `_elementmap.resolve_selector` (ASSUMPTIONS
+    154a/155b; fix round F1/F2/F6 — one resolver, not a duplicated copy)."""
+    _tier, node = resolve_selector(root, name, selector)
+    return node
 
 
 def _resolve_optional(
@@ -103,7 +67,11 @@ def _optional_qty(field: str, raw: str) -> Decimal | None:
 
 def _row_from_node(row_node: UiaNode) -> PropPositionRow:
     cells = row_node.children()
+    if len(cells) != 5:
+        raise PanelParseError("positions_row", ",".join(c.value for c in cells))
     symbol_n, side_n, qty_n, entry_n, pnl_n = cells
+    if side_n.value not in _POSITION_SIDES:
+        raise PanelParseError("side", side_n.value)
     try:
         qty = Decimal(qty_n.value)
         entry_price = Decimal(entry_n.value)
@@ -189,6 +157,8 @@ def read_ticket(*, session: UiaSession | None = None) -> TicketReadback:
     stop_raw = _resolve(
         root, "TICKET_STOP_PRICE", element_map.selectors["TICKET_STOP_PRICE"]
     ).value
+    if side_raw != "" and side_raw not in _TICKET_SIDES:
+        raise PanelParseError("TICKET_SIDE", side_raw)
 
     return TicketReadback(
         account_name=account_name,

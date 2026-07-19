@@ -115,6 +115,50 @@ class TestBridgeSnapshotParseFailure:
         assert "5 000,00" in result.stderr
 
 
+class TestBridgeSnapshotElementMapMiss:
+    def test_element_map_miss_exits_four_with_one_line_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix round F5: an `ElementMapMiss` from the driver -> exit 4,
+        one-line stderr message (AppNotFound stays 2, parse stays 3)."""
+
+        def _raise(**kw: object) -> PropPanelSnapshot:
+            from tradekit import bridge as bridge_module
+
+            raise bridge_module.ElementMapMiss("BALANCE", "no node found")
+
+        monkeypatch.setattr("tradekit.bridge.snapshot", _raise)
+
+        result = runner.invoke(app, ["bridge", "snapshot"])
+
+        assert result.exit_code == 4
+        assert result.stdout == ""
+        assert "BALANCE" in result.stderr
+        assert result.stderr.strip().count("\n") == 0, "one-line message"
+
+
+class TestBridgeSnapshotAmbiguousElement:
+    def test_ambiguous_element_exits_four_with_one_line_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix round F5: an `AmbiguousElement` from the driver -> exit 4,
+        one-line stderr message."""
+
+        def _raise(**kw: object) -> PropPanelSnapshot:
+            from tradekit import bridge as bridge_module
+
+            raise bridge_module.AmbiguousElement("BALANCE", 2)
+
+        monkeypatch.setattr("tradekit.bridge.snapshot", _raise)
+
+        result = runner.invoke(app, ["bridge", "snapshot"])
+
+        assert result.exit_code == 4
+        assert result.stdout == ""
+        assert "BALANCE" in result.stderr
+        assert result.stderr.strip().count("\n") == 0, "one-line message"
+
+
 class TestBridgeSnapshotMapDrift:
     def test_app_version_drift_emits_stderr_warning_not_fatal(
         self, monkeypatch: pytest.MonkeyPatch

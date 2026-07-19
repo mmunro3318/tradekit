@@ -109,6 +109,72 @@ class TestGradeRuleC:
         assert grade_exposure(tree, element_map) == "C"
 
 
+class TestGradeRulePathTier:
+    def test_path_selector_resolved_by_unique_name_descent_grades_b(self) -> None:
+        """Fix round F1/F2 coverage: a `by:"path"` selector resolves via
+        ordered unique-name descent (ASSUMPTIONS 155b) -> path tier, not
+        automation_id -> B (all resolvable, >=1 only by name/path)."""
+        tree = _tree(
+            FakeUiaNode(node_id="n1", automation_id="balanceValue"),
+            FakeUiaNode(
+                node_id="panel",
+                name="Panel",
+                _children=[FakeUiaNode(node_id="grid", name="PositionsGrid")],
+            ),
+        )
+        element_map = ElementMap(
+            app_version="1.0.0",
+            captured_utc="2026-07-19T00:00:00Z",
+            selectors={
+                "BALANCE": Selector(by="automation_id", value="balanceValue"),
+                "POSITIONS_TABLE": Selector(by="path", value=["Panel", "PositionsGrid"]),
+            },
+        )
+        assert grade_exposure(tree, element_map) == "B"
+
+
+class TestGradeRuleAmbiguityGradesC:
+    def test_automation_id_ambiguity_grades_c_consistent_with_read_behavior(self) -> None:
+        """Fix round F1 coverage: two nodes sharing an automation_id makes
+        that selector ambiguous, not merely unresolved by a different
+        tier — grading treats ambiguity as unresolvable (C), the same
+        outcome `_read.py`'s `snapshot()` raises `AmbiguousElement` for
+        over the same tree shape (ASSUMPTIONS 154a; same-tree, same-
+        outcome consistency between the grading and read surfaces)."""
+        tree = _tree(
+            FakeUiaNode(node_id="n1", automation_id="balanceValue"),
+            FakeUiaNode(node_id="n2", automation_id="balanceValue"),
+        )
+        element_map = ElementMap(
+            app_version="1.0.0",
+            captured_utc="2026-07-19T00:00:00Z",
+            selectors={
+                "BALANCE": Selector(by="automation_id", value="balanceValue"),
+            },
+        )
+        assert grade_exposure(tree, element_map) == "C"
+
+
+class TestCascadeStartsAtOwnTier:
+    def test_name_selector_never_consults_automation_id_tier(self) -> None:
+        """CTO adjudication F6: a `by:"name"` selector never consults the
+        automation_id tier, even when a node's automation_id equals the
+        selector's value — only `.name` matches count. Here the sole
+        node's automation_id (not name) equals the selector value, so a
+        `by:"name"` selector must find it unresolvable (grade C), proving
+        the automation_id tier was skipped rather than falling through to
+        it."""
+        tree = _tree(FakeUiaNode(node_id="n1", automation_id="Account Name", name=""))
+        element_map = ElementMap(
+            app_version="1.0.0",
+            captured_utc="2026-07-19T00:00:00Z",
+            selectors={
+                "ACCOUNT_NAME": Selector(by="name", value="Account Name"),
+            },
+        )
+        assert grade_exposure(tree, element_map) == "C"
+
+
 class TestElementMapRoundTrip:
     """AC-11: the artifact JSON round-trips (load -> same tree)."""
 

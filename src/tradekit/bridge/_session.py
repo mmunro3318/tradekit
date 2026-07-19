@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from tradekit.bridge._errors import BridgeError
-
 
 class UiaNode(Protocol):
     @property
@@ -36,13 +34,14 @@ class UiaSession(Protocol):
 
 
 def real_session() -> UiaSession:
-    """Construct the pywinauto-backed session (T6). Stubbed for now: raises
-    BridgeError naming the install hint so `tradekit.bridge` stays
-    importable without the optional dependency group (AC-10)."""
-    raise BridgeError(
-        "real UIA session requires the optional bridge dependency group — "
-        "run `uv sync --group bridge`"
-    )
+    """Construct the pywinauto-backed session (T6). Delegates to
+    `_pywinauto.real_session`, which does the guard-first optional
+    dependency check before any other work (AC-10; fix round F3 — this
+    used to be a duplicate unconditional-raise stub that lied about the
+    install hint even when the bridge group WAS installed)."""
+    from tradekit.bridge._pywinauto import real_session as _real_session
+
+    return _real_session()
 
 
 __all__ = ["UiaNode", "UiaSession", "real_session"]

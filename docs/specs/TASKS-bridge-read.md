@@ -33,4 +33,4 @@ done: artifact round-trip + guard tests green via tk-gate; probe runs to --help 
 ### T7: run probe against live Kraken Desktop, commit artifact, re-freeze fixtures
 satisfies: AC-1, AC-11 (real-data leg); resolves S1/S3, design U4
 files: docs/research/uia-probe-kraken-2026-07.json, src/tradekit/bridge/elementmaps/, tests/unit/bridge/conftest.py
-done: artifact committed with grade; fixtures swapped to real tree through the golden-freeze gate; MIKE-GATED (Kraken Desktop must be open; CTO observes read-only)
+done: artifact committed with grade; fixtures swapped to real tree through the golden-freeze gate; MIKE-GATED (Kraken Desktop must be open; CTO observes read-only); includes real drift detection replacing _check_bridge_map_drift stub (AC-12)

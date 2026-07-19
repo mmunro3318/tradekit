@@ -515,7 +515,9 @@ def _check_bridge_map_drift() -> str | None:
 def bridge_snapshot() -> None:
     """`tk bridge snapshot` — read-only prop-panel reconcile aid (AC-9/AC-12).
     Exit 0 + pure-JSON `PropPanelSnapshot` on stdout; exit 2 if Kraken Desktop
-    isn't running; exit 3 on a panel parse failure (field + raw text named).
+    isn't running; exit 3 on a panel parse failure (field + raw text named);
+    exit 4 on an element-map resolution failure (`ElementMapMiss` /
+    `AmbiguousElement` / any other `BridgeError` — fix round F5).
     A map/app_version drift warning (AC-12) goes to stderr only, never stdout.
     """
     from tradekit import bridge as bridge_module
@@ -528,6 +530,9 @@ def bridge_snapshot() -> None:
     except bridge_module.PanelParseError as exc:
         typer.echo(f"parse failure: field={exc.field} raw={exc.raw_text!r}", err=True)
         raise typer.Exit(code=3) from exc
+    except bridge_module.BridgeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=4) from exc
 
     warning = _check_bridge_map_drift()
     if warning:

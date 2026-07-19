@@ -43,7 +43,14 @@ from decimal import Decimal
 import pytest
 
 from conftest import FakeUiaSession, node
-from tradekit.bridge import AmbiguousElement, AppNotFound, ElementMapMiss, read_ticket, snapshot
+from tradekit.bridge import (
+    AmbiguousElement,
+    AppNotFound,
+    ElementMapMiss,
+    PanelParseError,
+    read_ticket,
+    snapshot,
+)
 from tradekit.bridge._elementmap import ElementMap, Selector
 from tradekit.contracts import PropPanelSnapshot, PropPositionRow, TicketReadback
 
@@ -348,3 +355,77 @@ class TestReadOnlyCallLog:
         assert not any(
             verb in call for call in session.calls for verb in FakeUiaSession.WRITE_VERBS
         )
+
+
+class TestSnapshotPositionsRowCellCount:
+    def test_row_with_four_cells_raises_panel_parse_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix round F4: a positions row whose child count != 5 is a
+        `PanelParseError(field="positions_row", ...)`, not a bare
+        `ValueError` from tuple-unpacking crossing the bridge boundary."""
+        bad_row = node(
+            "row1",
+            role="DataItem",
+            children=[
+                node("row1-symbol", value="AAPL"),
+                node("row1-side", value="long"),
+                node("row1-qty", value="10"),
+                node("row1-entry", value="150.25"),
+                # unrealized_pnl_usd cell deliberately missing
+            ],
+        )
+        tree = _base_tree(positions=[bad_row])
+        session = FakeUiaSession(tree)
+        _use_map(monkeypatch, _base_map())
+
+        with pytest.raises(PanelParseError) as excinfo:
+            snapshot(session=session, captured_at=CAPTURED_AT)
+
+        assert excinfo.value.field == "positions_row"
+
+
+class TestSnapshotPositionsRowBadSide:
+    def test_side_outside_long_short_raises_panel_parse_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix round F4: a positions-row side cell outside {long, short}
+        is a `PanelParseError` naming the `side` field, never silently
+        coerced or a bare `ValidationError` escaping the bridge boundary."""
+        rows = [_row("AAPL", "buy", "10", "150.25", "25.50", node_id="row1")]
+        tree = _base_tree(positions=rows)
+        session = FakeUiaSession(tree)
+        _use_map(monkeypatch, _base_map())
+
+        with pytest.raises(PanelParseError) as excinfo:
+            snapshot(session=session, captured_at=CAPTURED_AT)
+
+        assert excinfo.value.field == "side"
+
+
+class TestReadTicketBadSide:
+    def test_side_outside_buy_sell_raises_panel_parse_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix round F4: a ticket side cell outside {buy, sell} (and not
+        empty) is a `PanelParseError` naming the `TICKET_SIDE` field."""
+        tree = node(
+            "root",
+            role="Window",
+            children=[
+                node("account", automation_id="accountNameValue", value="Starter Eval 1"),
+                node("instrument", automation_id="instrumentValue", value="BTC/USD"),
+                node("side", automation_id="ticketSideValue", value="long"),
+                node("order_type", automation_id="ticketOrderTypeValue", value="Market"),
+                node("qty", automation_id="ticketQtyValue", value=""),
+                node("limit", automation_id="ticketLimitPriceValue", value=""),
+                node("stop", automation_id="ticketStopPriceValue", value=""),
+            ],
+        )
+        session = FakeUiaSession(tree)
+        _use_map(monkeypatch, _ticket_map())
+
+        with pytest.raises(PanelParseError) as excinfo:
+            read_ticket(session=session)
+
+        assert excinfo.value.field == "TICKET_SIDE"
