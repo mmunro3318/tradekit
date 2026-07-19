@@ -282,3 +282,68 @@ class TestAC13MissingEquityIsUsageError:
 
         assert result.exit_code == 2
         assert not out.exists()
+
+
+class TestAC14OpenFlag:
+    def test_open_flag_opens_written_file_in_browser(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-14: `--open` opens the written file's URI via webbrowser.open
+        after a successful write; exit 0."""
+        import webbrowser
+
+        _patch_allow_all(monkeypatch)
+        out = tmp_path / "hud.html"
+        opened: list[str] = []
+        monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+        result = runner.invoke(
+            app,
+            ["hud", "--symbols", "LINK/USD", "--equity", EQUITY, "--out", str(out), "--open"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(opened) == 1
+        assert out.resolve().as_uri() == opened[0]
+
+    def test_open_failure_does_not_change_exit_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-14: a raising webbrowser.open is best-effort — swallowed,
+        exit stays 0, file still written."""
+        import webbrowser
+
+        _patch_allow_all(monkeypatch)
+        out = tmp_path / "hud.html"
+
+        def _boom(url: str) -> bool:
+            raise OSError("no browser")
+
+        monkeypatch.setattr(webbrowser, "open", _boom)
+
+        result = runner.invoke(
+            app,
+            ["hud", "--symbols", "LINK/USD", "--equity", EQUITY, "--out", str(out), "--open"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert out.exists()
+
+    def test_no_open_flag_never_touches_browser(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-14: without --open, webbrowser is never invoked."""
+        import webbrowser
+
+        _patch_allow_all(monkeypatch)
+        out = tmp_path / "hud.html"
+        opened: list[str] = []
+        monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+        result = runner.invoke(
+            app,
+            ["hud", "--symbols", "LINK/USD", "--equity", EQUITY, "--out", str(out)],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert opened == []

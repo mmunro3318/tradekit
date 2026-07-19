@@ -554,6 +554,9 @@ def hud_scan(
     out: Annotated[
         Path, typer.Option("--out", help="HTML output path.")
     ] = Path("docs/hud/hud.html"),
+    open_browser: Annotated[
+        bool, typer.Option("--open", help="Open the written file in the default browser.")
+    ] = False,
 ) -> None:
     """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10/AC-13).
     Writes a static HTML report to `--out` (atomic replace); exit 4 if the
@@ -587,6 +590,14 @@ def hud_scan(
     except OSError as exc:
         typer.echo(f"failed to write {out}: {exc}", err=True)
         raise typer.Exit(code=4) from exc
+
+    if open_browser:
+        import webbrowser
+
+        try:  # best-effort (AC-14): a browser failure is not a HUD failure
+            webbrowser.open(out.resolve().as_uri())
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
