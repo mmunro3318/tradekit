@@ -154,3 +154,42 @@ Error taxonomy: no new exception types. Scanner warnings/refusals are data
   `build_state` consumes them — RESOLVED by reference.
 - Wait-vs-hold tie (open position AND data gap): `hold` wins (position
   safety trumps) — RESOLVED, test in AC-7 fixture.
+
+## Addendum — T5 (real funnel wiring), CTO-pinned 2026-07-19
+
+Interface changes (ratify as ASSUMPTIONS on red):
+- `build_state(symbols, *, captured_at, equity_usd: Decimal) -> HudState`
+  (new required kwarg; CLI gains required `--equity` Decimal option — the
+  advisory surface never guesses account equity).
+- Sizing seam becomes `size_qty(symbol, limit_price, equity_usd) -> Decimal`;
+  DEFAULT is now REAL: `mae.size_position(symbol, account_equity_usd=equity_usd)`
+  → qty = Decimal(str(recommended_units)) quantized to 8 dp ROUND_DOWN
+  (conservative — never oversize). Zero/negative qty → no ticket, failed
+  `sizing` gate.
+- Bracket rule replaces interim 1.05/0.97: SL = limit − stop_distance_usd
+  (from the same size_position call, min-ATR stop), TP = limit +
+  r_multiple_target × stop_distance_usd (2R), both quantized to the limit
+  price's exponent ROUND_HALF_EVEN. Sell side mirrors signs (and
+  `_build_ticket_fields` + render button label become side-aware), though
+  build_state still emits buy-only proposals in this batch.
+- Setup gate (new, before policy): `mae.scan_markets("crypto", ["1h"],
+  filters={"macd_signal": "bullish", "volume_spike": 1.5}, symbols=[symbol],
+  regime_gate=True)`; PASSES iff a match for the symbol survives with ≥1
+  signal_tag after the regime gate (doctrine: momentum + volume
+  confirmation, STRATEGY-PROCEDURE stage 2). Fail → grade `wait`, gate
+  rationale lists the dropped/absent tags; no policy call, no ticket.
+- Gate order per symbol: open-position (hold) → data_integrity → setup →
+  sizing → policy_verdict. Report entries carry the regime state/confidence
+  in `indicators` when available.
+
+AC-11: GIVEN seams driving a symbol through setup+sizing+policy allow WHEN
+  build_state runs THEN the ticket's SL/TP equal the pinned ATR-bracket
+  arithmetic (worked example frozen in tests) and qty equals the seamed
+  size_qty result.
+AC-12: GIVEN scan_markets yields no surviving signal_tags WHEN build_state
+  runs THEN grade `wait` with failed `setup` gate and NO policy evaluation
+  occurs (no verdict gate row present).
+AC-13: GIVEN `tk hud` without `--equity` THEN usage error (exit 2, Typer
+  default); with `--equity 5000` the value reaches build_state verbatim.
+Scan seam: monkeypatch `tradekit.hud._build.scan_setup` (4th sanctioned
+seam, same pattern; default = the real scan_markets call above).
