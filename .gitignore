@@ -34,3 +34,7 @@ htmlcov/
 Thumbs.db
 .DS_Store
 .tk/
+
+# agent tooling (local)
+.claude/
+.codex/
