@@ -82,6 +82,7 @@ from tradekit.contracts._execution import (
     Verdict,
     VerdictToken,
 )
+from tradekit.contracts._hud import AdvisoryTicket, GateResult, HudState, ScanReportEntry
 from tradekit.contracts._marketdata import (
     TIMEFRAME_SECONDS,
     Bar,
@@ -112,6 +113,7 @@ __all__ = [
     "AccountCreatedPayload",
     "AccountState",
     "ActionProposedPayload",
+    "AdvisoryTicket",
     "AssetRef",
     "Bar",
     "BarSeries",
@@ -128,11 +130,13 @@ __all__ = [
     "Fill",
     "FillRecordedPayload",
     "Friction",
+    "GateResult",
     "GateViolationDetectedPayload",
     "GlobalCrypto",
     "Grade",
     "HaltClearedPayload",
     "HaltSetPayload",
+    "HudState",
     "InvalidationAttestedPayload",
     "InvalidationSpec",
     "LessonRecordedPayload",
@@ -160,6 +164,7 @@ __all__ = [
     "ReviewCompletedPayload",
     "RuleHit",
     "RunManifest",
+    "ScanReportEntry",
     "ScriptedTradeModel",
     "SeriesClosedPayload",
     "SizingComputedPayload",
