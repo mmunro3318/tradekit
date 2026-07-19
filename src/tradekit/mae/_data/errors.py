@@ -14,10 +14,14 @@ class ProviderError(Exception):
 
 
 class ProviderRangeError(ProviderError):
-    """Requested [start, end) exceeds what the provider can return in one
-    call (e.g. Kraken OHLC's ~720-bar cap). Callers must page themselves;
-    this sprint does not implement provider-side pagination (known trap —
-    Kraken `since` semantics differ per endpoint, do not improvise)."""
+    """Requested [start, end) exceeds what the provider can return.
+
+    Kraken OHLC retains only its most recent ~720-bar window per interval
+    (CTO-verified live 2026-07-19) — there is no deeper data to page to, so
+    this is a hard retention wall, not a caller-side pagination job. Alpaca
+    instead pages internally via `next_page_token` (T-PAGE-1); there this
+    error means its internal page-cap guard tripped (a runaway token), not
+    a normal multi-page fetch."""
 
 
 class ProviderUnavailable(ProviderError):

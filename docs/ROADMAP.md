@@ -220,43 +220,28 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [x] T4: hud verbs + tk hud CLI
 - [x] T5: wire real funnel into build_state
 
-## Backlog — provider pagination (next sprint)
+## Backlog — provider pagination (RESOLVED 2026-07-19)
 
-### T-PAGE-1: multi-page bar fetch for Kraken/Alpaca (>720-bar ranges)
-**Problem:** `ProviderRangeError` is currently a hard wall (ASSUMPTIONS
-31/33) — any caller asking for more than 720 Kraken bars (or Alpaca with
-a `next_page_token`) in one logical range gets refused outright. hud's
-setup scan worked around this by shrinking to 4h bars; longer lookbacks
-(e.g. 90d @ 1h for other verbs) will hit the same wall.
+### T-PAGE-1: multi-page bar fetch for Kraken/Alpaca (>720-bar ranges) — RESOLVED
+**Kraken:** pagination is impossible, not merely out of scope — CTO-verified
+live (2026-07-19) that `/0/public/OHLC` RETAINS only the most recent 720
+candles per interval; `since` only filters WITHIN that window, there is no
+deeper data to page to. The pre-HTTP `ProviderRangeError` guard stays a
+hard wall; its message now states this retention truth and points callers
+at a coarser interval (720x1d ~= 2y, 720x4h = 120d, 720x1h = 30d,
+720x15m = 7.5d) or the tick collector, instead of implying pagination was
+merely deferred.
 
-**Mike's chunking idea (correct instinct, mechanism differs per provider):**
-split any requested range into ≤720-bar windows and concatenate. Note for
-the implementer: this is NOT simple page-index slicing — Kraken's OHLC
-`since` param is a unix-timestamp CURSOR, not an offset/page number
-(sprint-doc trap, ASSUMPTIONS 31: "Kraken's `since` semantics differ per
-call, do not improvise"). The real pagination loop is cursor-based:
+**Alpaca:** real pagination shipped. `AlpacaDataProvider.get_bars` loops on
+a non-null `next_page_token`, issuing `page_token=<token>` requests and
+concatenating bars in order, capped at 20 pages (`ProviderRangeError` on a
+runaway token) with an empty page treated as end-of-data even if it still
+carries a token. Duplicate/overlapping timestamps across a page boundary
+fail loudly via `BarSeries`'s own strict-ascending-and-unique validator —
+never a silent dedupe.
 
-```
-bars = []
-cursor = start
-while cursor < end:
-    window_end = min(cursor + MAX_BARS_PER_CALL * tf_seconds, end)
-    page = provider.get_bars(asset, timeframe, cursor, window_end)  # <= 720 bars
-    bars += page.bars
-    if not page.bars:
-        break  # provider returned nothing further; stop, don't spin
-    cursor = page.bars[-1].ts_open + tf_seconds  # advance past the last bar returned
-```
-Alpaca's `next_page_token` is a literal opaque cursor Alpaca hands back —
-loop while it's non-null, passing it into the next request; do not
-attempt Kraken-style timestamp math there.
+**Deeper crypto history** beyond Kraken's 720-bar retention window accrues
+over time via the tick collector, not provider-side pagination.
 
-**Scope:** `src/tradekit/mae/_data/kraken.py::get_bars`,
-`src/tradekit/mae/_data/alpaca_data.py` equivalent, `_runtime.py` callers
-unaffected (same `BarSeries` return shape — pagination is invisible above
-this layer). Guardrails: cap total pages (e.g. refuse >20 pages / ~14400
-bars) so a caller typo doesn't spin forever; empty-page and duplicate-bar
-(cursor off-by-one) cases need explicit tests; `stale=False` still never
-degrades silently per existing doctrine.
-**Est:** one tk-spec → tk-tasks → implement batch, red-line free (mae/
-touch but no policy/broker/money-path).
+See ASSUMPTIONS 161 (supersedes 33) and
+`src/tradekit/mae/_data/{kraken,alpaca_data}.py`.

@@ -70,9 +70,15 @@ _KRAKEN_RESULT_KEY: dict[str, str] = {
     "AKTUSD": "AKTUSD",
 }
 
-# Kraken OHLC returns at most this many bars per call; beyond it callers must
-# page themselves (ProviderRangeError) — pagination is out of scope this
-# sprint (its `since` semantics are a known trap, do not improvise).
+# EMPIRICAL FINDING (CTO-verified live 2026-07-19): Kraken's /0/public/OHLC
+# RETAINS only the most recent MAX_BARS_PER_CALL candles per interval — a
+# request with since=60d-ago at interval=60 returns exactly 721 rows
+# starting 30d ago. `since` only filters WITHIN that retained window; there
+# is no deeper data to page to. Pagination against this endpoint is
+# IMPOSSIBLE, not merely out of scope (T-PAGE-1) — the guard below stays a
+# hard wall. Callers needing longer history must use a coarser interval
+# (see the ladder in the raised message) or the tick collector, which
+# accrues its own deep history over time.
 MAX_BARS_PER_CALL = 720
 
 _REQUEST_TIMEOUT_S = 10.0
@@ -115,8 +121,11 @@ class KrakenProvider:
         implied_bars = (end - start).total_seconds() / tf_seconds
         if implied_bars > MAX_BARS_PER_CALL:
             raise ProviderRangeError(
-                f"requested range implies {implied_bars:.0f} bars > "
-                f"{MAX_BARS_PER_CALL} bar cap per Kraken OHLC call"
+                f"Kraken OHLC serves only the most recent {MAX_BARS_PER_CALL} bars per "
+                "interval — this is a data-retention wall, not a paging cap "
+                f"(requested range implies {implied_bars:.0f} bars; there is no deeper "
+                "data to page to). Use a coarser interval (720x1d ~= 2y, 720x4h = 120d, "
+                "720x1h = 30d, 720x15m = 7.5d) or the tick collector for deeper history."
             )
 
         kraken_pair = _SYMBOL_TO_KRAKEN_PAIR.get(asset.symbol)
