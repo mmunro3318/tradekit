@@ -2932,3 +2932,14 @@ barrier simulator), 2026-07-19
     direction is pinned so the golden (exit at exactly D2 00:30 excluded
     from D2's snapshot) enforces ONE behavior. Revisit only if Kraken
     support answers otherwise (support ticket already pending).
+
+154. **bridge-read batch 1 flags ratified (red phase, 2026-07-20):**
+    (a) `grade_exposure` re-resolves every logical selector against the
+    LIVE tree by cascade `automation_id -> name -> path` (the map's
+    stored `by` records how the probe found it, but grading must not
+    trust stale probe metadata — the signature takes the tree precisely
+    to re-resolve). Grade A requires every target resolvable at the
+    automation_id tier; B = all resolvable, >=1 only via name/path;
+    C = >=1 unresolvable. (b) `parse_qty` deliberately NOT added in T3:
+    qty grammar is pinned in T4 against `_read.py`'s actual needs —
+    no invented surface (test-writer flag, CTO-ratified).
