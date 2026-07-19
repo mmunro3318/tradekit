@@ -577,6 +577,10 @@ def hud_scan(
             with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
                 tmp_file.write(html)
             os.replace(tmp_name, out)
+            typer.echo(
+                f"wrote {out} ({len(state.tickets)} advisory ticket(s), "
+                f"{len(state.report)} symbol(s) scanned)"
+            )
         except OSError:
             os.remove(tmp_name)
             raise
