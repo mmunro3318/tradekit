@@ -2,6 +2,29 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, last full session) — retention truth, MTF+strategy designs, PAXG probe, Sol skill
+
+- **Pagination RESOLVED with truth** (red a7d6be2 -> green 715beca,
+  ASSUMPTIONS 161): live probe proved Kraken OHLC RETAINS only the last
+  720 candles/interval — pagination there is impossible, error message now
+  says so with the interval ladder (1d~2y / 4h=120d / 1h=30d / 15m=7.5d).
+  Alpaca got REAL page_token pagination (cap 20 pages, loud dup guard).
+- **Delegation-ready designs** (Fable-pinned, zero open questions):
+  docs/design/MTF-SCAN.md (retention pins in limits.py, scan_confluence
+  verb, StrategyDef registry, T-MTF-1..4) and docs/design/STRATEGY-PACK.md
+  (S2 pullback / S3 breakout / S4 restricted reversion — exact filters,
+  new vocab ema_above + rsi_band with momentum-family rationale, build
+  order, boundary pins, worked-example procedure).
+- **PAXG probe RUN with real data** (docs/research/
+  paxg-basis-probe-2026-07-19.md + experiments/paxg-basis/): 497d PAXG vs
+  GC=F. Naive fade "96% win" exposed as artifact (timestamp skew, thin
+  closes, futures roll); next-day entry collapses it to 0.65%/trade.
+  Verdict: needs collector intraday data + spot-XAU feed before any bot.
+  House lesson: EVERY strategy probe runs the next-period-entry check.
+- **New skill ~/.claude/skills/tk-sol**: the Claude<->Sol seam protocol —
+  brief format (6 required sections) outbound, claim-audit adjudication
+  inbound. Sol designs; the house pipeline ratifies.
+
 ## 2026-07-19 (Fable, day 3 finale) — hud-ack shipped; loop rehearsed; ops codified
 
 - **hud-ack** (spec -> red e9c0fa9 -> green 6daf171, ASSUMPTIONS 160):
