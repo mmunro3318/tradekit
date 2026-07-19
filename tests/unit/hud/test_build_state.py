@@ -1,38 +1,76 @@
-"""BEHAVIOR/SEAM tests for hud.build_state (SPEC-hud-orderbook T3, AC-4..8).
+"""BEHAVIOR/SEAM tests for hud.build_state (SPEC-hud-orderbook T3/T5,
+AC-4..8, AC-11..13).
 
 Determinism seams (sanctioned, per DESIGN §Test seams): monkeypatch ONLY
 ``mae._runtime.get_closed_bars`` and ``mae._runtime.clock`` — never mock
 tradekit internals directly.
 
 Sanctioned module-level seams on ``tradekit.hud._build`` (RATIFIED,
-tests/ASSUMPTIONS.md 157a/158):
+tests/ASSUMPTIONS.md 157a/158, RENAMED/ADDED per T5 addendum — see
+ASSUMPTIONS flag in this batch's report):
 
   - ``evaluate_policy(proposal)`` -> object with ``.allowed: bool``,
     ``.verdict_id: str | None``, ``.rationale: str``.
   - ``open_position_symbols() -> set[str]``
-  - ``size_qty(symbol, limit_price) -> Decimal`` (real-sizing default is
-    loud-until-wired per ASSUMPTIONS 158; tests always patch it).
+  - ``sizing_info(symbol, limit_price, equity_usd) -> SizingInfo`` — REPLACES
+    the T3/batch-1 ``size_qty(symbol, limit_price) -> Decimal`` seam. One
+    real ``mae.size_position`` call now powers BOTH qty and the ATR bracket
+    (stop_distance_usd, r_multiple_target), per the T5 addendum's literal
+    text: "the DEFAULT size_qty calls mae.size_position once and the module
+    keeps (qty, stop_distance, r_multiple) from that call." Tests provide a
+    duck-typed fake exposing ``.qty``, ``.stop_distance_usd``,
+    ``.r_multiple_target`` (ASSUMPTIONS flag #1, CTO to ratify).
+  - ``scan_setup(symbol) -> object`` with ``.signal_tags: list[str]`` — NEW
+    4th sanctioned seam (T5 addendum); default is the real
+    ``mae.scan_markets("crypto", ["1h"], filters={...}, symbols=[symbol],
+    regime_gate=True)`` call, PASSING iff a match for the symbol survives
+    with >= 1 signal_tag after the regime gate.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import ClassVar
 
 import pytest
 
 from tradekit.hud import build_state
 
 CAPTURED_AT = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+EQUITY_USD = Decimal("5000")
 
-# AC-4 golden arithmetic (CTO-derived, frozen — buy LINK/USD limit 8.30000
-# qty 12 tp 8.71500 sl 8.05100):
+# AC-11 golden arithmetic (CTO-derived, frozen — buy LINK/USD limit 8.30000
+# qty 12, stop_distance_usd 0.24900, r_multiple_target 2 -> ATR bracket
+# SL = 8.30000 - 0.24900 = 8.05100; TP = 8.30000 + 2*0.24900 = 8.79800):
+EXPECTED_TP_PRICE = Decimal("8.79800")
+EXPECTED_SL_PRICE = Decimal("8.05100")
 EXPECTED_EST_TOTAL_USD = Decimal("99.60")
 EXPECTED_EST_FEE_USD = Decimal("0.04")
-EXPECTED_EST_PNL_TP_USD = Decimal("4.90")
+EXPECTED_EST_PNL_TP_USD = Decimal("5.90")
 EXPECTED_EST_PNL_SL_USD = Decimal("-3.07")
-EXPECTED_TP_DISTANCE_PCT = Decimal("5.00")
+EXPECTED_TP_DISTANCE_PCT = Decimal("6.00")
 EXPECTED_SL_DISTANCE_PCT = Decimal("-3.00")
+
+
+@dataclass(frozen=True)
+class _FakeSizingInfo:
+    """Duck-typed stand-in for the addendum's ``SizingInfo`` — tests never
+    import the real dataclass (green-stage internal); they only rely on the
+    three field names the addendum pins."""
+
+    qty: Decimal
+    stop_distance_usd: Decimal
+    r_multiple_target: Decimal
+
+
+class _PassingSetup:
+    signal_tags: ClassVar[list[str]] = ["macd_bullish", "volume_spike"]
+
+
+class _FailingSetup:
+    signal_tags: ClassVar[list[str]] = []
 
 
 class _AllowDecision:
@@ -58,7 +96,7 @@ def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _fixture_series(symbol: str, n_bars: int):
     """Valid ascending hourly BarSeries whose last close is 8.30000 — the
-    AC-4 golden entry price (limit = last close, pinned)."""
+    AC-11 golden entry price (limit = last close, pinned)."""
     from datetime import timedelta
 
     from tradekit.contracts import AssetRef, Bar, BarSeries
@@ -89,10 +127,12 @@ def _fixture_series(symbol: str, n_bars: int):
 
 def _patch_setup_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
     """SEAM: mae._runtime.get_closed_bars returns a real, valid 24-bar
-    series (last close 8.30000) and the sanctioned sizing seam
-    ``tradekit.hud._build.size_qty`` returns qty 12, driving the funnel to
-    the AC-4 golden setup (buy LINK/USD limit 8.30000 tp 8.71500 sl
-    8.05100 qty 12)."""
+    series (last close 8.30000), ``scan_setup`` passes with surviving
+    signal_tags, and the sanctioned sizing seam
+    ``tradekit.hud._build.sizing_info`` returns the AC-11 golden sizing
+    (qty 12, stop_distance_usd 0.24900, r_multiple_target 2) — driving the
+    funnel to the AC-11 golden ticket (buy LINK/USD limit 8.30000
+    tp 8.79800 sl 8.05100 qty 12)."""
     import tradekit.hud._build as hud_build
     import tradekit.mae._runtime as mae_runtime
 
@@ -101,29 +141,40 @@ def _patch_setup_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
         "get_closed_bars",
         lambda symbol, timeframe, lookback_days: _fixture_series(symbol, 24),
     )
-    monkeypatch.setattr(hud_build, "size_qty", lambda symbol, limit_price: Decimal("12"))
+    monkeypatch.setattr(hud_build, "scan_setup", lambda symbol: _PassingSetup())
+    monkeypatch.setattr(
+        hud_build,
+        "sizing_info",
+        lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
+            qty=Decimal("12"),
+            stop_distance_usd=Decimal("0.24900"),
+            r_multiple_target=Decimal("2"),
+        ),
+    )
 
 
-class TestAC4AllowedProposalBuildsTicketWithGoldenArithmetic:
-    def test_allow_verdict_produces_one_ticket_with_pinned_arithmetic(
+class TestAC11AllowedProposalBuildsTicketWithGoldenAtrBracketArithmetic:
+    def test_allow_verdict_produces_one_ticket_with_pinned_atr_bracket_arithmetic(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AC-4: funnel passes all gates AND policy allows -> exactly one
-        AdvisoryTicket for that symbol; verdict_id equals the ledgered
-        verdict; est-P&L/fee/distance fields match the pinned arithmetic
-        exactly (worked example independently hand-derived, not from the
-        code under test)."""
+        """AC-11: seams driving a symbol through setup+sizing+policy allow
+        -> the ticket's SL/TP equal the pinned ATR-bracket arithmetic
+        (worked example frozen in this test) and qty equals the seamed
+        sizing_info result."""
         import tradekit.hud._build as hud_build
 
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
         _patch_setup_sufficient(monkeypatch)
 
-        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert len(state.tickets) == 1
         ticket = state.tickets[0]
         assert ticket.verdict_id == "verdict-link-1"
+        assert ticket.quantity == Decimal("12")
+        assert ticket.tp_price == EXPECTED_TP_PRICE
+        assert ticket.sl_price == EXPECTED_SL_PRICE
         assert ticket.est_total_usd == EXPECTED_EST_TOTAL_USD
         assert ticket.est_fee_usd == EXPECTED_EST_FEE_USD
         assert ticket.est_pnl_tp_usd == EXPECTED_EST_PNL_TP_USD
@@ -145,7 +196,7 @@ class TestAC5PolicyRefusalYieldsNoTicketAndFailedGate:
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
         _patch_setup_sufficient(monkeypatch)
 
-        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert state.tickets == ()
         entry = next(e for e in state.report if e.symbol == "LINK/USD")
@@ -173,7 +224,7 @@ class TestAC6InsufficientBarsYieldsWaitNoException:
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
 
-        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert state.tickets == ()
         entry = next(e for e in state.report if e.symbol == "LINK/USD")
@@ -197,7 +248,7 @@ class TestAC7OpenPositionYieldsHoldNoTicket:
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: {"LINK/USD"})
         _patch_setup_sufficient(monkeypatch)
 
-        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert state.tickets == ()
         entry = next(e for e in state.report if e.symbol == "LINK/USD")
@@ -217,8 +268,8 @@ class TestAC8Determinism:
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
         _patch_setup_sufficient(monkeypatch)
 
-        state_1 = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
-        state_2 = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state_1 = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+        state_2 = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert state_1 == state_2
         assert state_1.generated_at == CAPTURED_AT
@@ -241,7 +292,7 @@ class TestAC6ProviderExceptionDegradesToWait:
         monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
         monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
 
-        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
 
         assert state.tickets == ()
         entry = next(e for e in state.report if e.symbol == "LINK/USD")
@@ -249,3 +300,110 @@ class TestAC6ProviderExceptionDegradesToWait:
         gate = next(g for g in entry.gates if g.name == "data_integrity")
         assert gate.passed is False
         assert "RuntimeError" in gate.observed
+
+
+class TestAC12SetupFailureYieldsWaitAndSkipsPolicy:
+    def test_no_surviving_signal_tags_produces_wait_failed_setup_gate_no_policy_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-12: scan_markets/scan_setup yields no surviving signal_tags ->
+        grade "wait" with a failed "setup" gate and NO policy evaluation
+        occurs at all — no "policy_verdict" gate row present, and the
+        policy seam is never invoked (short-circuit before policy, per the
+        T5 addendum's pinned gate order)."""
+        import tradekit.hud._build as hud_build
+        import tradekit.mae._runtime as mae_runtime
+
+        policy_calls: list[object] = []
+
+        def _recording_policy(proposal: object) -> _AllowDecision:
+            policy_calls.append(proposal)
+            return _AllowDecision()
+
+        monkeypatch.setattr(
+            mae_runtime,
+            "get_closed_bars",
+            lambda symbol, timeframe, lookback_days: _fixture_series(symbol, 24),
+        )
+        monkeypatch.setattr(hud_build, "scan_setup", lambda symbol: _FailingSetup())
+        monkeypatch.setattr(hud_build, "evaluate_policy", _recording_policy)
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        assert state.tickets == ()
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        assert entry.grade == "wait"
+        setup_gates = [g for g in entry.gates if g.name == "setup"]
+        assert len(setup_gates) == 1
+        assert setup_gates[0].passed is False
+        policy_gates = [g for g in entry.gates if g.name == "policy_verdict"]
+        assert policy_gates == []
+        assert policy_calls == []
+
+
+class TestSizingGateZeroQtyYieldsWaitNoTicket:
+    def test_zero_qty_sizing_result_produces_wait_and_failed_sizing_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T5 addendum: sizing_info returning a zero/negative qty -> no
+        ticket, a failed "sizing" gate, grade "wait" (conservative — never
+        oversize, and a zero recommendation is a refusal to trade, not a
+        degenerate ticket)."""
+        import tradekit.hud._build as hud_build
+        import tradekit.mae._runtime as mae_runtime
+
+        monkeypatch.setattr(
+            mae_runtime,
+            "get_closed_bars",
+            lambda symbol, timeframe, lookback_days: _fixture_series(symbol, 24),
+        )
+        monkeypatch.setattr(hud_build, "scan_setup", lambda symbol: _PassingSetup())
+        monkeypatch.setattr(
+            hud_build,
+            "sizing_info",
+            lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
+                qty=Decimal("0"),
+                stop_distance_usd=Decimal("0.24900"),
+                r_multiple_target=Decimal("2"),
+            ),
+        )
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        assert state.tickets == ()
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        assert entry.grade == "wait"
+        sizing_gates = [g for g in entry.gates if g.name == "sizing"]
+        assert len(sizing_gates) == 1
+        assert sizing_gates[0].passed is False
+
+
+class TestGateOrderMatchesPinnedSequence:
+    def test_allow_path_gate_names_appear_in_pinned_relative_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T5 addendum: gate order per symbol is data_integrity -> setup ->
+        sizing -> policy_verdict (open-position/hold is checked earlier and
+        short-circuits, per AC-7, so it never coexists with these gates in
+        one report entry). Assert the RELATIVE order of the named gates
+        that appear — this stays true regardless of whether the
+        implementer also emits a passing "sizing" row alongside the others."""
+        import tradekit.hud._build as hud_build
+
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+        _patch_setup_sufficient(monkeypatch)
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        gate_names = [g.name for g in entry.gates]
+        pinned_order = ["data_integrity", "setup", "sizing", "policy_verdict"]
+        present_in_pinned_order = [name for name in pinned_order if name in gate_names]
+        observed_positions = [gate_names.index(name) for name in present_in_pinned_order]
+        assert observed_positions == sorted(observed_positions), (
+            f"gate order {gate_names} does not respect pinned sequence {pinned_order}"
+        )
