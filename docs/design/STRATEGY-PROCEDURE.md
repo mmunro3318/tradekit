@@ -360,3 +360,19 @@ resolves against the agent, and the FAIL flows into the live metrics.
 - **Scanner semantics flags still open:** `macd_signal` "cross" is
   implemented as histogram sign, not an actual crossover event
   (flagged in `_scanner` docstring, unratified).
+
+---
+
+## Audit amendments (2026-07-20 — external audit by GPT "Sol", CTO-verified against code)
+
+Binding corrections to the above; full ratification in tests/ASSUMPTIONS.md
+entry 156: (1) DSR implementation gap CONFIRMED — SR* lacks cross-trial
+dispersion; M5.2 registry stores per-trial SRs and fixes it (proxy emits a
+warning until then). (2) HMM labels are vol-tiers pending conditional-
+stats relabeling (M5.2). (3) Daily equity-series Sharpe becomes primary
+post-M5.2; Stage-5 tiebreaks in R/bps. (4) v1 exclusions are SCOPE/DATA
+decisions, not evidence verdicts — OFI/stat-arb/OI-liquidation have real
+evidence at other horizons; the greenlist tick/book collector
+(scripts/collect_ticks.py) keeps them revisitable. (5) DSR 0.5 screening
+is internal policy; 0.95 for live promotion. ADX-25 and trade-count
+minimums are house rails.

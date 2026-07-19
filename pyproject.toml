@@ -30,6 +30,15 @@ dev = [
 bridge = [
     "pywinauto>=0.6.8; sys_platform == 'win32'",
 ]
+# Optional — only needed to actually run scripts/collect_ticks.py (WS
+# connection + Parquet sink). Import of the script never requires these
+# (AC-10 guard, mirrors `bridge` above). NEW DEPENDENCIES (Mike-visible,
+# SPRINT-P5-PROP §2c dispatch): websockets (Kraken WS v2 client), pyarrow
+# (Parquet read/write).
+collector = [
+    "websockets>=13.0",
+    "pyarrow>=17.0",
+]
 
 [project.scripts]
 tk = "tradekit.cli.main:app"

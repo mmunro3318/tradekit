@@ -2957,3 +2957,30 @@ barrier simulator), 2026-07-19
     session` is an ACCEPTED internal seam (default-map resolution lands
     with T7's real map); (e) AC-12 drift check lives at the CLI layer,
     driver surface unchanged.
+
+156. **Sol-audit amendments ratified (2026-07-20, external audit of
+    STRATEGY-PROCEDURE):** (a) CONFIRMED DEFECT (MED): `_deflated_
+    sharpe`'s SR* scales the expected-max term by the candidate's own
+    estimator variance (denom/(n-1)), not the Bailey-LdP cross-trial
+    dispersion V[SR_trials] — DSR is overstated (anti-conservative)
+    when tried variants disperse. Fix pinned into M5.2: experiment
+    registry stores per-trial SR; V[SR_trials] computed from it;
+    current proxy allowed ONLY with a "dsr_dispersion_proxy" warning
+    until >=2 registry trials exist. (b) HMM state labels currently
+    derive from vol-variance rank alone (ratified 2026-07-16, now
+    AMENDED): relabeling from state-conditional return mean/persistence
+    + OOS utility is scheduled with M5.2 regime work; until then,
+    labels are treated as vol-tiers, not semantic market calls.
+    (c) Sharpe: trade-level sqrt(trades/year) annualization stays
+    display-only; DSR/PSR remain on non-annualized trade SR (already
+    true); bar-level marked-to-market daily Sharpe becomes primary
+    when M5.2 equity curves exist. Stage-5 tiebreak expectancy
+    normalized in R/bps, not fixed dollars. (d) v1 exclusion list
+    rationale is SCOPE/DATA-based, not "debunked" (OFI/stat-arb have
+    real evidence at other horizons/infrastructures); tick/book
+    collection (Q.F.83 collector, greenlist 11 pairs) preserves the
+    option to revisit. (e) DSR 0.5 = internal screening policy; 0.95 =
+    literature-grade bar required for live promotion. ADX-25 and
+    100/50-trade minimums documented as house rails, not laws.
+    (f) Prop profit target is per-plan spec input (never hard-coded);
+    re-verify on purchase screen per plan.
