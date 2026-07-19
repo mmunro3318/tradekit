@@ -40,6 +40,7 @@ from tradekit.contracts import (
     ThesisRejectedPayload,
     ThesisSubmittedPayload,
 )
+from tradekit.contracts._base import StrictFrozenModel  # noqa: TID251 — base pin
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -134,83 +135,37 @@ def test_constructs_from_valid_kwargs(model_cls) -> None:
     assert isinstance(instance, model_cls)
 
 
-@pytest.mark.parametrize("model_cls", _ALL_MODELS, ids=lambda m: m.__name__)
-def test_is_frozen(model_cls) -> None:
-    instance = model_cls(**_VALID_KWARGS[model_cls])
-    first_field = next(iter(_VALID_KWARGS[model_cls]))
+def test_every_payload_model_is_strict_frozen() -> None:
+    """Collapses the former frozen/extra-forbid/required-field/decimal-coercion
+    parametrize sweeps (~85 cases) into one inheritance pin: every payload
+    model in this file gets `frozen=True` + `extra="forbid"` (plus pydantic's
+    own required-field and Decimal-coercion machinery) FOR FREE from
+    `StrictFrozenModel` — pydantic itself already guarantees that behavior for
+    any subclass, so re-testing it per-model is pure padding
+    (test-audit-2026-07-18.md garbage-removal item 1). Custom validators
+    (naive-datetime rejection, enum pins, nullable-not-optional pnl_usd, the
+    producer round trip, etc.) stay as their own dedicated tests below."""
+    for model_cls in _ALL_MODELS:
+        assert issubclass(model_cls, StrictFrozenModel), (
+            f"{model_cls.__name__} must inherit StrictFrozenModel (frozen=True, "
+            "extra='forbid') so it gets the shared mutation/extra-field/required-"
+            "field discipline pydantic enforces for the whole hierarchy"
+        )
+
+
+def test_strict_frozen_model_base_rejects_mutation_and_extra_fields() -> None:
+    """`StrictFrozenModel` itself isn't exercised by any other test in the
+    suite — pin its two load-bearing `ConfigDict` flags once, directly,
+    rather than at every subclass (test-audit-2026-07-18.md item 1)."""
+
+    class _Probe(StrictFrozenModel):
+        value: int
+
+    probe = _Probe(value=1)
     with pytest.raises(ValidationError):
-        setattr(instance, first_field, getattr(instance, first_field))
-    # §5: "no in-place mutation ever" — pydantic's frozen=True raises on ANY
-    # setattr, even a no-op reassignment of the field's current value.
-
-
-@pytest.mark.parametrize("model_cls", _ALL_MODELS, ids=lambda m: m.__name__)
-def test_extra_field_rejected(model_cls) -> None:
+        probe.value = 2  # frozen=True: no in-place mutation ever (§5)
     with pytest.raises(ValidationError):
-        model_cls(**_VALID_KWARGS[model_cls], unexpected_field="typo-dies-here")
-    # extra="forbid" (StrictFrozenModel): a stray/typo'd field must die at
-    # construction, not be silently dropped on the JSON round trip into the
-    # ledger's payload dict (same rationale as ASSUMPTIONS 5's Predicate rule).
-
-
-@pytest.mark.parametrize(
-    ("model_cls", "required_field"),
-    [
-        (ThesisDraftedPayload, "thesis_id"),
-        (ThesisDraftedPayload, "contract"),
-        (MarketSnapshotTakenPayload, "snapshot_id"),
-        (MarketSnapshotTakenPayload, "last_close"),
-        (SizingComputedPayload, "sizing"),
-        (SizingComputedPayload, "account_equity_usd"),
-        (ThesisSubmittedPayload, "ev_recomputed_usd"),
-        (ThesisSubmittedPayload, "market_snapshot_id"),
-        (ReviewCompletedPayload, "review_artifact_id"),
-        (ThesisApprovedPayload, "review_artifact_id"),
-        (ThesisRejectedPayload, "why"),
-        (ThesisActivatedPayload, "order_id"),
-        (InvalidationAttestedPayload, "attestation"),
-        (InvalidationAttestedPayload, "kind"),
-        (ThesisGradedPayload, "pnl_usd"),
-        (ThesisGradedPayload, "outcome"),
-        (GateViolationDetectedPayload, "why"),
-        (GateViolationDetectedPayload, "rule_id"),
-        (HaltSetPayload, "set_by"),
-        (HaltClearedPayload, "cleared_by"),
-        (PromotionGrantedPayload, "account_ref"),
-        (PromotionGrantedPayload, "criteria"),
-        (PromotionConfirmedPayload, "granted_event_id"),
-        (DemotedPayload, "trigger"),
-        (DemotedPayload, "detail"),
-    ],
-    ids=lambda v: v if isinstance(v, str) else v.__name__,
-)
-def test_required_field_missing_is_rejected(model_cls, required_field: str) -> None:
-    kwargs = dict(_VALID_KWARGS[model_cls])
-    del kwargs[required_field]
-    with pytest.raises(ValidationError):
-        model_cls(**kwargs)
-
-
-@pytest.mark.parametrize(
-    ("model_cls", "decimal_field"),
-    [
-        (MarketSnapshotTakenPayload, "last_close"),
-        (SizingComputedPayload, "account_equity_usd"),
-        (ThesisSubmittedPayload, "resolved_target_price"),
-        (ThesisSubmittedPayload, "ev_stated_usd"),
-        (ThesisGradedPayload, "pnl_usd"),
-    ],
-    ids=lambda v: v if isinstance(v, str) else v.__name__,
-)
-def test_decimal_field_coerces_from_string(model_cls, decimal_field: str) -> None:
-    kwargs = dict(_VALID_KWARGS[model_cls])
-    kwargs[decimal_field] = "123.45"
-    instance = model_cls(**kwargs)
-    value = getattr(instance, decimal_field)
-    assert isinstance(value, Decimal) and value == Decimal("123.45"), (
-        f"{model_cls.__name__}.{decimal_field} must be Decimal end-to-end (TD-3) — a "
-        "float here corrupts money math downstream"
-    )
+        _Probe(value=1, unexpected_field="typo-dies-here")  # extra="forbid"
 
 
 @pytest.mark.parametrize(

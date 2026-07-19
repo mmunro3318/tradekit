@@ -18,6 +18,7 @@ from tradekit.contracts import (
     OrderStatus,
     Position,
 )
+from tradekit.contracts._base import FrozenModel, StrictFrozenModel  # noqa: TID251 — base pin
 
 # ---------------------------------------------------------------------------
 # AccountState / Position / OrderStatus — shape + Decimal/frozen discipline
@@ -33,17 +34,6 @@ def test_account_state_money_fields_are_decimal() -> None:
     )
     for field in ("equity_usd", "settled_cash_usd", "buying_power_usd"):
         assert isinstance(getattr(state, field), Decimal)
-
-
-def test_account_state_is_frozen() -> None:
-    state = AccountState(
-        account_ref="paper:alpha",
-        equity_usd=Decimal("500"),
-        settled_cash_usd=Decimal("500"),
-        buying_power_usd=Decimal("500"),
-    )
-    with pytest.raises(ValidationError):
-        state.equity_usd = Decimal("1")  # type: ignore[misc]
 
 
 def test_position_market_value_defaults_to_none_not_fabricated() -> None:
@@ -124,12 +114,6 @@ def test_account_config_accepts_principal_at_or_under_two_decimal_places(
     assert config.principal_usd == principal
 
 
-def test_account_config_is_frozen() -> None:
-    config = AccountConfig(**_valid_kwargs())
-    with pytest.raises(ValidationError):
-        config.principal_usd = Decimal("1")  # type: ignore[misc]
-
-
 def test_account_config_accepts_configured_drawdown_and_consistency_slots() -> None:
     config = AccountConfig(
         **_valid_kwargs(
@@ -162,13 +146,25 @@ def test_account_created_payload_carries_the_whole_config_dump() -> None:
     assert payload.config["principal_usd"] == "500.00"
 
 
-def test_account_created_payload_rejects_unknown_fields() -> None:
-    from datetime import UTC, datetime
-
-    with pytest.raises(ValidationError):
-        AccountCreatedPayload(
-            account_ref="paper:alpha",
-            config={},
-            created_ts=datetime(2026, 7, 17, tzinfo=UTC),
-            extra_field="should not validate",  # type: ignore[call-arg]
+def test_broker_account_models_inherit_the_shared_frozen_bases() -> None:
+    """Collapses the former per-model frozen/extra-forbid mechanics checks
+    (`test_account_state_is_frozen`, `test_account_config_is_frozen`,
+    `test_account_created_payload_rejects_unknown_fields`) into one
+    inheritance pin — pydantic itself already guarantees mutation-rejection
+    and (for `StrictFrozenModel` subclasses) extra-field-rejection for any
+    subclass of these bases; `StrictFrozenModel`'s own two flags are pinned
+    directly in `tests/unit/contracts/test_event_payloads.py`
+    (test-audit-2026-07-18.md garbage-removal item 1). `AccountState`/
+    `Position`/`OrderStatus`/`AccountConfig` are plain `FrozenModel` (no
+    `extra='forbid'`, DESIGN §8.1) while `AccountCreatedPayload` is the
+    stricter `StrictFrozenModel` — both distinctions are pinned here so a
+    stray change to either base assignment fails loudly."""
+    for model_cls in (AccountState, Position, OrderStatus, AccountConfig):
+        assert issubclass(model_cls, FrozenModel), (
+            f"{model_cls.__name__} must inherit FrozenModel (frozen=True)"
         )
+    assert issubclass(AccountCreatedPayload, StrictFrozenModel), (
+        "AccountCreatedPayload must inherit StrictFrozenModel (frozen=True, "
+        "extra='forbid') — a stray/typo'd field in the ledger payload must "
+        "die at construction"
+    )

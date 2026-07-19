@@ -74,16 +74,74 @@ def test_readiness_report_renders_promotion_status_verbatim_with_criteria(monkey
         )
 
 
-def test_pnl_snapshot_includes_account_ref_and_realized_pnl(ledger, make_event) -> None:
-    ledger.append(
+def _active_thesis_for_account(thesis_kwargs, monkeypatch, make_event, account_ref: str) -> str:
+    """Drives a real thesis to `active` (draft -> submit -> harness
+    ReviewCompleted -> approve -> harness ThesisActivated), same shape as
+    `tests/unit/thesis/test_grade_verb.py`'s `_build_active_thesis` helper.
+    Required because `ledger._projections`'s `ThesisGraded` branch only
+    populates `theses.account_ref`/`graded_ts` (what `pnl_snapshot`'s
+    `latest_grades()` reads) when the row's CURRENT state is `active` — a
+    bare harness-appended `ThesisGraded` with no drafted/activated thesis
+    behind it is a silent no-op in the projection, which is exactly why the
+    old version of this test was a tautology (test-audit-2026-07-18.md item
+    2): it only ever checked the `account_ref` string the function prints
+    unconditionally, never that a seeded pnl value was actually aggregated."""
+    from decimal import Decimal
+
+    from tradekit.contracts import AssetRef, Bar, BarSeries
+
+    asset = AssetRef(symbol="BTC/USD", venue="kraken", asset_class="crypto",
+                     tick_size=Decimal("0.01"))
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    bars = [
+        Bar(ts_open=start + timedelta(days=i), open=Decimal("100"), high=Decimal("105"),
+            low=Decimal("95"), close=Decimal("100"), volume=Decimal("1000"))
+        for i in range(20)
+    ]
+    series = BarSeries(asset=asset, timeframe="1d", bars=bars, source="fake-kraken")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", lambda *a, **k: series)
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: start + timedelta(days=25))
+
+    kw = dict(thesis_kwargs)
+    kw["account_ref"] = account_ref
+    tid = thesis.draft(kw)
+    thesis.submit(tid)
+    default_ledger().append(
+        make_event(
+            type="ReviewCompleted",
+            payload={"thesis_id": tid, "review_artifact_id": "rev-1", "passed": True,
+                     "kind": "thesis_review"},
+        )
+    )
+    thesis.approve(tid)
+    default_ledger().append(
+        make_event(
+            type="ThesisActivated",
+            payload={"thesis_id": tid, "order_id": "ord-1", "ts_utc": start.isoformat()},
+        )
+    )
+    return tid
+
+
+def test_pnl_snapshot_aggregates_seeded_realized_pnl_for_the_account(
+    thesis_kwargs, monkeypatch, make_event
+) -> None:
+    tid = _active_thesis_for_account(thesis_kwargs, monkeypatch, make_event, "paper:alpha")
+    default_ledger().append(
         make_event(
             type="ThesisGraded",
-            payload={"thesis_id": "th-pnl", "outcome": "PASS", "measured": [],
+            payload={"thesis_id": tid, "outcome": "PASS", "measured": [],
                      "ambiguous_bar": False, "pnl_usd": "42.00",
                      "graded_ts": datetime(2026, 1, 5, tzinfo=UTC).isoformat()},
         )
     )
 
+    default_ledger().rebuild()  # theses/pnl projections are rebuild-derived (DESIGN §6.2)
     snapshot = report.pnl_snapshot("paper:alpha")
 
     assert "paper:alpha" in snapshot
+    assert "42.00" in snapshot, (
+        "the seeded ThesisGraded pnl_usd must actually be aggregated into "
+        "realized_pnl_usd, not merely have the account_ref string appear "
+        "(the tautology this test replaces, test-audit-2026-07-18.md item 2)"
+    )

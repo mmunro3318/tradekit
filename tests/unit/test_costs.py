@@ -39,7 +39,3 @@ def test_unknown_venue_dies_loudly() -> None:
     # friction is exactly the simulation-optimism TD-8 exists to kill.
 
 
-def test_symmetric_sides() -> None:
-    buy = price_friction("alpaca", "crypto", Decimal("50"), "buy")
-    sell = price_friction("alpaca", "crypto", Decimal("50"), "sell")
-    assert buy == sell, "cost model is side-symmetric today; param reserved for asymmetry"

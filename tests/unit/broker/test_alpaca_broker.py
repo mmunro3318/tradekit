@@ -37,9 +37,6 @@ from ulid import ULID
 
 from tradekit import costs
 from tradekit.broker._alpaca import (
-    ALPACA_LIVE_BASE_URL,
-    ALPACA_LIVE_KEY_ID_ENV,
-    ALPACA_LIVE_SECRET_ENV,
     ALPACA_PAPER_BASE_URL,
     ALPACA_PAPER_KEY_ID_ENV,
     ALPACA_PAPER_SECRET_ENV,
@@ -198,16 +195,6 @@ def test_constructor_wires_base_url_and_env_names() -> None:
     assert adapter._base_url == ALPACA_PAPER_BASE_URL
     assert adapter._key_id_env == ALPACA_PAPER_KEY_ID_ENV
     assert adapter._secret_env == ALPACA_PAPER_SECRET_ENV
-
-
-def test_live_base_url_and_env_names_are_the_pinned_constants() -> None:
-    """Sanity pin on the two base URLs/env-name pairs `broker/__init__.py`'s
-    routing wires — a typo here would silently point 'live:' at the paper
-    sandbox or vice versa."""
-    assert ALPACA_PAPER_BASE_URL == "https://paper-api.alpaca.markets/v2"
-    assert ALPACA_LIVE_BASE_URL == "https://api.alpaca.markets/v2"
-    assert ALPACA_LIVE_KEY_ID_ENV == "ALPACA_LIVE_KEY_ID"
-    assert ALPACA_LIVE_SECRET_ENV == "ALPACA_LIVE_SECRET"
 
 
 # ---------------------------------------------------------------------------

@@ -579,15 +579,3 @@ def test_bb_inside_symbol_appears_in_matches(monkeypatch) -> None:
     assert "bb_inside" in matches[0]["signal_tags"]
 
 
-def test_symbols_none_message_names_deferral_not_notimplementederror() -> None:
-    """Duplicate-intent sanity check: the symbols=None guard must raise
-    ValueError specifically, never let NotImplementedError leak through it
-    (it is checked BEFORE the stub's unconditional raise)."""
-    with pytest.raises(ValueError):
-        _scanner.scan(
-            asset_class="equity",
-            timeframes=["1h", "4h", "1d"],
-            filters={"rsi_max": 35},
-            symbols=None,
-            regime_gate=True,
-        )

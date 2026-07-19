@@ -7,6 +7,18 @@ pass, each case built by its own factory function and registered once in
 `CASE_BUILDERS` — adding a future adapter is exactly one new factory +
 one new registry entry (TD-18's "one factory entry" property).
 
+EXEMPTION (test-audit-2026-07-18.md garbage-removal item 3d): this is NOT
+"every current `BrokerPort` adapter" — `ManualBroker` (`broker._manual`,
+DESIGN §8.4, D16) implements the same five-method protocol but is
+deliberately advisory-only: `submit()` unconditionally raises `AdvisoryOnly`
+(`broker._port.AdvisoryOnly`), a DIFFERENT exception from the
+`BrokerTokenRequired` this suite's own `test_submit_refuses_without_a_valid_
+verdict_token` pin requires — an advisory account never places a real order
+through this adapter regardless of the `VerdictToken` passed, by design, so
+it cannot pass that pin without changing `ManualBroker`'s own semantics
+(a production change, out of scope for a garbage-removal pass). It is
+exempt from `CASE_BUILDERS`, not merely omitted by oversight.
+
 SPRINT P3 batch B (PaperBroker, the first real adapter) lands the first real
 `CASE_BUILDERS` entry (`"paper"`) below — the placeholder marker from batch A
 is gone, so this suite now runs FOR REAL (no longer skipped) for the "paper"
@@ -63,15 +75,107 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import httpx
 import pytest
+from ulid import ULID
 
 from tradekit.broker._paper import PaperBroker
 from tradekit.broker._port import BrokerPort, BrokerTokenRequired
+from tradekit.contracts import (
+    AssetRef,
+    Bar,
+    BarSeries,
+    Event,
+    OrderRequest,
+    VerdictIssuedPayload,
+    VerdictToken,
+)
+from tradekit.ledger import default_ledger
+
+_FILL_ASSET = AssetRef(
+    symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
+)
+
+
+def _seed_paper_fills(monkeypatch: pytest.MonkeyPatch, broker: PaperBroker) -> None:
+    """Drives two REAL fills through `PaperBroker.submit` — the cheapest
+    sanctioned path, mirroring `tests/unit/broker/test_paper_fills.py`'s own
+    `_seed_allow_verdict` + bar/clock monkeypatch helpers — so the
+    ascending-order and non-empty-list conformance pins exercise the
+    adapter's real filter/sort/aggregation code instead of an empty list
+    (test-audit-2026-07-18.md garbage-removal item 3a/3b). Both fills are
+    BUYs so the net position is also non-zero (PaperBroker.positions() omits
+    zero-net symbols, ASSUMPTIONS round-17 entry 109)."""
+    t0 = datetime(2026, 1, 2, tzinfo=UTC)
+    bar = Bar(
+        ts_open=t0, open=Decimal("50000"), high=Decimal("50500"),
+        low=Decimal("49500"), close=Decimal("50000.00"), volume=Decimal("100"),
+    )
+    series = BarSeries(asset=_FILL_ASSET, timeframe="1d", bars=[bar], source="fake-kraken")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", lambda *a, **k: series)
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: t0 + timedelta(days=1))
+
+    for i in range(2):
+        thesis_id = f"TH-conformance-fill-{i}"
+        verdict = VerdictToken(
+            verdict_id=f"conformance-fill-verdict-{i}", policy_version_hash="0" * 64
+        )
+        default_ledger().append(
+            Event(
+                event_id=str(ULID()),
+                ts_utc=t0,
+                type="VerdictIssued",
+                actor="system:test-harness",
+                run_id=None,
+                schema_ver=1,
+                payload=VerdictIssuedPayload(
+                    verdict_id=verdict.verdict_id,
+                    kind="submit_order",
+                    account_ref=broker.account_ref,
+                    thesis_id=thesis_id,
+                    allow=True,
+                    policy_version_hash=verdict.policy_version_hash,
+                ).model_dump(mode="json"),
+            )
+        )
+        order = OrderRequest(
+            thesis_id=thesis_id,
+            account_ref=broker.account_ref,
+            asset=_FILL_ASSET,
+            side="buy",
+            order_type="market",
+            qty=Decimal("0.001"),
+        )
+        broker.submit(order, verdict)
+
+
+def _seed_alpaca_fills_out_of_order(respx_mock: Any) -> None:
+    """Re-registers the `/account/activities` respx route (same URL the
+    `_build_alpaca_paper_case` builder already mocked) with TWO fills whose
+    JSON array order is the REVERSE of their `transaction_time` — so a test
+    asserting ascending-by-ts_utc output actually exercises
+    `AlpacaBroker.fills`'s own sort, not a single-element or already-sorted
+    fixture (test-audit-2026-07-18.md item 3a)."""
+    from tradekit.broker._alpaca import ALPACA_PAPER_BASE_URL
+
+    later = {
+        "id": "act-later", "activity_type": "FILL",
+        "transaction_time": "2026-07-18T02:20:00.000000Z", "type": "fill",
+        "price": "64000.00", "qty": "0.0005", "side": "buy", "symbol": "BTC/USD",
+        "leaves_qty": "0", "order_id": "order-b", "cum_qty": "0.0005",
+        "order_status": "filled", "swap_rate": "1",
+    }
+    earlier = {
+        **later, "id": "act-earlier",
+        "transaction_time": "2026-07-18T02:10:00.000000Z", "order_id": "order-a",
+    }
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/account/activities").mock(
+        return_value=httpx.Response(200, json=[later, earlier])  # deliberately out of order
+    )
 
 
 @dataclass(frozen=True)
@@ -243,10 +347,29 @@ def test_account_returns_account_state_with_decimal_fields(case: Case) -> None:
         )
 
 
-def test_positions_returns_a_list(case: Case) -> None:
+def test_positions_returns_a_list_with_real_element_shape_when_seeded(
+    case: Case, monkeypatch: pytest.MonkeyPatch, respx_mock: Any
+) -> None:
     broker = case.factory()
+    if case.id == "paper":
+        _seed_paper_fills(monkeypatch, broker)
+    elif case.id == "alpaca-paper":
+        respx_mock.get(f"{broker._base_url}/positions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"symbol": "BTC/USD", "qty": "0.001", "avg_entry_price": "50000.00"}],
+            )
+        )
+
     positions = broker.positions()
     assert isinstance(positions, list), f"[{case.id}] positions() must return a list"
+    assert len(positions) > 0, f"[{case.id}] conformance fixture must seed at least one position"
+    position = positions[0]
+    assert isinstance(position.qty, Decimal) and isinstance(position.avg_price, Decimal), (
+        f"[{case.id}] Position.qty/avg_price must be Decimal, got "
+        f"{type(position.qty).__name__}/{type(position.avg_price).__name__}"
+    )
+    assert position.symbol, f"[{case.id}] Position.symbol must be a non-empty string"
 
 
 def test_submit_refuses_without_a_valid_verdict_token(case: Case) -> None:
@@ -255,15 +378,11 @@ def test_submit_refuses_without_a_valid_verdict_token(case: Case) -> None:
     allow-verdict is structurally impossible") is only real if every
     adapter enforces it, not just the pipeline that happens to call it
     correctly."""
-    from tradekit.contracts import AssetRef, OrderRequest, VerdictToken
-
     broker = case.factory()
     order = OrderRequest(
         thesis_id="TH-conformance",
         account_ref="paper:conformance-suite",
-        asset=AssetRef(
-            symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
-        ),
+        asset=_FILL_ASSET,
         side="buy",
         order_type="market",
         qty=Decimal("0.001"),
@@ -273,10 +392,18 @@ def test_submit_refuses_without_a_valid_verdict_token(case: Case) -> None:
         broker.submit(order, bogus_verdict)
 
 
-def test_fills_returns_ascending_by_ts_utc(case: Case) -> None:
+def test_fills_returns_ascending_by_ts_utc(
+    case: Case, monkeypatch: pytest.MonkeyPatch, respx_mock: Any
+) -> None:
     broker = case.factory()
+    if case.id == "paper":
+        _seed_paper_fills(monkeypatch, broker)
+    elif case.id == "alpaca-paper":
+        _seed_alpaca_fills_out_of_order(respx_mock)
+
     since = datetime(2026, 1, 1, tzinfo=UTC)
     fills = broker.fills(since)
+    assert len(fills) > 0, f"[{case.id}] conformance fixture must seed at least one real fill"
     timestamps = [f.ts_utc for f in fills]
     assert timestamps == sorted(timestamps), (
         f"[{case.id}] fills(since) must return Fills ascending by ts_utc"
@@ -291,4 +418,9 @@ def test_order_status_returns_a_typed_order_status(case: Case) -> None:
     assert isinstance(status, OrderStatus), (
         f"[{case.id}] order_status() must return a typed OrderStatus, got "
         f"{type(status).__name__}"
+    )
+    assert status.status == "rejected", (
+        f"[{case.id}] an unknown order_id must map to the 'rejected' OrderStatus VALUE "
+        f"(fail closed), got {status.status!r} — isinstance alone doesn't pin the mapping "
+        "(test-audit-2026-07-18.md garbage-removal item 3c)"
     )

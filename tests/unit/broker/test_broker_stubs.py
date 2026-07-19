@@ -52,7 +52,6 @@ from __future__ import annotations
 import pytest
 
 from tradekit import broker
-from tradekit.contracts import VerdictToken
 
 
 def test_get_resolves_a_paper_prefixed_account_ref_to_a_paper_broker() -> None:
@@ -120,8 +119,3 @@ def test_port_protocol_declares_exactly_five_methods() -> None:
     assert protocol_methods == {"account", "positions", "submit", "order_status", "fills"}
 
 
-def test_verdict_token_shape_is_unchanged_by_broker_port() -> None:
-    # `submit` takes the VerdictToken by value (§8.1) — a smoke check that
-    # importing broker._port doesn't require reshaping the existing contract.
-    token = VerdictToken(verdict_id="v-1", policy_version_hash="0" * 64)
-    assert token.verdict_id == "v-1"

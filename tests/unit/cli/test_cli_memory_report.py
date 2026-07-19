@@ -15,6 +15,7 @@ discipline as every other stubbed verb's CLI test in this codebase.
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from tradekit.cli.main import app
@@ -22,15 +23,22 @@ from tradekit.cli.main import app
 runner = CliRunner()
 
 
-def test_tk_brief_stub_exits_cleanly_not_a_traceback(tmp_path) -> None:
-    result = runner.invoke(app, ["brief"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 0, result.output
-    assert "Traceback" not in result.output
-    assert "Traceback" not in result.output
-
-
-def test_tk_search_stub_exits_cleanly_not_a_traceback(tmp_path) -> None:
-    result = runner.invoke(app, ["search", "halt"], env={"TK_DATA_DIR": str(tmp_path)})
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["brief"],
+        ["search", "halt"],
+        ["report", "readiness"],
+        ["report", "pnl", "paper:alpha"],
+    ],
+    ids=["brief", "search", "report-readiness", "report-pnl"],
+)
+def test_verb_exits_cleanly_not_a_traceback(tmp_path, argv: list[str]) -> None:
+    """Collapses 4 near-identical "stubbed verb exits cleanly" pins
+    (test-audit-2026-07-18.md garbage-removal item 4) into one parametrized
+    smoke check: each verb's own content-level behavior is pinned by its
+    dedicated unit tests (e.g. test_report.py), not the CLI shell."""
+    result = runner.invoke(app, argv, env={"TK_DATA_DIR": str(tmp_path)})
     assert result.exit_code == 0, result.output
     assert "Traceback" not in result.output
 
@@ -43,18 +51,6 @@ def test_tk_report_memo_unknown_thesis_fails_cleanly(tmp_path) -> None:
     assert result.exit_code != 0, result.output
     assert "TH-1" in str(result.exception) or "TH-1" in result.output
     assert "Traceback" not in result.output
-
-
-def test_tk_report_readiness_stub_exits_cleanly(tmp_path) -> None:
-    result = runner.invoke(app, ["report", "readiness"], env={"TK_DATA_DIR": str(tmp_path)})
-    assert result.exit_code == 0, result.output
-
-
-def test_tk_report_pnl_stub_exits_cleanly(tmp_path) -> None:
-    result = runner.invoke(
-        app, ["report", "pnl", "paper:alpha"], env={"TK_DATA_DIR": str(tmp_path)}
-    )
-    assert result.exit_code == 0, result.output
 
 
 def test_tk_wiki_add_is_real_and_writes_a_file(tmp_path) -> None:

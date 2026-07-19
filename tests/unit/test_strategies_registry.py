@@ -2,18 +2,16 @@
 SPRINT P3 batch E, sprint-doc addendum: "one source of truth").
 
 `strategies.TAGS`/`FAMILIES` are REAL data (see `strategies.py`'s own module
-docstring) — the tests here are NOT wrapped in `pytest.raises(
-NotImplementedError)`, and most of them are ordinary assertion failures
-against already-real, golden-frozen modules (`mae._scanner`/`mae._regime`),
-not `NotImplementedError`s: there is no stub function to call, only two
-already-complete modules that haven't been rewired to import FROM the new
-shared registry yet. This is the one file in this batch's red phase that
-deliberately deviates from the "new red is NotImplementedError only"
-default — flagged in `tests/ASSUMPTIONS.md` round-21, not silently ratified
-here. Golden-compatibility (scanner/regime OUTPUT VALUES unchanged) is
-covered by the pre-existing frozen tests in `tests/unit/mae/`, which must
-stay green throughout the dev pass's rewire — this file only pins the
-re-derivation/propagation requirement itself.
+docstring). The dev pass this file originally described as pending (round-21
+red phase, `tests/ASSUMPTIONS.md`) has LANDED: `mae._scanner._TAG_STRATEGY`
+is re-derived FROM `strategies.TAGS` (same object, not a copy), so a registry
+edit propagates to the scanner/regime gate without a second edit. Every test
+below now pins that CURRENT, green, one-source-of-truth behavior — none of
+them describe a pre-implementation gap any more (test-audit-2026-07-18.md
+garbage-removal item 6: the names/docstrings were stale "RED"-era wording
+that passed for the OPPOSITE of what they claimed). Golden-compatibility
+(scanner/regime OUTPUT VALUES unchanged) stays covered by the pre-existing
+frozen tests in `tests/unit/mae/`.
 """
 
 from __future__ import annotations
@@ -23,11 +21,12 @@ from tradekit.mae import _regime, _scanner
 
 
 def test_tags_seed_matches_scanners_existing_mapping_verbatim() -> None:
-    """`strategies.TAGS` must be a byte-for-byte transcription of `_scanner
-    ._TAG_STRATEGY`'s CURRENT values (ASSUMPTIONS 57f's mapping, not a new
-    decision) — this passes today by construction (both were authored from
-    the same source) and pins that the seed is honest, not silently
-    diverged, before the dev pass ever rewires either module."""
+    """`strategies.TAGS` must equal `_scanner._TAG_STRATEGY`'s values
+    (ASSUMPTIONS 57f's mapping) — now trivially true by IDENTITY (see
+    `test_scanner_tag_strategy_is_the_same_object_as_the_shared_registry`,
+    the dev pass re-derived `_scanner._TAG_STRATEGY` from `strategies.TAGS`
+    directly), kept as its own value-level pin so a future refactor that
+    breaks the identity link still gets caught by a value mismatch here."""
     assert strategies.TAGS == _scanner._TAG_STRATEGY
 
 
@@ -48,32 +47,29 @@ def test_regime_strategy_tags_families_are_within_the_shared_vocabulary() -> Non
         assert set(avoid) <= set(strategies.FAMILIES)
 
 
-def test_scanner_tag_strategy_is_not_yet_the_shared_registry_object() -> None:
-    """RED (assertion failure, not NotImplementedError — see module
-    docstring): the sprint-doc pin requires `_scanner._TAG_STRATEGY` to be
-    the SAME object as `strategies.TAGS` (import, not a copy) once the dev
-    pass re-derives it — "one source of truth" only holds if a change to
-    the registry propagates without touching `_scanner.py` again. As of
-    this commit `_scanner._TAG_STRATEGY` is still `_scanner.py`'s own
-    independent module-level dict (equal in VALUE, per the test above, but
-    a distinct object) — this test names the gap explicitly rather than
-    leaving it to be discovered as a silent non-propagation bug."""
+def test_scanner_tag_strategy_is_the_same_object_as_the_shared_registry() -> None:
+    """Pins the "one source of truth" requirement itself: `_scanner.
+    _TAG_STRATEGY` is re-derived FROM `strategies.TAGS` (identity, not a
+    value-equal copy) — the dev pass landed this (test-audit-2026-07-18.md
+    item 6 renamed this test from its stale RED-era "is_not_yet" name/
+    docstring, which described the pre-implementation gap this test now
+    proves is closed)."""
     assert _scanner._TAG_STRATEGY is strategies.TAGS, (
         "mae._scanner._TAG_STRATEGY must be re-derived FROM tradekit.strategies.TAGS "
         "(the same object, e.g. `_TAG_STRATEGY = strategies.TAGS`) so a registry edit "
-        "propagates to the scanner without a second edit — currently still independent"
+        "propagates to the scanner without a second edit"
     )
 
 
 def test_registry_edit_propagates_to_the_regime_gate(monkeypatch) -> None:
-    """RED (assertion failure): the concrete "does a registry change
-    propagate" scenario the sprint doc asks for. Flip `oversold`'s family
-    from `mean_reversion` to `breakout` in the SHARED registry; today
-    `_scanner._apply_regime_gate` still reads its own private
-    `_TAG_STRATEGY` copy, so a regime recommending only `breakout` still
-    drops the `oversold` tag (the module never saw the edit) — once
-    `_TAG_STRATEGY` is re-derived (previous test), this same monkeypatch
-    must flip the gate's outcome instead."""
+    """The concrete "does a registry change propagate" scenario the
+    sprint doc asked for, now pinned green: flip `oversold`'s family from
+    `mean_reversion` to `breakout` in the SHARED registry, and
+    `_scanner._apply_regime_gate` (reading the SAME object per the test
+    above, no private copy left to go stale) keeps `oversold` for a regime
+    recommending only `breakout` (test-audit-2026-07-18.md item 6 renamed
+    this from its stale RED-era docstring, which described this propagation
+    as not-yet-working)."""
     monkeypatch.setitem(strategies.TAGS, "oversold", "breakout")
     kept = _scanner._apply_regime_gate(["oversold"], {"recommended_strategies": ["breakout"]})
     assert kept == ["oversold"], (

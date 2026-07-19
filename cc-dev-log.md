@@ -2,6 +2,26 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable) — Test audit + garbage removal; tk-stack Phase 1 wiring
+
+- **Test-quality audit** (6-agent rubric sweep, all 683 fns): Mike's garbage-test
+  suspicion largely REFUTED — ~85-90% protective, zero mock-theater. Report:
+  docs/reviews/test-audit-2026-07-18.md (verdict + gap backlog, gaps > garbage).
+- **Garbage removal executed** (sonnet agent, CTO re-gated): 824→758 collected (−66,
+  mostly pydantic-mechanics sweeps → one inheritance pin each). pnl_snapshot
+  tautology rewritten to a real lifecycle test (exposed that projections are
+  rebuild-derived, not append-applied). broker_port conformance now seeds real
+  fills/positions; ManualBroker exemption documented (AdvisoryOnly by design).
+  No src/ changes. Gate: green (758 passed, ruff clean, mypy clean).
+- **tk-stack Phase 1 live**: tk-gate (canonical gate verdict + .tk/gate-last.json),
+  tk-bootstrap (SessionStart hook: seed/dev-log/roadmap/gate-freshness/recovery
+  classification), tk-friction (docs/FRICTION.md logger). Project CLAUDE.md (gate
+  line, red lines, doc inventory) + AGENTS.md (Codex/Gemini) added. Global skills
+  purge: 57 gstack skills archived, gstack.bak deleted; tk- suite design at
+  ~/.claude/tk-stack/DESIGN.md.
+- Exemplar subagent prompts + TDD examples library harvested to
+  ~/.claude/tk-stack/references/ (feeds future tk-tdd/tk-implement).
+
 ## 2026-07-18 (Fable) — P4-PAPER COMPLETE: AlpacaBroker dress rehearsal + seam hardening
 
 - Scope per Mike: "P4, paper only." Live remains structurally unreachable
