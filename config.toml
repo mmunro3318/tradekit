@@ -90,3 +90,26 @@ unresolved_attack_threshold = 1
 # Live keys/rotations remain Mike-blocked (sprint doc Addendum 2) — stays
 # false until Mike flips it by hand alongside rotating in the live keys.
 live_trading_enabled = false
+
+# SPRINT P5-PROP batch A (ASSUMPTIONS 143/144): prop-account evaluation
+# dials. First five are the Kraken Prop Starter venue numbers (Report-1
+# §6/§8); last three are the CTO's internal-buffer fractions
+# (Q.H.122-123/130-131) that size OUR walls strictly inside the venue's
+# (prop_account_walls -> (0.021, 0.036) with these values). Left
+# COMMENTED OUT here deliberately, same TD-24 convention as
+# max_daily_drawdown_default/max_lifetime_drawdown_default above:
+# `tests/unit/policy/test_prop_dials.py::test_code_defaults_are_disabled`
+# pins a bare `PolicyDials()` (no TK_CONFIG_PATH isolation, reads this
+# repo-root file) to return `None` on every prop_*/internal_* field —
+# uncommenting these would silently flip that pin. The Starter values
+# are supplied by explicit `PolicyDials(**overrides)` construction at
+# prop-simulation call sites (see `tests/unit/prop/test_scripted_
+# goldens.py`'s `_STARTER`-style dicts), not by this shared file.
+# prop_mdl_pct = "0.03"
+# prop_mdd_pct = "0.06"
+# prop_profit_target_pct = "0.10"
+# prop_fee_side_bps = "4"
+# prop_funding_daily_pct = "0.00033"
+# internal_daily_soft_frac = "0.50"
+# internal_daily_hard_frac = "0.70"
+# internal_mdd_reserve_frac = "0.40"

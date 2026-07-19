@@ -32,6 +32,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import ClassVar
 
+import pytest
+
 from tradekit.contracts import PropSimSpec, ScriptedTradeModel, TradeRecord
 from tradekit.prop import simulate_evaluation
 
@@ -119,8 +121,8 @@ class TestFeeFundingAccrual:
 
     def test_daily_snapshots_are_balance_at_0030_utc(self) -> None:
         """Day 1's reference is the starting balance; D2/D3 snapshots
-        include exactly the ledger events with ts <= 00:30 that day
-        (ASSUMPTIONS 145a/146d)."""
+        include exactly the ledger events with ts strictly BEFORE 00:30
+        that day (ASSUMPTIONS 145a/146d/153)."""
         assert self._result().daily_snapshots == [
             Decimal("5000.00"),
             Decimal("5036.80"),
@@ -306,3 +308,54 @@ class TestTargetAbsorbs:
         assert result.ruin_prob == 0.0
         assert result.final_balance == Decimal("5500.00")
         assert result.expected_days_to_outcome == 1.0
+
+
+class TestTimelineGuards:
+    """Review-round pins (ASSUMPTIONS 152/153)."""
+
+    def test_trades_past_horizon_raise(self) -> None:
+        # Entry 152a: a day-5 trade under horizon_days=2 must fail loud,
+        # never report a breach outside the evaluation window.
+        trades = (
+            _trade(
+                side="long",
+                size="1000",
+                entry_price="100",
+                exit_price="101",
+                entry=_ts(1, 9),
+                exit=_ts(1, 15),
+            ),
+            _trade(
+                side="long",
+                size="1000",
+                entry_price="100",
+                exit_price="101",
+                entry=_ts(5, 9),
+                exit=_ts(5, 15),
+            ),
+        )
+        with pytest.raises(ValueError, match="horizon"):
+            simulate_evaluation(_spec(trades, horizon_days=2), seed=1)
+
+    def test_event_at_exactly_0030_lands_in_the_new_day(self) -> None:
+        # Entry 153: an exit stamped exactly D2 00:30 is EXCLUDED from
+        # D2's snapshot — the snapshot is computed at the instant, the
+        # same-instant fill settles after it.
+        trades = (
+            _trade(
+                side="long",
+                size="5000",
+                entry_price="100",
+                exit_price="110",
+                entry=_ts(1, 9),
+                exit=_ts(2, 0, 30),
+            ),
+        )
+        result = simulate_evaluation(
+            _spec(trades, horizon_days=2, profit_target_pct="0.50"), seed=1
+        )
+        assert result.daily_snapshots == [
+            Decimal("5000.00"),
+            Decimal("5000.00"),
+        ]
+        assert result.final_balance == Decimal("5500.00")

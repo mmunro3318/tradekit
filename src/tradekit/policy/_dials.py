@@ -151,6 +151,27 @@ class PolicyDials(BaseSettings):
     # sprint doc's Addendum 2 scope note: "Live keys/rotations remain
     # Mike-blocked").
     live_trading_enabled: bool = False
+    # SPRINT P5-PROP batch A (ASSUMPTIONS 143): prop-account evaluation
+    # dials. All `Decimal | None = None` in CODE (TD-24 convention,
+    # entry 99 lineage) — disabled unless a config.toml (or explicit
+    # override) sets them; the committed config.toml carries the Kraken
+    # Prop Starter venue numbers (Report-1 §6/§8) for the first five, plus
+    # the CTO's internal-buffer fractions (Q.H.122-123/130-131) for the
+    # last three. `prop_mdl_pct`/`prop_mdd_pct`/`prop_profit_target_pct`
+    # are the VENUE's own daily-loss/max-drawdown/profit-target
+    # percentages; `prop_fee_side_bps`/`prop_funding_daily_pct` are the
+    # simulator's per-side commission and daily funding rate. The three
+    # `internal_*` fractions size OUR walls strictly inside the venue's
+    # (see `prop_account_walls` below, entry 144) — `internal_daily_soft_
+    # frac` is advisory/HUD only (not consumed by any R-rule this batch).
+    prop_mdl_pct: Decimal | None = None
+    prop_mdd_pct: Decimal | None = None
+    prop_profit_target_pct: Decimal | None = None
+    prop_fee_side_bps: Decimal | None = None
+    prop_funding_daily_pct: Decimal | None = None
+    internal_daily_soft_frac: Decimal | None = None
+    internal_daily_hard_frac: Decimal | None = None
+    internal_mdd_reserve_frac: Decimal | None = None
 
     @classmethod
     def settings_customise_sources(
@@ -199,8 +220,20 @@ def prop_account_walls(dials: PolicyDials) -> tuple[Decimal, Decimal] | None:
     `(prop_mdl_pct * internal_daily_hard_frac,
     prop_mdd_pct * (1 - internal_mdd_reserve_frac))`, or `None` (walls
     disabled -> R-017/R-018 `not_configured`) unless all four inputs are
-    set. RED-phase stub (P5-PROP batch A) — green pass implements."""
-    raise NotImplementedError("batch A green pass implements this (RED stub)")
+    set. The soft frac is deliberately NOT one of the four — it is
+    advisory/HUD only (entry 144)."""
+    mdl_pct = dials.prop_mdl_pct
+    mdd_pct = dials.prop_mdd_pct
+    daily_hard_frac = dials.internal_daily_hard_frac
+    mdd_reserve_frac = dials.internal_mdd_reserve_frac
+    if (
+        mdl_pct is None
+        or mdd_pct is None
+        or daily_hard_frac is None
+        or mdd_reserve_frac is None
+    ):
+        return None
+    return (mdl_pct * daily_hard_frac, mdd_pct * (Decimal("1") - mdd_reserve_frac))
 
 
 def resolve_account_dial(

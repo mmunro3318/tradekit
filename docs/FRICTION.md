@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-07-19 — read-dedupe hook false-positives on first-ever reads `hooks,subagent`
+- **Symptom:** reviewer subagent blocked from first reads of test_simulator_parametric.py and test_prop_dials.py (files it had never opened this session); worked around via sed
+- **Cause:** dedupe hook appears to key on files read by OTHER agents/sessions sharing state, not per-agent read history
+- **Solution:** **NOT SOLVED**
+
 ## 2026-07-19 — commit_gate.py blocks documented (red) TDD commits `hooks,git,tdd`
 - **Symptom:** P5-PROP batch A (red) commit denied: hook runs pytest and denies on any failure, no escape for the house (red) failing-test convention
 - **Cause:** commit_gate.py written without the CLAUDE.md '(red) commits' exception — enforcement drifted from house law

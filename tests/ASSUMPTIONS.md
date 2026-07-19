@@ -2803,6 +2803,15 @@ barrier simulator), 2026-07-19
     0.50 / 0.70 / 0.40 per Q.H.122–123/130–131). Report-1 §6/§8 is the
     venue source of truth for the first five.
 
+    **CTO amendment (green phase, same day):** the Starter values ship in
+    `config.toml` COMMENTED OUT, exactly like `max_daily_drawdown_default`/
+    `max_lifetime_drawdown_default` (TD-24 precedent) — a bare
+    `PolicyDials()` reads the repo-root config.toml, so live values there
+    would contradict this entry's own None-by-default pin (caught by the
+    green implementer, ratified as the committed behavior). The block
+    activates when Mike uncomments it alongside standing up the first
+    `prop:*` account.
+
 144. **Internal-wall resolution for `prop:*` accounts (R-017/R-018
     wiring).** `policy.prop_account_walls(dials)` is the ONE resolution
     point: returns `(daily_wall_frac, lifetime_wall_frac)` =
@@ -2900,3 +2909,26 @@ barrier simulator), 2026-07-19
     placeholder-pending-Report-2; it is a `CostModel` slot consumed in
     batch B, recorded here so the number's provenance is on the record
     before it gets load-bearing.
+
+152. **Scripted timeline guards (review round, batch A — FIX-FIRST
+    findings 1/3/4):** (a) a scripted trade list whose calendar span
+    exceeds `horizon_days` raises `ValueError` — never simulated
+    silently (the leak produced a breach outside the window with an
+    all-zero hazard vector, an internally inconsistent result; batch B's
+    backtest→barriers bridge is exactly the caller that would hit it).
+    (b) Barrier levels (MDL floor, MDD floor, target) are compared
+    UNQUANTIZED — cent-rounding a floor can round it down, permissive at
+    the boundary against entry 145b; only ledger applications quantize.
+    (c) When one event crosses BOTH floors and they are exactly equal,
+    the tie resolves to "mdl" (higher-floor-wins with mdl on equality;
+    consistent in both engines).
+
+153. **00:30 UTC snapshot boundary is EXCLUSIVE (review round, batch A —
+    FIX-FIRST finding 2):** the daily snapshot is the balance from
+    ledger events with ts strictly BEFORE 00:30; an event stamped
+    exactly 00:30 lands in the new day (snapshot computed at the
+    instant, the same-instant fill settles after). The venue's "balance
+    at that moment" wording does not resolve the instant itself; this
+    direction is pinned so the golden (exit at exactly D2 00:30 excluded
+    from D2's snapshot) enforces ONE behavior. Revisit only if Kraken
+    support answers otherwise (support ticket already pending).
