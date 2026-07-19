@@ -2,6 +2,31 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, night 2) — P5-PROP batch A shipped (red 4343b0b -> green 1c4cb14)
+
+- **ASSUMPTIONS round-26 (143-153)**: all four sprint-flagged ambiguities
+  ratified + red/review pins: balance-snapshot MDL, equality=breach
+  anti-permissive (documented asymmetry vs R-017/R-018 allow-at-boundary),
+  static MDD, funding at 4h UTC marks exclusive-both-ends, cent
+  HALF_EVEN per application, independent parametric draws, zero-edge
+  log-space envelope 0.3936, risk ladder + monthly ruin normalization,
+  scripted-granularity limitation, 2bps basis placeholder, horizon
+  guard, exclusive 00:30 boundary.
+- **Shipped**: contracts._prop (spec/result/trade-model union),
+  prop.simulate_evaluation (scripted Decimal ledger + parametric numpy
+  MC), policy prop dial block + prop_account_walls (0.021/0.036).
+  35 new tests incl. cent-exact goldens (CTO re-derived independently:
+  5036.80/5035.84/4974.46 confirmed pre-freeze). 793 green.
+- **Review round (money-path, pre-registered focus boundary/reset)**:
+  FIX-FIRST — 2 MED (horizon-span leak -> ValueError; 00:30-equality
+  docstring/impl mismatch -> pinned exclusive + golden), 4 LOW (floors
+  now compared unquantized; tie->mdl pinned; fee-kernel lift deferred
+  to batch B; walls hygiene fixed). Grades: implementer A-, test suite A-.
+- **Friction x2**: commit_gate.py lacked the (red) exemption (fixed);
+  read-dedupe hook false-positives on subagent first-reads (NOT SOLVED).
+- Open into batch B: R-017/R-018 PolicyContext wiring for prop:*
+  accounts; EmpiricalTradeModel pin; fee kernel -> CostModel single canon.
+
 ## 2026-07-19 (Fable, late) — Prop recon complete; SPRINT-P5-PROP designed
 
 - **Prop API hunt CLOSED (negative)**: Pro key sees main wallet only;

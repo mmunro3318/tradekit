@@ -170,10 +170,10 @@ docs/research/prop-questionnaire-answers-CTO-2026-07-18.md (binding) +
 docs/research/kraken-prop-report1-2026-07-19.md (venue mechanics).
 
 ### M5.1 Prop dials + evaluation barrier simulator (SPRINT-P5-PROP batch A)
-- [ ] AccountConfig/PolicyDials prop block (mdl/mdd/target/fees/internal buffers; None=disabled)
-- [ ] R-017/R-018 wired to internal walls (50/70% MDL, 40% MDD reserve)
-- [ ] `tradekit.prop.simulate_evaluation` Monte Carlo (absorbing barriers, ≥10k paths, seeded)
-- [ ] Headline: `recommended_max_risk_frac` clearing ruin ≤2%/mo (Q.A.8)
+- [X] AccountConfig/PolicyDials prop block (mdl/mdd/target/fees/internal buffers; None=disabled) — green 1c4cb14; Starter values shipped commented-out in config.toml (ASSUMPTIONS 143 amendment)
+- [ ] R-017/R-018 wired to internal walls (50/70% MDL, 40% MDD reserve) — `prop_account_walls` resolution DONE (0.021/0.036, ASSUMPTIONS 144); PolicyContext wiring for `prop:*` accounts still open (needs its own pinned tests; fold into batch C or a wiring mini-batch)
+- [X] `tradekit.prop.simulate_evaluation` Monte Carlo (absorbing barriers, ≥10k paths, seeded) — scripted + parametric green (ASSUMPTIONS 145-153); empirical mode fail-loud until pinned
+- [X] Headline: `recommended_max_risk_frac` clearing ruin ≤2%/mo (Q.A.8) — ladder + monthly normalization per ASSUMPTIONS 150
 
 ### M5.2 Backtest / walk-forward engine (absorbs M1.3 open box; batches B–D)
 - [ ] StrategySpec/CostModel contracts (scanner-vocabulary entries; one fee canon with M5.1)

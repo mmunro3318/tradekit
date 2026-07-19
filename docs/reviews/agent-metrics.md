@@ -199,3 +199,27 @@ rounds turn in ~15-20 min. (2) The pre-registered-focus rule keeps paying:
 MED-1 sat exactly in the named focus area. (3) Live remains structurally
 unreachable: dial default-false + live-key env absent + two-man promotion +
 live_path manual-resume — four independent locks.
+
+## Round 8 — 2026-07-19 — P5-PROP batch A (prop dials + barrier simulator, 4343b0b..1c4cb14)
+
+Reviewer: tk-reviewer (top model). Pre-registered focus: boundary/reset
+semantics. Probes executed against the live engine (horizon leak, 00:30
+equality), G1 ledger independently re-derived, trailing-MDD kill-check
+verified on the golden numbers. Verdict: **FIX-FIRST** (2 MED fixed
+same-session with new pins 152/153, 4 LOW: 2 fixed, 1 deferred-by-design
+to batch B, 1 accepted).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| green-prop-A (Sonnet) | batch A src | 0 | 1 | 2 | A- | Venue-exact barrier/fee/RNG semantics both engines; caught the config.toml-vs-pin conflict itself and resolved via TD-24 precedent instead of editing the test (exemplary flag-don't-improvise). Docked: unguarded horizon leak (inconsistent result object). |
+| CTO red (Fable) | batch A tests/pins | 0 | 1 | 1 | A- | Cent-exact hand-derived goldens with real kill power; docked: wrong 00:30-inclusivity docstring pin, weak largest-rung assertion (accepted LOW). |
+
+CTO-gate catches: goldens re-derived independently pre-freeze (all
+confirmed); ASSUMPTIONS 143 amended rather than silently diverging from
+the shipped config.toml behavior.
+
+Process notes: (1) commit-gate hook and house (red) convention had
+drifted — hook now exempts (red) commits; enforcement follows written
+law, not vice versa. (2) The reviewer ran live probes, not just reading
+— both MEDs were demonstrated, not conjectured; keep requiring that.
+
