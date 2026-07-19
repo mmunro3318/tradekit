@@ -2,6 +2,25 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable) — Prop-strategy questionnaire answered (CTO), Kraken GO verdict
+
+- **Answered GPT 5.6 Sol's 378-question prop-strategy discovery sheet**:
+  docs/research/prop-questionnaire-answers-CTO-2026-07-18.md. Anchors GPT
+  to the built substrate (BUILT markers), flags MIKE-only items, defers
+  venue facts to Report 1. Key calls: survival-first priority order,
+  pullback-continuation+breakout first family, 4h/1h/15m MTF, LLM
+  deny-only + P&L-blinded, risk ladder 0.05→0.10→0.15%, no manual trades
+  in system account, "tradekit Substrate Contract" doc inserted into the
+  design sequence (GPT adopted all of it).
+- **Kraken Prop Report 1 verdict: GO with conditions** (Mike's deep
+  research): automation explicitly permitted, WA/US eligible, MDL = 3% of
+  BALANCE recalc'd daily 00:30 UTC, MDD static lifetime off starting
+  balance, breach detection on real-time EQUITY. Unconfirmed →
+  SUPERVISED_LIVE-gated: Prop API key scoping, stop persistence through
+  disconnect, full Prop ToS text. Contingency if no API: advisory-HUD
+  mode (Mike executes, app simulates from synced fills).
+- Gate: green (19127d3 baseline, 758 passed).
+
 ## 2026-07-19 (Fable) — Test audit + garbage removal; tk-stack Phase 1 wiring
 
 - **Test-quality audit** (6-agent rubric sweep, all 683 fns): Mike's garbage-test
