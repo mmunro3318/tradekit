@@ -2984,3 +2984,11 @@ barrier simulator), 2026-07-19
     100/50-trade minimums documented as house rails, not laws.
     (f) Prop profit target is per-plan spec input (never hard-coded);
     re-verify on purchase screen per plan.
+
+157. hud-orderbook batch 1 (2026-07-19): (a) `tradekit.hud._build.evaluate_policy`
+     and `tradekit.hud._build.open_position_symbols` are SANCTIONED module-level
+     test seams (alongside mae._runtime.clock/get_closed_bars); their defaults
+     must be the real policy evaluation and real open-position query — the seam
+     names are the only monkeypatch points for HUD policy/position injection.
+     (b) Red-stage bar stubs are shape pins; green implementer supplies real
+     BarSeries fixtures driving the funnel, without editing test assertions.
