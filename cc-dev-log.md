@@ -2,6 +2,29 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-19 (Fable, day 3) — hud-orderbook shipped T1-T4 (design a85053c -> green fa0d3e4)
+
+- **Pivot executed**: post-UIA-grade-C, built the advisory HUD per handoff.
+  Design/spec/tasks committed (static HTML render target chosen over
+  FastAPI/Textual); AC-1..10; T1-T5.
+- **Batch 1 (contracts + render + build_state)**: red 2525531, green e9805da,
+  CTO fix round d9ef3f8 REJECTED implementer's NotImplementedError-as-success
+  sentinel + hardcoded proposal fixture (fabricated advisory numbers = money
+  hazard) -> real BarSeries fixtures, third sanctioned seam size_qty with
+  LOUD default (ASSUMPTIONS 158). Review round 10 ACCEPT w/ fixes (be70f94):
+  tab-count assertion, exception-path test, interim-provenance warning on
+  tickets, gate-reason fidelity.
+- **Batch 2 (tk hud CLI)**: red 8c6ef7d, green fa0d3e4. Implementer correctly
+  STOPPED on pytest basename collision (test_cli.py x2) instead of hacking
+  import mode; CTO renamed to test_hud_cli.py. Atomic temp+replace write,
+  exit 4, clock via mae._runtime only.
+- **Known intended limitation**: production `tk hud` fails loud until T5
+  (real sizing/funnel wiring) — no fabricated quantities on the surface Mike
+  transcribes into the prop account. T5 is next session's first batch, then
+  the one compliant inactivity-clock trade.
+- Gate green at a4e2d6d (890+ tests). Collector confirmed live (hour-14
+  parquet growing).
+
 ## 2026-07-19 (Fable, night 2) — P5-PROP batch A shipped (red 4343b0b -> green 1c4cb14)
 
 - **ASSUMPTIONS round-26 (143-153)**: all four sprint-flagged ambiguities
