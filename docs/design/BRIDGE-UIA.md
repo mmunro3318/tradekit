@@ -1,101 +1,174 @@
-# Execution Bridge v2 — UIA middleware design (supersedes outbox/inbox sketch)
+# BRIDGE-UIA — synchronous UIA execution middleware (DESIGN, v2)
 
-> CTO design, 2026-07-19 (late). Mike's call: drop the file-based
-> outbox/inbox; the bridge is a synchronous middleware that "physically"
-> drives Kraken Desktop through the Windows accessibility layer (UI
-> Automation) and returns success/fail directly. This doc is the seed for
-> SPRINT-P5-BRIDGE pinning.
+> CTO design, 2026-07-19 (late), upgraded to tk-design bar 2026-07-20.
+> Mike's call: no outbox/inbox files — a synchronous middleware drives
+> Kraken Desktop through Windows UI Automation and returns success/fail
+> directly. Supersedes the executor-agent sketch. Recon basis: broker
+> seam facts verified against `_port.py`/`_manual.py`/conformance suite
+> (recon-bridge sweep, 2026-07-20).
 
-## Shape: a BrokerPort adapter, not a new pipeline
+## 0. Decision summary
 
-`UiaBroker` implements the EXISTING `broker._port.BrokerPort` protocol
-(`submit / order_status / fills / account / positions`). Nothing upstream
-changes: the policy gate (R-rules + VerdictToken) already sits between
-every agent action and `submit()`; reconcile/halt machinery already
-consumes BrokerPort outputs. The "middleware" is just this adapter plus a
-thin UIA driver library it owns:
+Order flow reuses the entire existing money path; only the last hop is
+new:
 
-    thesis -> policy.evaluate -> VerdictToken -> broker.get("prop:starter1")
-        -> UiaBroker.submit(order)          # synchronous, timeout-bounded
-            -> _uia driver: find ticket -> set fields -> read-back verify
-               -> click submit -> read confirmation -> Fill/raise
-        <- OrderAck / VenueRejected / VenueUnavailable / NEEDS_RECONCILE
+    thesis -> policy.evaluate -> VerdictToken
+        -> broker.get("prop:starter1") -> UiaBroker (BrokerPort)
+            -> tradekit.bridge driver (UIA verbs, deterministic)
+                -> Kraken Desktop order ticket
+        <- OrderAck | VenueRejected | VenueUnavailable | VenueAmbiguous
 
-## The driver: deterministic verbs, no AI in the loop
+No AI on the submit path. Mechanics are deterministic UIA element walks
+against a pinned element map; any model (Claude read-only included) is
+at most a *secondary* reconcile verifier, never an actor.
 
-Narrow verb surface (pywinauto, `backend="uia"`), per the
-agent-desktop pattern but WITHOUT an agent holding the mouse:
+**NEW DEPENDENCY (flagged per house rule): `pywinauto` (UIA backend;
+pulls `comtypes`).** Chosen over raw `comtypes`/`uiautomation` because
+it is the maintained, typed-enough, Windows-native UIA wrapper with
+wait/timeout primitives we would otherwise hand-roll. Windows-only dep:
+declared in an optional dependency group `bridge` so CI/linux installs
+stay clean; `tradekit.bridge` import fails loud with install hint.
 
-- `snapshot()` — structured dump of the Prop panel (account selector
-  value, instrument, balance/MDL/MDD readouts, open positions table).
-- `select_account(name)` / `select_instrument(sym)`
-- `fill_ticket(side, qty, type, limit_price, stop)`
-- `read_ticket()` — read every field BACK off the UIA tree.
-- `submit_ticket()` — enabled only after read-back matches the order.
-- `read_confirmation(timeout)` — toast/positions-delta.
+## 1. Module table (Deep Modules doctrine)
 
-Mechanics are 100% deterministic UIA element walks pinned to
-automation-ids/names captured in a probe (below). No vision model, no
-LLM, no coordinates. An optional *secondary verifier* (screenshot ->
-any VLM, or Claude read-only) can cross-check `snapshot()` for the
-reconcile aid, but it is never on the submit path.
+| Module | Interface (verbs × params) | What it hides | Depth verdict |
+|---|---|---|---|
+| `tradekit.bridge` (driver) | 7 verbs: `snapshot()`, `select_account(name)`, `select_instrument(sym)`, `fill_ticket(ticket)`, `read_ticket()`, `submit_ticket()`, `read_confirmation(timeout_s)` | UIA tree walking, element map resolution + staleness, input method (UIA pattern vs keystroke fallback), waits/retries, Electron-accessibility activation | DEEP — 7 narrow verbs over the entire Win32/UIA/Electron surface |
+| `broker.UiaBroker` (adapter) | BrokerPort's 5 verbs (`account/positions/submit/order_status/fills`) | driver orchestration, verdict-token check, client-side caps + kill-switch, confirmation -> `FillRecorded` ledger writes, ambiguity handling | DEEP — same width as every other adapter (conformance suite: one factory entry) |
+| element map (`bridge/elementmap_kraken_<ver>.json`) | data, not code | selector churn across Kraken releases | n/a — versioned data artifact, pinned to the probe dump |
+| `scripts/probe_uia_kraken.py` | CLI, read-only | — | thin by design (a probe, not a module) |
 
-## Non-negotiable safety semantics (each becomes a pinned test)
+Rejected shallow alternative: a separate "middleware service" process
+with an HTTP API (the pasted agent-desktop pattern). We have exactly one
+consumer (tradekit) on the same machine; a local API layer is a
+forwarding wrapper. The driver is a library; the *seam* is BrokerPort.
 
-1. **Read-back-before-submit**: submit is refused unless `read_ticket()`
-   equals the order exactly (account, instrument, side, qty, price,
-   stop). A UIA set that silently failed must never reach the venue.
-2. **Timeout != fail**: if `submit_ticket()`/`read_confirmation()` times
-   out, the order state is UNKNOWN — the click may have landed. Return
-   `NEEDS_RECONCILE`, never "failed"; the caller must reconcile off the
-   positions panel (`snapshot()`) before ANY retry. Blind retry on a
-   money surface is the classic double-fill bug.
-3. **Failure taxonomy mirrors `broker._port`** (round-25 discipline):
-   venue-visible rejection (error toast) -> `VenueRejected`; app not
-   running / element not found / tree changed -> `VenueUnavailable`;
-   ambiguous -> `NEEDS_RECONCILE`. Nothing fabricated from silence.
-4. **Client-side hard caps in the driver itself**: max qty/notional,
-   internal walls (0.021/0.036 via `prop_account_walls`), ticket
-   staleness expiry, and a kill-switch file checked before every
-   `submit_ticket()`. Defense in depth below the policy gate.
-5. **Live-lock discipline unchanged**: `UiaBroker` registers behind a
-   `bridge_execution_enabled` dial (default false) + the existing
-   promotion tiers; Claude remains read-only observer (harness tier +
-   policy — executes nothing regardless); Mike flips the dial per-step.
-6. **Supervised only** until Kraken's written stop-persistence answer
-   (H.164): a human watches every submit in phase 1 of live use.
+## 2. Data flow
 
-## Feasibility gate first (phase 0 — do before any driver code)
+    OrderRequest + VerdictToken
+        │ submit()
+        ▼
+    UiaBroker ── caps/kill-switch/ttl check ──> BrokerTokenRequired /
+        │                                       VenueRejected(reason=cap)
+        ▼ Ticket (typed: account, symbol, side, qty, type, limit, stop)
+    bridge.fill_ticket ──UIA──> Kraken Desktop
+        │ read_ticket() -> TicketReadback (every field, from the tree)
+        ▼ readback == ticket ? submit_ticket() : VenueUnavailable(set-failed)
+    read_confirmation(timeout) ──> ConfirmationEvent
+        │                            (positions/orders panel delta = truth;
+        │                             toast parsed as advisory corroboration)
+        ▼
+    OrderAck + FillRecorded(ledger)   |   VenueRejected (venue error text)
+                                      |   VenueAmbiguous -> HaltSet + reconcile
 
-Kraken Desktop is (probably) Electron/Chromium. Chromium exposes a UIA
-tree, but often only once assistive-tech is detected, and element ids
-may be unstable per release. Phase 0 is a READ-ONLY probe script:
-`scripts/probe_uia_kraken.py` dumps the tree over the Prop page + order
-ticket (with and without `--force-renderer-accessibility`-style flags),
-and we grade exposure A (semantic ids) / B (names only) / C (canvas —
-fall back to the vision-executor plan, docs/handoff sprint sketch).
-The probe artifact (tree dump) gets committed under docs/research/ and
-the driver's element map is pinned against it, so a Kraken UI update
-breaks LOUDLY at the map layer, not silently mid-order.
+## 3. Submit state machine (the only lifecycle)
 
-## Data plane (unchanged from batch-A architecture)
+    IDLE -> NAVIGATED (account+instrument verified from snapshot)
+         -> FILLED    (ticket fields set)
+         -> VERIFIED  (read_ticket == ticket, exact; else abort SET_FAILED)
+         -> SUBMITTED (click; ts recorded)
+         -> CONFIRMED (panel delta within timeout)  -> ack
+          | REJECTED  (venue error surfaced)        -> VenueRejected
+          | AMBIGUOUS (timeout, no delta, no error) -> VenueAmbiguous
 
-Analysis stays in `mae`: Kraken API primary for crypto, Alpaca for the
-general universe; cross-feed divergence flag (>N bps -> distrust both,
-no action), prop-basis 2bps placeholder pending Report 2. The bridge
-consumes decisions; it never sources them.
+Transitions are one-way; any UIA failure before SUBMITTED aborts to a
+clean state (nothing at the venue — safe to re-enter from IDLE). After
+SUBMITTED, NOTHING retries automatically, ever (double-fill rule).
 
-## Batches (SPRINT-P5-BRIDGE, after M5.2 or interleaved)
+## 4. Error / rescue map
 
-- **A**: phase-0 probe + exposure grade + element map format (read-only).
-- **B**: driver read verbs (`snapshot`/`read_ticket`) + reconcile-aid
-  integration — useful standalone even if we never automate submits.
-- **C**: write verbs + read-back/timeout/kill-switch semantics against a
-  UIA test double (goldens for every safety pin above).
-- **D**: `UiaBroker` adapter conformance (ring-2 suite, one factory
-  entry) + supervised dry-run protocol doc for Mike.
+| Failure | Typed as | Handler | Operator sees |
+|---|---|---|---|
+| bad/missing VerdictToken | `BrokerTokenRequired` | policy pipeline (existing) | struct-ordered refusal |
+| kill-switch file present / dial off / ticket older than `bridge_ticket_ttl_s` (60) / cap or internal-wall violation | `VenueRejected` (reason names the guard) | caller; no UI touched | refusal with named guard |
+| app not running, element map miss, tree changed, read-back mismatch (pre-submit) | `VenueUnavailable` | caller may retry from IDLE; map miss also logs the tree diff for re-pin | "bridge unavailable: <element>" |
+| venue error toast/inline after submit | `VenueRejected(venue_text)` | caller | venue's own words |
+| post-submit timeout, no confirmation, no error | `VenueAmbiguous` (NEW, `VenueError` subclass) | pipeline: `HaltSet` + mandatory `reconcile()` before ANY resubmission | halt + reconcile report |
+| UIA exception mid-`submit_ticket` click | `VenueAmbiguous` (click may have landed) | same as above | same |
 
-Open flags for pin time: exact staleness expiry; whether `fill_ticket`
-uses keyboard-emulation fallback when a field rejects UIA patterns
-(grade-B exposure); confirmation source of truth (toast vs positions
-delta vs both).
+`VenueAmbiguous` is the one new exception; it extends the round-25
+taxonomy and is exported from `broker._port` (canonical home rule).
+
+## 5. Ledger + reconcile integration
+
+- CONFIRMED writes `FillRecorded` (actor `"system:bridge"`) with price/
+  qty/fees parsed from the confirmation panel; `OrderSubmitted`/
+  `OrderAck` events bracket the UI interaction (validate-before-append
+  discipline: events only after the corresponding UI truth exists).
+- `fills(since)` parses the app's trade-history panel (broker truth,
+  independent of our ledger) so the EXISTING `reconcile()` triple-match
+  `(order_id, ts_utc, qty)` has two genuinely independent sources.
+  Venue UI has no order_id: the bridge stamps its own ULID into the
+  ledger AND matches history rows by `(ts within tolerance-0, qty,
+  symbol, side)` mapped back to the bridge order — exact mapping is a
+  SPEC-level pin (feature 3) informed by the probe's history-panel dump.
+- `order_status(order_id)`: open-orders panel parse; unknown id ->
+  `status="rejected"` (conformance fail-closed pin).
+- `account()`/`positions()`: snapshot parse of the Prop panel readouts
+  (balance, MDL/MDD remaining, positions table) — this is ALSO the
+  standalone reconcile-aid deliverable (useful before any write verb
+  exists).
+
+## 6. Safety invariants (each becomes a pinned test)
+
+1. Read-back-before-submit, exact equality on every field.
+2. Timeout ≠ fail: post-submit ambiguity -> `VenueAmbiguous`, halt,
+   reconcile before retry. No automatic resubmission, ever.
+3. Client-side hard caps below the policy gate: max qty/notional,
+   `prop_account_walls` (0.021/0.036), `bridge_ticket_ttl_s`,
+   kill-switch file (`TK_DATA_DIR/bridge.KILL`) checked before every
+   `submit_ticket()`.
+4. `bridge_execution_enabled` dial, default false; `broker.get("prop:*")`
+   fail-closed conjunction (dial AND element map present AND app
+   reachable), mirroring `LiveTradingDisabled`'s pattern with
+   `BridgeExecutionDisabled`.
+5. Read verbs never require the dial (reconcile aid is always allowed);
+   write verbs always do.
+6. Supervised-only until Kraken's written stop-persistence answer
+   (H.164): the dry-run protocol (feature 4) requires Mike watching
+   each submit; this is process, pinned in the protocol doc, not code.
+
+## 7. Test seams
+
+- **Determinism seam:** the driver takes a `UiaSession` protocol
+  (connect/find/read/set/click primitives). Tests inject `FakeUiaSession`
+  replaying recorded tree states — the ONLY sanctioned fake for bridge
+  tests (mirrors `mae._runtime` discipline; never mock tradekit
+  internals). Probe dumps become fixture trees.
+- CONTRACT: UiaBroker joins `CASE_BUILDERS` ("prop" entry) — token
+  refusal, Decimal money, ascending fills, typed order_status.
+- BEHAVIOR: state machine paths (read-back mismatch aborts; ambiguous
+  timeout raises + halts; caps refuse pre-UI).
+- GOLDEN: snapshot parser over committed probe dumps (panel text ->
+  typed readouts, cent-exact).
+- SEAM: kill-switch file, ttl expiry vs injected clock (`bridge._clock`
+  monkeypatch seam, same shape as `mae._runtime._clock`).
+
+## 8. Unknowns register (carry-forward: resolved or consciously parked)
+
+| # | Question | Status |
+|---|---|---|
+| U1 | Ticket staleness expiry | RESOLVED (fill-blanks): dial `bridge_ticket_ttl_s = 60` — long enough for UI latency, short enough that a stale thesis price can't execute; revisit with dry-run data. |
+| U2 | Keyboard fallback when a field rejects UIA value patterns | RESOLVED (fill-blanks): allowed per-field (grade-B exposure), because read-back is the invariant that makes input method irrelevant — pattern first, keystroke fallback, identical verification either way. |
+| U3 | Confirmation source of truth | RESOLVED (fill-blanks): positions/open-orders panel delta is authoritative; toast is advisory corroboration only (transient, missable). |
+| U4 | Kraken Desktop UIA exposure grade | PARKED on evidence, by design: phase-0 probe (feature 1) grades A/B/C. Grade C (canvas) -> STOP; fall back to the vision-executor sketch as a NEW design round. Features 2-4 are conditional on A/B. |
+| U5 | UI-history -> order_id mapping for `fills()` | PARKED to feature-3 spec, pinned against the probe's actual history-panel columns (can't pin columns we haven't seen; spec blocks on probe artifact). |
+| U6 | Stop persistence during disconnect | EXTERNAL (Kraken ticket) — gates autonomy tier only, not this sprint's supervised scope. |
+
+## 9. Feature list (feeds tk-spec / tk-tasks)
+
+1. **probe-uia**: `scripts/probe_uia_kraken.py` read-only tree dump +
+   exposure grade + committed artifact. (No spec needed — a probe.)
+2. **bridge-read**: element map format + driver read verbs
+   (`snapshot`, `read_ticket`) + snapshot parser goldens + reconcile-aid
+   CLI (`tk bridge snapshot`). Standalone value.
+3. **bridge-write + UiaBroker**: write verbs, state machine, caps/
+   kill-switch/ttl, `VenueAmbiguous`+halt wiring, ledger writes,
+   conformance entry, `fills()` mapping (U5 resolved here).
+4. **dry-run protocol**: supervised execution procedure doc + `tk bridge
+   drill` (fills a ticket on the SMALLEST unit and stops before submit;
+   Mike clicks or aborts). Process deliverable.
+
+Blast radius: everything below `broker.get("prop:*")` — no existing
+adapter, rule, or test changes except additive routing + the new
+exception export. Reversal = delete the package + routing branch.
