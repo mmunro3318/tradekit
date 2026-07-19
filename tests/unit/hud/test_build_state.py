@@ -222,3 +222,30 @@ class TestAC8Determinism:
 
         assert state_1 == state_2
         assert state_1.generated_at == CAPTURED_AT
+
+
+class TestAC6ProviderExceptionDegradesToWait:
+    def test_provider_exception_produces_wait_grade_never_escapes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-6 / ASSUMPTIONS 158d: a raising bar provider degrades to a
+        failed data_integrity gate (grade "wait") naming the error class —
+        the exception never escapes build_state."""
+        import tradekit.hud._build as hud_build
+        import tradekit.mae._runtime as mae_runtime
+
+        def _boom(symbol: str, timeframe: str, lookback_days: int):
+            raise RuntimeError("feed down")
+
+        monkeypatch.setattr(mae_runtime, "get_closed_bars", _boom)
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT)
+
+        assert state.tickets == ()
+        entry = next(e for e in state.report if e.symbol == "LINK/USD")
+        assert entry.grade == "wait"
+        gate = next(g for g in entry.gates if g.name == "data_integrity")
+        assert gate.passed is False
+        assert "RuntimeError" in gate.observed

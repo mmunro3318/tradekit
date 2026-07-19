@@ -37,3 +37,8 @@ Batch 1 = T1+T2+T3 (red together, green together); batch 2 = T4.
 satisfies: AC-4 (real derivation path; SPEC Unknowns "RESOLVED by reference")
 files: src/tradekit/hud/_build.py, tests/unit/hud/test_build_state.py
 done: size_qty default = real mae.size_position wiring; scan/regime/metric gates in report; tk-gate green
+
+T5 scope additions (review round batch 1): sell-side sign handling in
+_build_ticket_fields + side-aware button label in _render; replace
+interim-thesis provenance with real ledgered thesis ids; real tick_size
+lookup for the proposal AssetRef.

@@ -133,6 +133,7 @@ class TestTicketTabsAndReportRows:
         """AC-1: exactly two ticket tabs labeled by pair for a two-ticket
         state."""
         html = render(_two_ticket_state())
+        assert html.count('<label for="tab-') == 2
         assert html.count("LINK/USD") >= 1
         assert html.count("ETH/USD") >= 1
 

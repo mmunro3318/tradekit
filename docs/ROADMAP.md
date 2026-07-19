@@ -214,8 +214,8 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [ ] Phase-2 hardening: single-writer key-holding daemon (TD-19)
 
 ### hud-orderbook (advisory HUD)
-- [ ] T1: HUD contracts
-- [ ] T2: render (OSO-mirror + scan report)
-- [ ] T3: build_state (funnel walk + grade rule)
+- [x] T1: HUD contracts
+- [x] T2: render (OSO-mirror + scan report)
+- [x] T3: build_state (funnel walk + grade rule)
 - [ ] T4: hud verbs + tk hud CLI
 - [ ] T5: wire real funnel into build_state

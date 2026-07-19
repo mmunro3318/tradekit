@@ -246,3 +246,12 @@ Process: reviewer ran live probes again (both HIGHs demonstrated). Lesson
 for red dispatches: REQUIRE adversarial fixtures (ambiguity, malformed
 rows, wrong-tier collisions) in the pin list, not just spec-named errors.
 
+
+## Round 10 — hud-orderbook batch 1 (2026-07-19)
+| Dimension | Grade | Note |
+|---|---|---|
+| Correctness | A- | golden arithmetic exact; fabricated thesis_id docked (fixed: interim prefix + rendered warning) |
+| Safety | A | zero I/O/clock/execution; loud size_qty default |
+| Test quality | B | AC-1 tab assertion + AC-6 exception path gaps (both fixed post-review) |
+| Doctrine | B+ | seams sanctioned/real; sell-path + provenance now in T5 scope |
+Per-agent: test-writer B+, implementer B (NotImplementedError trap caught at CTO gate), CTO fix round A-. Verdict: ACCEPT (pass-with-fixes, all MED fixes applied same round).

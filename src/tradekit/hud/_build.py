@@ -103,17 +103,18 @@ open_position_symbols = _default_open_position_symbols
 size_qty = _default_size_qty
 
 
-def _fetch_bars(symbol: str) -> BarSeries | None:
-    """`None` signals "insufficient/gap" (AC-6): too few bars, or the
-    provider raised — either way the symbol degrades to a visible failed
-    `data_integrity` gate, never an escaping exception."""
+def _fetch_bars(symbol: str) -> tuple[BarSeries | None, str]:
+    """`(None, reason)` signals "insufficient/gap" (AC-6): too few bars, or
+    the provider raised — either way the symbol degrades to a visible failed
+    `data_integrity` gate carrying the actual reason, never an escaping
+    exception."""
     try:
         series = mae_runtime.get_closed_bars(symbol, _TIMEFRAME, _LOOKBACK_DAYS)
-    except Exception:
-        return None
+    except Exception as exc:
+        return None, f"provider error: {type(exc).__name__}"
     if len(series.bars) < _MIN_BARS:
-        return None
-    return series
+        return None, f"{len(series.bars)} closed bars"
+    return series, ""
 
 
 def _build_ticket_fields(
@@ -207,7 +208,7 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             )
             continue
 
-        bars = _fetch_bars(symbol)
+        bars, gap_reason = _fetch_bars(symbol)
         if bars is None:
             report.append(
                 ScanReportEntry(
@@ -218,7 +219,7 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
                         GateResult(
                             name="data_integrity",
                             passed=False,
-                            observed=f"< {_MIN_BARS} closed bars",
+                            observed=gap_reason,
                             threshold=f">= {_MIN_BARS} closed bars",
                             rationale=f"insufficient closed bar history for {symbol}",
                         ),
@@ -232,7 +233,9 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
         limit_price = bars.bars[-1].close
         quantity = size_qty(symbol, limit_price)
         fields = _build_ticket_fields(symbol, limit_price, quantity)
-        thesis_id = f"thesis-{symbol.replace('/', '-').lower()}"
+        # Interim provenance (review round: not a ledgered thesis): honest
+        # prefix + a rendered warning until real thesis wiring lands (T5).
+        thesis_id = f"interim-thesis-{symbol.replace('/', '-').lower()}"
         proposal = _make_proposal(symbol, thesis_id, fields)
         decision = evaluate_policy(proposal)
 
@@ -287,7 +290,10 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             trigger_signal="last",
             post_only=False,
             tif="gtc",
-            warnings=(),
+            warnings=(
+                "interim provenance: thesis id, TP/SL rule, and sizing seam "
+                "pending real funnel wiring (T5)",
+            ),
             thesis_id=thesis_id,
             verdict_id=decision.verdict_id,
             created_at=captured_at,
