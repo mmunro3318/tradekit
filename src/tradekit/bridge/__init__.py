@@ -15,6 +15,7 @@ from tradekit.bridge._errors import (
     ElementMapMiss,
     PanelParseError,
 )
+from tradekit.bridge._read import read_ticket, snapshot
 from tradekit.bridge._session import UiaNode, UiaSession, real_session
 
 __all__ = [
@@ -25,5 +26,7 @@ __all__ = [
     "PanelParseError",
     "UiaNode",
     "UiaSession",
+    "read_ticket",
     "real_session",
+    "snapshot",
 ]

@@ -32,6 +32,7 @@ order_app = typer.Typer(no_args_is_help=True)
 fill_app = typer.Typer(no_args_is_help=True)
 wiki_app = typer.Typer(no_args_is_help=True)
 report_app = typer.Typer(no_args_is_help=True)
+bridge_app = typer.Typer(no_args_is_help=True)
 app.add_typer(schema_app, name="schema", help="Contract JSON Schemas (§5).")
 app.add_typer(ledger_app, name="ledger", help="Audit surface over the event store (§6).")
 app.add_typer(thesis_app, name="thesis", help="Thesis lifecycle (§10.1).")
@@ -43,6 +44,9 @@ app.add_typer(order_app, name="order", help="Two-phase order pipeline (§8.2, SP
 app.add_typer(fill_app, name="fill", help="Advisory/manual fills (§8.4, D16, SPRINT P3 batch D).")
 app.add_typer(wiki_app, name="wiki", help="Research-loop notes (§11, SPRINT P3 batch E).")
 app.add_typer(report_app, name="report", help="Reporting (§12.3, SPRINT P3 batch E).")
+app.add_typer(
+    bridge_app, name="bridge", help="UIA prop-panel reconcile aid (SPEC-bridge-read, feature 1+2)."
+)
 
 
 def _guard_not_implemented(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -492,6 +496,42 @@ def report_readiness() -> None:
 def report_pnl(account_ref: str) -> None:
     """`report.pnl_snapshot(account_ref)` (thin dispatch, DESIGN §12.3)."""
     typer.echo(_guard_not_implemented(report.pnl_snapshot, account_ref))
+
+
+def _check_bridge_map_drift() -> str | None:
+    """AC-12: detect the connected app's `app_version` drifting from the
+    element map's own `app_version` and return a warning string (or None).
+    RED stub for T5 — GREEN work compares the two versions (S2's window-title
+    parse / "unverified" provenance flag); returns None for now so the CLI
+    never emits a false-positive warning while unimplemented. Test-writer
+    -invented internal seam (flagged, not a spec pin) — tests monkeypatch it
+    directly rather than driving real drift through the (also-stubbed)
+    driver."""
+    return None
+
+
+@bridge_app.command("snapshot")
+def bridge_snapshot() -> None:
+    """`tk bridge snapshot` — read-only prop-panel reconcile aid (AC-9/AC-12).
+    Exit 0 + pure-JSON `PropPanelSnapshot` on stdout; exit 2 if Kraken Desktop
+    isn't running; exit 3 on a panel parse failure (field + raw text named).
+    A map/app_version drift warning (AC-12) goes to stderr only, never stdout.
+    """
+    from tradekit import bridge as bridge_module
+
+    try:
+        result = bridge_module.snapshot()
+    except bridge_module.AppNotFound:
+        typer.echo("Kraken Desktop not running", err=True)
+        raise typer.Exit(code=2) from None
+    except bridge_module.PanelParseError as exc:
+        typer.echo(f"parse failure: field={exc.field} raw={exc.raw_text!r}", err=True)
+        raise typer.Exit(code=3) from exc
+
+    warning = _check_bridge_map_drift()
+    if warning:
+        typer.echo(warning, err=True)
+    typer.echo(result.model_dump_json())
 
 
 if __name__ == "__main__":

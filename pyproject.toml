@@ -23,6 +23,13 @@ dev = [
     "mypy>=1.11",
     "respx>=0.23.1",
 ]
+# Optional — only needed for the real UIA session (Windows-only). Import
+# of `tradekit.bridge` never requires this group; only constructing the
+# REAL session does (AC-10). NEW DEPENDENCY (Mike-visible, T6 dispatch):
+# pywinauto, for driving Kraken Desktop's accessibility tree read-only.
+bridge = [
+    "pywinauto>=0.6.8; sys_platform == 'win32'",
+]
 
 [project.scripts]
 tk = "tradekit.cli.main:app"
