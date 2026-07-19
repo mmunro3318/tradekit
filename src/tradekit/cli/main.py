@@ -544,6 +544,10 @@ def bridge_snapshot() -> None:
 
 @app.command("hud")
 def hud_scan(
+    equity: Annotated[
+        str,
+        typer.Option(..., "--equity", help="Account equity USD (required — never guessed)."),
+    ],
     symbols: Annotated[
         str, typer.Option("--symbols", help="Comma-separated pairs (default: 11-pair greenlist).")
     ] = "",
@@ -551,7 +555,7 @@ def hud_scan(
         Path, typer.Option("--out", help="HTML output path.")
     ] = Path("docs/hud/hud.html"),
 ) -> None:
-    """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10).
+    """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10/AC-13).
     Writes a static HTML report to `--out` (atomic replace); exit 4 if the
     write fails, leaving any pre-existing target untouched.
     """
@@ -563,7 +567,7 @@ def hud_scan(
     )
 
     captured_at = mae_runtime.clock()
-    state = hud.build_state(symbol_list, captured_at=captured_at)
+    state = hud.build_state(symbol_list, captured_at=captured_at, equity_usd=Decimal(equity))
     html = hud.render(state)
 
     try:

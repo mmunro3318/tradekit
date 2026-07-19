@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 
 import tradekit.mae._runtime as mae_runtime
 from tradekit.contracts import AdvisoryTicket, GateResult, HudState, ScanReportEntry
@@ -28,10 +28,7 @@ _TIMEFRAME = "1h"
 _LOOKBACK_DAYS = 30
 _MIN_BARS = 20
 _FEE_RATE = Decimal("0.0004")  # 4 bps/side (ASSUMPTIONS 144)
-# Interim bracket rule (ASSUMPTIONS 158): TP/SL derived off the limit
-# price until real thesis/sizing funnel wiring lands (T5).
-_TP_MULT = Decimal("1.05")
-_SL_MULT = Decimal("0.97")
+_SETUP_FILTERS = {"macd_signal": "bullish", "volume_spike": 1.5}
 
 
 @dataclass(frozen=True)
@@ -39,6 +36,22 @@ class _PolicyDecision:
     allowed: bool
     verdict_id: str | None
     rationale: str
+
+
+@dataclass(frozen=True)
+class SizingInfo:
+    """Real min-ATR/quarter-Kelly sizing result plus the ATR-bracket
+    inputs derived from the same `mae.size_position` call (ASSUMPTIONS
+    159a: one call powers both quantity and the bracket)."""
+
+    qty: Decimal
+    stop_distance_usd: Decimal
+    r_multiple_target: Decimal
+
+
+@dataclass(frozen=True)
+class _SetupResult:
+    signal_tags: list[str]
 
 
 def _round2(value: Decimal) -> Decimal:
@@ -85,22 +98,46 @@ def _default_open_position_symbols() -> set[str]:
     return symbols
 
 
-def _default_size_qty(symbol: str, limit_price: Decimal) -> Decimal:
-    """ASSUMPTIONS 158: real min-ATR/quarter-Kelly sizing wiring lands with
-    the funnel task (T5). Until then the default is LOUD — never a
-    fabricated quantity on an advisory surface Mike transcribes from."""
-    raise RuntimeError(
-        "hud sizing is not wired yet (ASSUMPTIONS 158 / task T5) — "
-        "size_qty must be provided before advisory tickets can be built"
+def _default_sizing_info(symbol: str, limit_price: Decimal, equity_usd: Decimal) -> SizingInfo:
+    """Real min-ATR/quarter-Kelly sizing (ASSUMPTIONS 159a): one
+    `mae.size_position` call powers both the quantity and the ATR-bracket
+    inputs. Quantity is quantized to 8dp ROUND_DOWN — conservative, never
+    oversize."""
+    from tradekit import mae
+
+    result = mae.size_position(symbol, account_equity_usd=equity_usd)
+    qty = Decimal(str(result["recommended_units"])).quantize(
+        Decimal("0.00000001"), rounding=ROUND_DOWN
+    )
+    return SizingInfo(
+        qty=qty,
+        stop_distance_usd=Decimal(str(result["stop_distance_usd"])),
+        r_multiple_target=Decimal(str(result["r_multiple_target"])),
     )
 
 
-# Test seams (ASSUMPTIONS 157a/158). Tests monkeypatch these module
+def _default_scan_setup(symbol: str) -> _SetupResult:
+    """Real setup scan (ASSUMPTIONS 159b): momentum + volume confirmation,
+    post-regime-gate. Empty `signal_tags` when no match survives for the
+    symbol."""
+    from tradekit import mae
+
+    result = mae.scan_markets(
+        "crypto", [_TIMEFRAME], filters=_SETUP_FILTERS, symbols=[symbol], regime_gate=True
+    )
+    for match in result["matches"]:
+        if match.get("symbol") == symbol:
+            return _SetupResult(signal_tags=list(match.get("signal_tags", [])))
+    return _SetupResult(signal_tags=[])
+
+
+# Test seams (ASSUMPTIONS 157a/158/159). Tests monkeypatch these module
 # attributes directly; production code below calls them via this module's
 # own namespace so the seam takes effect.
 evaluate_policy = _default_evaluate_policy
 open_position_symbols = _default_open_position_symbols
-size_qty = _default_size_qty
+sizing_info = _default_sizing_info
+scan_setup = _default_scan_setup
 
 
 def _fetch_bars(symbol: str) -> tuple[BarSeries | None, str]:
@@ -118,10 +155,23 @@ def _fetch_bars(symbol: str) -> tuple[BarSeries | None, str]:
 
 
 def _build_ticket_fields(
-    symbol: str, limit_price: Decimal, quantity: Decimal
+    symbol: str,
+    limit_price: Decimal,
+    quantity: Decimal,
+    stop_distance_usd: Decimal,
+    r_multiple_target: Decimal,
+    side: str = "buy",
 ) -> dict[str, Decimal]:
-    tp_price = (limit_price * _TP_MULT).quantize(limit_price, rounding=ROUND_HALF_EVEN)
-    sl_price = (limit_price * _SL_MULT).quantize(limit_price, rounding=ROUND_HALF_EVEN)
+    """ATR bracket (ASSUMPTIONS 159d): buy side SL = limit - stop_distance,
+    TP = limit + r_multiple*stop_distance; sell side mirrors signs. Both
+    quantized to the limit price's exponent ROUND_HALF_EVEN."""
+    tp_offset = r_multiple_target * stop_distance_usd
+    if side == "buy":
+        tp_price = (limit_price + tp_offset).quantize(limit_price, rounding=ROUND_HALF_EVEN)
+        sl_price = (limit_price - stop_distance_usd).quantize(limit_price, rounding=ROUND_HALF_EVEN)
+    else:
+        tp_price = (limit_price - tp_offset).quantize(limit_price, rounding=ROUND_HALF_EVEN)
+        sl_price = (limit_price + stop_distance_usd).quantize(limit_price, rounding=ROUND_HALF_EVEN)
 
     fee_entry = _round2(limit_price * quantity * _FEE_RATE)
     fee_tp_exit = _round2(tp_price * quantity * _FEE_RATE)
@@ -177,11 +227,12 @@ def _make_proposal(symbol: str, thesis_id: str, fields: dict[str, Decimal]) -> o
     )
 
 
-def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
+def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decimal) -> HudState:
     """Walk the funnel for each symbol, grading buy/sell/hold/wait, and
     assembling an `AdvisoryTicket` only when every gate passes AND policy
     allows. `captured_at` is verbatim `generated_at` — no wall-clock reads
-    (AC-8)."""
+    (AC-8). Gate order (ASSUMPTIONS 159): open-position (hold) ->
+    data_integrity -> setup -> sizing -> policy_verdict."""
     positions = open_position_symbols()
     tickets: list[AdvisoryTicket] = []
     report: list[ScanReportEntry] = []
@@ -231,14 +282,6 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             continue
 
         limit_price = bars.bars[-1].close
-        quantity = size_qty(symbol, limit_price)
-        fields = _build_ticket_fields(symbol, limit_price, quantity)
-        # Interim provenance (review round: not a ledgered thesis): honest
-        # prefix + a rendered warning until real thesis wiring lands (T5).
-        thesis_id = f"interim-thesis-{symbol.replace('/', '-').lower()}"
-        proposal = _make_proposal(symbol, thesis_id, fields)
-        decision = evaluate_policy(proposal)
-
         bar_count = len(bars.bars)
         data_gate = GateResult(
             name="data_integrity",
@@ -248,6 +291,83 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             rationale="sufficient closed bar history",
         )
 
+        setup = scan_setup(symbol)
+        if not setup.signal_tags:
+            report.append(
+                ScanReportEntry(
+                    symbol=symbol,
+                    timeframe=_TIMEFRAME,
+                    indicators=(("limit_price", str(limit_price)),),
+                    gates=(
+                        data_gate,
+                        GateResult(
+                            name="setup",
+                            passed=False,
+                            observed="signal_tags=[]",
+                            threshold=">= 1 surviving signal_tag",
+                            rationale=f"no surviving setup signal tags for {symbol} "
+                            "(absent or dropped by regime gate)",
+                        ),
+                    ),
+                    grade="wait",
+                    grade_rationale="no confirmed setup",
+                )
+            )
+            continue
+
+        setup_gate = GateResult(
+            name="setup",
+            passed=True,
+            observed=f"signal_tags={setup.signal_tags}",
+            threshold=">= 1 surviving signal_tag",
+            rationale="setup confirmed",
+        )
+
+        sizing = sizing_info(symbol, limit_price, equity_usd)
+        if sizing.qty <= 0:
+            report.append(
+                ScanReportEntry(
+                    symbol=symbol,
+                    timeframe=_TIMEFRAME,
+                    indicators=(("limit_price", str(limit_price)),),
+                    gates=(
+                        data_gate,
+                        setup_gate,
+                        GateResult(
+                            name="sizing",
+                            passed=False,
+                            observed=f"qty={sizing.qty}",
+                            threshold="qty > 0",
+                            rationale=f"sizing recommended no position for {symbol}",
+                        ),
+                    ),
+                    grade="wait",
+                    grade_rationale="sizing produced no tradeable quantity",
+                )
+            )
+            continue
+
+        sizing_gate = GateResult(
+            name="sizing",
+            passed=True,
+            observed=f"qty={sizing.qty}",
+            threshold="qty > 0",
+            rationale="sizing produced a tradeable quantity",
+        )
+
+        fields = _build_ticket_fields(
+            symbol,
+            limit_price,
+            sizing.qty,
+            sizing.stop_distance_usd,
+            sizing.r_multiple_target,
+        )
+        # Interim provenance (review round: not a ledgered thesis): honest
+        # prefix + a rendered warning until real thesis wiring lands (T5).
+        thesis_id = f"interim-thesis-{symbol.replace('/', '-').lower()}"
+        proposal = _make_proposal(symbol, thesis_id, fields)
+        decision = evaluate_policy(proposal)
+
         if not decision.allowed:
             report.append(
                 ScanReportEntry(
@@ -256,6 +376,8 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
                     indicators=(("limit_price", str(limit_price)),),
                     gates=(
                         data_gate,
+                        setup_gate,
+                        sizing_gate,
                         GateResult(
                             name="policy_verdict",
                             passed=False,
@@ -291,8 +413,7 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
             post_only=False,
             tif="gtc",
             warnings=(
-                "interim provenance: thesis id, TP/SL rule, and sizing seam "
-                "pending real funnel wiring (T5)",
+                "interim provenance: thesis id not yet backed by a ledgered thesis",
             ),
             thesis_id=thesis_id,
             verdict_id=decision.verdict_id,
@@ -306,6 +427,8 @@ def build_state(symbols: list[str], *, captured_at: datetime) -> HudState:
                 indicators=(("limit_price", str(limit_price)),),
                 gates=(
                     data_gate,
+                    setup_gate,
+                    sizing_gate,
                     GateResult(
                         name="policy_verdict",
                         passed=True,
