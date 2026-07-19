@@ -126,6 +126,7 @@ def _tab_css_for(index: int) -> str:
 def _ticket_panel(ticket: AdvisoryTicket) -> str:
     side_class = "buy-side" if ticket.side == "buy" else "sell-side"
     btn_class = "primary-buy" if ticket.side == "buy" else "primary-sell"
+    ack_id = f"ack-{ticket.pair.replace('/', '-').lower()}"
     warnings_html = (
         "".join(f'<div class="warn">{_esc(w)}</div>' for w in ticket.warnings)
         if ticket.warnings
@@ -173,6 +174,47 @@ def _ticket_panel(ticket: AdvisoryTicket) -> str:
       </div>
       <div class="field-label">thesis {_esc(ticket.thesis_id)} ·
       verdict {_esc(ticket.verdict_id)}</div>
+      <div class="field-row">
+        <button type="button" id="{_esc(ack_id)}-confirm">Confirm</button>
+        <button type="button" id="{_esc(ack_id)}-failed">Failed</button>
+        <span id="{_esc(ack_id)}-status" class="field-label"></span>
+      </div>
+      <script>
+      (function () {{
+        var status = document.getElementById("{_esc(ack_id)}-status");
+        function ack(action) {{
+          fetch('/ack', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+              verdict_preview_id: {ticket.verdict_id!r},
+              action: action,
+              ticket: {{
+                pair: {ticket.pair!r},
+                side: {ticket.side!r},
+                limit_price: {str(ticket.limit_price)!r},
+                quantity: {str(ticket.quantity)!r},
+                tp_price: {str(ticket.tp_price)!r},
+                sl_price: {str(ticket.sl_price)!r}
+              }}
+            }})
+          }}).then(function (resp) {{
+            if (!resp.ok) {{
+              return resp.text().then(function (text) {{
+                status.textContent = "error: " + resp.status + " " + text;
+              }});
+            }}
+            status.textContent = action + " sent";
+          }}).catch(function (err) {{
+            status.textContent = "network error: " + err;
+          }});
+        }}
+        document.getElementById("{_esc(ack_id)}-confirm")
+          .addEventListener("click", function () {{ ack("confirmed"); }});
+        document.getElementById("{_esc(ack_id)}-failed")
+          .addEventListener("click", function () {{ ack("failed"); }});
+      }})();
+      </script>
     </div>
     """
 

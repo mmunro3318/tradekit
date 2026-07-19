@@ -98,6 +98,28 @@ class ThesisSubmittedPayload(StrictFrozenModel):
     ev_recomputed_usd: Decimal
 
 
+class AdvisoryTicketAckedPayload(StrictFrozenModel):
+    """Producer: `tradekit.hud._serve`'s POST /ack handler (SPEC-hud-ack.md
+    "Interface pins"). `verdict_preview_id` is the pairing key back to the
+    scan-time ticket's `AdvisoryTicket.verdict_id`. `thesis_id`/`verdict_id`
+    are the REAL ledgered thesis + the BINDING confirm-time verdict — both
+    null for `action="failed"` (thesis/verdict untouched on a failed ack);
+    both set for `action="confirmed"` with an allowing policy verdict.
+    `pair`/`side`/`limit_price`/`quantity` are the ticket snapshot,
+    carried verbatim so the ack event is self-contained (no second lookup
+    needed to see what was acked)."""
+
+    verdict_preview_id: str
+    action: Literal["confirmed", "failed"]
+    thesis_id: str | None
+    verdict_id: str | None
+    pair: str
+    side: Literal["buy", "sell"]
+    limit_price: Decimal
+    quantity: Decimal
+    acked_at: AwareDatetime
+
+
 class ReviewCompletedPayload(StrictFrozenModel):
     """Producer: `tradekit.review` (P3) — P2 has no review verb; tests append
     this as a harness action to reach the `reviewed` state (CTO addendum).
@@ -554,6 +576,7 @@ class LessonRecordedPayload(StrictFrozenModel):
 __all__ = [
     "AccountCreatedPayload",
     "ActionProposedPayload",
+    "AdvisoryTicketAckedPayload",
     "ConfigChangedPayload",
     "DemotedPayload",
     "FillRecordedPayload",

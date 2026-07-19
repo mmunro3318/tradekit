@@ -557,13 +557,39 @@ def hud_scan(
     open_browser: Annotated[
         bool, typer.Option("--open", help="Open the written file in the default browser.")
     ] = False,
+    serve: Annotated[
+        bool,
+        typer.Option(
+            "--serve", help="Run the localhost confirm/failed HUD server instead of writing a file."
+        ),
+    ] = False,
+    port: Annotated[
+        int, typer.Option("--port", help="Port for --serve (default 7333).")
+    ] = 7333,
 ) -> None:
     """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10/AC-13).
     Writes a static HTML report to `--out` (atomic replace); exit 4 if the
-    write fails, leaving any pre-existing target untouched.
+    write fails, leaving any pre-existing target untouched. `--serve`
+    (SPEC-hud-ack.md) runs the confirm/failed reverse-channel server
+    instead — implies `--open` (pointed at the server root) and ignores
+    `--out`; Ctrl-C exits 0.
     """
     from tradekit import hud
     from tradekit.mae import _runtime as mae_runtime
+
+    if serve:
+        # --serve implies --open (SPEC-hud-ack.md), regardless of the flag.
+        import webbrowser
+
+        try:  # best-effort (AC-14 precedent): a browser failure is not a HUD failure
+            webbrowser.open(f"http://127.0.0.1:{port}/")
+        except Exception:
+            pass
+        try:
+            hud.serve(equity_usd=Decimal(equity), port=port)
+        except KeyboardInterrupt:  # pragma: no cover — hud.serve already catches this
+            pass
+        return
 
     symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else list(
         hud.DEFAULT_SYMBOLS

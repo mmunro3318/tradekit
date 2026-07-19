@@ -38,6 +38,7 @@ from tradekit.contracts._bridge import PropPanelSnapshot, PropPositionRow, Ticke
 from tradekit.contracts._event_payloads import (
     AccountCreatedPayload,
     ActionProposedPayload,
+    AdvisoryTicketAckedPayload,
     ConfigChangedPayload,
     DemotedPayload,
     FillRecordedPayload,
@@ -114,6 +115,7 @@ __all__ = [
     "AccountState",
     "ActionProposedPayload",
     "AdvisoryTicket",
+    "AdvisoryTicketAckedPayload",
     "AssetRef",
     "Bar",
     "BarSeries",

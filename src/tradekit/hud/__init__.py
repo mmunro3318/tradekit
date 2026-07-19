@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from tradekit.hud._build import build_state
 from tradekit.hud._render import render
+from tradekit.hud._serve import serve
 
 # Pinned greenlist default (SPEC-hud-orderbook Unknowns register): the 11
 # advisory-scan pairs `tk hud` covers when no `--symbols` is given.
@@ -28,4 +29,4 @@ DEFAULT_SYMBOLS = (
     "AKT/USD",
 )
 
-__all__ = ["DEFAULT_SYMBOLS", "build_state", "render"]
+__all__ = ["DEFAULT_SYMBOLS", "build_state", "render", "serve"]

@@ -47,6 +47,8 @@ EventType = Literal[
     "ReconciliationRun",
     # SPRINT P3 batch A (TD-24): named-account lifecycle.
     "AccountCreated",
+    # hud-ack (SPEC-hud-ack.md): Mike's confirm/failed reverse channel.
+    "AdvisoryTicketAcked",
 ]
 
 
