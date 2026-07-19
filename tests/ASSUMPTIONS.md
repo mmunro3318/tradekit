@@ -3016,3 +3016,13 @@ barrier simulator), 2026-07-19
      optional. (d) AC-4 golden superseded by AC-11 ATR-bracket golden
      (stop 0.24900, 2R: SL 8.05100, TP 8.79800, pnl 5.90/-3.07, dist
      6.00/-3.00) — CTO re-derived independently pre-freeze.
+
+160. hud-ack red (2026-07-19): (a) the confirm handler bridges the thesis
+     lifecycle by appending ReviewCompleted(passed=True) before approve —
+     for the advisory-manual flow the human Confirm click IS the review AND
+     the approval (rationale recorded in the event payload as
+     "human confirm via hud-ack"); RATIFIED. (b) `tradekit.hud._serve`
+     seams `_make_server(*, host, port, equity_usd)` (ephemeral-port
+     testing) and `evaluate_policy_binding` (confirm-time policy seam,
+     mirrors _build pattern; default = real policy.evaluate) RATIFIED.
+     `hud.serve` is a thin _make_server(...).serve_forever() wrapper.
