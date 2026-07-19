@@ -175,6 +175,35 @@ def test_range_over_720_bars_raises_provider_range_error_no_http_call(provider, 
     )
 
 
+def test_range_error_message_states_retention_truth_not_a_paging_job(
+    provider, respx_mock
+) -> None:
+    """T-PAGE-1 / ASSUMPTIONS 161: Kraken's /0/public/OHLC endpoint RETAINS
+    only the most recent 720 candles per interval (CTO-verified live
+    2026-07-19 — a since=60d-ago request at interval=60 returns exactly 721
+    rows starting 30d ago; `since` only filters WITHIN that window, it
+    cannot page further back). The guard stays a hard wall, but the message
+    must state this truth and point at a real mitigation (a coarser
+    interval or the tick collector) instead of implying pagination is a
+    caller-side job that was merely deferred."""
+    route = respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json=_kraken_ohlc_fixture([]))
+    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = start + timedelta(minutes=721)  # 721 one-minute bars > 720 cap
+
+    with pytest.raises(ProviderRangeError) as exc_info:
+        provider.get_bars(BTC_USD, "1m", start, end)
+
+    message = str(exc_info.value)
+    assert "retention" in message.lower(), f"message must name retention as the cause: {message!r}"
+    assert "720" in message, f"message must name the actual bar count: {message!r}"
+    assert "collector" in message.lower(), (
+        f"message must point at the tick collector as a real mitigation: {message!r}"
+    )
+    assert route.call_count == 0, "still must reject before any HTTP call"
+
+
 def test_http_failure_raises_provider_unavailable_never_stale(provider, respx_mock) -> None:
     """Primary OHLCV data never degrades silently: an HTTP failure must
     raise ProviderUnavailable, never return a stale=True BarSeries."""

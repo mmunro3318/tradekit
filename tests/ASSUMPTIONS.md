@@ -3026,3 +3026,8 @@ barrier simulator), 2026-07-19
      testing) and `evaluate_policy_binding` (confirm-time policy seam,
      mirrors _build pattern; default = real policy.evaluate) RATIFIED.
      `hud.serve` is a thin _make_server(...).serve_forever() wrapper.
+
+161. (2026-07-19) ASSUMPTIONS 33 superseded: Alpaca pages via page_token
+     loop (cap 20 pages, loud duplicate guard); Kraken pagination is
+     impossible (720-bar retention verified live) — guard stays, message
+     now states retention truth. CTO-verified via live probe.

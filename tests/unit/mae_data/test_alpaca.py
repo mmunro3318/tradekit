@@ -277,21 +277,118 @@ def test_http_failure_raises_provider_unavailable_never_stale(provider, respx_mo
         provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=1))
 
 
-def test_next_page_token_non_null_raises_provider_range_error(provider, respx_mock) -> None:
-    """Pagination is out of scope this sprint — same policy as Kraken's
-    720-bar cap (ASSUMPTIONS 31/33): a non-null next_page_token must raise,
-    never silently return a partial page."""
+# ---------------------------------------------------------------------------
+# T-PAGE-1 / ASSUMPTIONS 161 — real page_token pagination loop, supersedes
+# ASSUMPTIONS 33's raise-on-token policy (CTO-authorized: 33 is superseded).
+# ---------------------------------------------------------------------------
+
+
+def test_two_page_pagination_concatenates_bars_in_order_with_page_token_progression(
+    provider, respx_mock
+) -> None:
+    """A non-null next_page_token triggers a REAL second request carrying
+    page_token=<token>, not a raise. Bars from both pages concatenate, in
+    order, into one BarSeries — pagination is invisible above this layer."""
     t0 = datetime(2026, 1, 2, 14, 0, 0, tzinfo=UTC)
-    rows = [_alpaca_bar(t0, 189.43, 189.90, 189.10, 189.75, 1_500_000)]
+    page1_rows = [
+        _alpaca_bar(t0, 189.43, 189.90, 189.10, 189.75, 1_500_000),
+        _alpaca_bar(t0 + timedelta(hours=1), 189.75, 190.20, 189.60, 190.05, 1_200_000),
+    ]
+    page2_rows = [
+        _alpaca_bar(t0 + timedelta(hours=2), 190.05, 190.50, 189.90, 190.30, 1_100_000),
+        _alpaca_bar(t0 + timedelta(hours=3), 190.30, 190.80, 190.10, 190.60, 1_000_000),
+    ]
     route = respx_mock.get(AAPL_EQUITY_URL).mock(
-        return_value=httpx.Response(
-            200, json=_alpaca_bars_fixture(rows, next_page_token="opaque-cursor-abc123")
-        )
+        side_effect=[
+            httpx.Response(
+                200, json=_alpaca_bars_fixture(page1_rows, next_page_token="opaque-cursor-abc123")
+            ),
+            httpx.Response(200, json=_alpaca_bars_fixture(page2_rows, next_page_token=None)),
+        ]
     )
 
-    with pytest.raises(ProviderRangeError):
+    series = provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=4))
+
+    assert route.call_count == 2, f"expected exactly 2 HTTP calls, got {route.call_count}"
+    first_params = route.calls[0].request.url.params
+    assert "page_token" not in first_params, "the first page must not send a page_token"
+    second_params = route.calls[1].request.url.params
+    assert second_params["page_token"] == "opaque-cursor-abc123", (
+        f"the second request must carry the first page's next_page_token, got "
+        f"{second_params.get('page_token')!r}"
+    )
+    assert len(series.bars) == 4, "bars from both pages must concatenate"
+    opens = [b.ts_open for b in series.bars]
+    assert opens == [t0, t0 + timedelta(hours=1), t0 + timedelta(hours=2), t0 + timedelta(hours=3)]
+
+
+def test_pagination_exceeding_page_cap_raises_provider_range_error(provider, respx_mock) -> None:
+    """Guardrail: a runaway next_page_token (upstream bug or caller typo)
+    must not spin forever — a hard cap of 20 pages raises ProviderRangeError
+    naming the cap, without ever issuing a 21st request."""
+    t0 = datetime(2026, 1, 2, 14, 0, 0, tzinfo=UTC)
+
+    def _always_more_page(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_alpaca_bars_fixture(
+                [_alpaca_bar(t0, 100.0, 101.0, 99.0, 100.5, 10.0)],
+                next_page_token="always-more",
+            ),
+        )
+
+    route = respx_mock.get(AAPL_EQUITY_URL).mock(side_effect=_always_more_page)
+
+    with pytest.raises(ProviderRangeError, match="20"):
         provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=1))
-    assert route.call_count == 1, "the call happens; it's the response that must be rejected"
+    assert route.call_count == 20, (
+        f"expected the loop to stop at the 20-page cap without a 21st call, got "
+        f"{route.call_count}"
+    )
+
+
+def test_duplicate_timestamp_across_page_boundary_raises_loudly(provider, respx_mock) -> None:
+    """Overlapping/duplicate timestamps across a page boundary (e.g. an
+    off-by-one cursor bug) must fail loudly, never silently dedupe.
+    BarSeries's own strict-ascending-and-unique validator catches this; the
+    provider wraps it into the same typed ProviderUnavailable as any other
+    malformed body."""
+    t0 = datetime(2026, 1, 2, 14, 0, 0, tzinfo=UTC)
+    page1_rows = [_alpaca_bar(t0, 189.43, 189.90, 189.10, 189.75, 1_500_000)]
+    # Page 2 repeats page 1's exact timestamp (overlap bug).
+    page2_rows = [_alpaca_bar(t0, 189.43, 189.90, 189.10, 189.75, 1_500_000)]
+    respx_mock.get(AAPL_EQUITY_URL).mock(
+        side_effect=[
+            httpx.Response(
+                200, json=_alpaca_bars_fixture(page1_rows, next_page_token="dup-cursor")
+            ),
+            httpx.Response(200, json=_alpaca_bars_fixture(page2_rows, next_page_token=None)),
+        ]
+    )
+
+    with pytest.raises(ProviderUnavailable, match=r"(?i)alpaca"):
+        provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=2))
+
+
+def test_empty_page_with_token_stops_no_spin(provider, respx_mock) -> None:
+    """An empty page (zero bars) that still carries a next_page_token must
+    be treated as end-of-data, not chased further — guards against a
+    provider quirk where a token outlives the data."""
+    t0 = datetime(2026, 1, 2, 14, 0, 0, tzinfo=UTC)
+    page1_rows = [_alpaca_bar(t0, 189.43, 189.90, 189.10, 189.75, 1_500_000)]
+    route = respx_mock.get(AAPL_EQUITY_URL).mock(
+        side_effect=[
+            httpx.Response(
+                200, json=_alpaca_bars_fixture(page1_rows, next_page_token="empty-next")
+            ),
+            httpx.Response(200, json=_alpaca_bars_fixture([], next_page_token="still-more")),
+        ]
+    )
+
+    series = provider.get_bars(AAPL_EQUITY, "1h", t0, t0 + timedelta(hours=2))
+
+    assert route.call_count == 2, "must fetch the empty page once, then stop"
+    assert len(series.bars) == 1
 
 
 # ---------------------------------------------------------------------------
