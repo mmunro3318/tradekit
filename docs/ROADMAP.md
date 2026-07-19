@@ -212,3 +212,9 @@ Feature bridge-read (SPEC-bridge-read.md, branch feature/bridge-read):
 - [ ] Red-team strategy tournaments (SCOPE vision)
 - [ ] Options asset class (Mike: maybe; Alpaca supports)
 - [ ] Phase-2 hardening: single-writer key-holding daemon (TD-19)
+
+### hud-orderbook (advisory HUD)
+- [ ] T1: HUD contracts
+- [ ] T2: render (OSO-mirror + scan report)
+- [ ] T3: build_state (funnel walk + grade rule)
+- [ ] T4: hud verbs + tk hud CLI
