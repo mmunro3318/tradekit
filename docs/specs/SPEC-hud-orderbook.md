@@ -193,3 +193,26 @@ AC-13: GIVEN `tk hud` without `--equity` THEN usage error (exit 2, Typer
   default); with `--equity 5000` the value reaches build_state verbatim.
 Scan seam: monkeypatch `tradekit.hud._build.scan_setup` (4th sanctioned
 seam, same pattern; default = the real scan_markets call above).
+
+## Addendum 2 — palette v2 + auto-open (Mike, 2026-07-19; supersedes AC-3 tokens)
+
+Art direction: "twilight upon the parking lot" — carbon/tungsten/graphite
+darks under sodium-lamp orange. Pinned tokens (AC-3 now asserts THESE):
+- Surfaces: carbon `#0b0b0c` (page bg), tungsten `#161618` (panels),
+  graphite `#1f1f22` (fields/inputs), text `#e8e6e3`, muted `#9a948d`.
+- Neon orange `#ff7a1a`: thin pieces — lines, edges, borders, tab
+  underlines, gate pass/fail accents, focus rings.
+- Burnt orange `#c1581f`: thick pieces — primary buttons, selected side
+  fill, grade chips.
+- Twilight gradient: at least one linear/radial gradient from bright
+  orange `#ffb25e` through `#ff7a1a` falling off STEEPLY to transparent/
+  carbon within a short distance (header/title-bar glow) — the sodium-lamp
+  falloff, not a soft wash.
+- Forbidden token unchanged: `#5741d9` must never appear.
+AC-3 test updates to the new required tokens (#0b0b0c, #161618, #ff7a1a,
+#c1581f + gradient stop #ffb25e) are CTO-AUTHORIZED test edits.
+
+AC-14: `tk hud --open` — after a successful write, open the written file
+in the default browser (`webbrowser.open` on the file URI); flag off by
+default; the open call must NOT affect exit codes (browser failure is not
+a HUD failure — best-effort, swallow exceptions from the open call only).
