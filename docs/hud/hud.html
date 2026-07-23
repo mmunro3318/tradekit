@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>TradeKit HUD</title>
+<style>
+:root {
+  --bg: #0b0b0c;
+  --panel: #161618;
+  --field: #1f1f22;
+  --text: #e8e6e3;
+  --muted: #9a948d;
+  --neon: #ff7a1a;
+  --burnt: #c1581f;
+  --glow: #ffb25e;
+  --buy: #c1581f;
+  --sell: #7d2e2e;
+  --warn: #d9a441;
+  --fail: #7d2e2e;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+.title-bar {
+  background: radial-gradient(
+    ellipse at top, var(--glow) 0%, var(--neon) 18%, var(--bg) 55%
+  );
+  border-bottom: 1px solid var(--neon);
+  padding: 1.25rem 1.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+.page-body { padding: 0 1.5rem 1.5rem; }
+h1, h2 { color: var(--text); }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--neon);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+.field-row {
+  display: flex;
+  justify-content: space-between;
+  background: var(--field);
+  border: 1px solid var(--neon);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  margin: 0.3rem 0;
+}
+.field-label { color: var(--muted); }
+.field-value { color: var(--text); font-weight: 600; }
+.tabs {
+  display: flex; flex-wrap: wrap; gap: 0.25rem;
+  margin-bottom: 0.5rem; border-bottom: 1px solid var(--neon);
+}
+.tabs label {
+  padding: 0.4rem 0.8rem;
+  background: var(--field);
+  border: 1px solid var(--neon);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+input.tab-radio { display: none; }
+.tab-panel { display: none; }
+.buy-side { color: var(--buy); }
+.sell-side { color: var(--sell); }
+.warn { color: var(--warn); }
+button.primary-buy, button.primary-sell {
+  background: var(--burnt); color: var(--text); border: none;
+  padding: 0.5rem 1rem; border-radius: 4px;
+}
+button[type="button"]:not(.primary-buy):not(.primary-sell) {
+  background: var(--field); color: var(--text); border: 1px solid var(--neon);
+  border-radius: 4px; padding: 0.5rem 1rem;
+}
+table.report { width: 100%; border-collapse: collapse; }
+table.report th, table.report td {
+  border: 1px solid var(--neon);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+}
+.gate-pass { color: var(--neon); }
+.gate-fail { color: var(--fail); }
+.grade-chip {
+  background: var(--burnt);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+
+</style>
+</head>
+<body>
+<div class="title-bar"><h1>Advisory order book</h1></div>
+<div class="page-body">
+<div class="panel">
+<p class="field-label">no advisory tickets</p>
+</div>
+<h1>Scan report</h1>
+<div class="panel">
+<table class="report">
+<thead>
+<tr><th>Symbol</th><th>Timeframe</th><th>Indicators</th><th>Gates</th><th>Grade</th><th>Rationale</th></tr>
+</thead>
+<tbody>
+
+    <tr>
+      <td>ETH/USD</td>
+      <td>1h</td>
+      <td>limit_price=1886.58</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for ETH/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>SOL/USD</td>
+      <td>1h</td>
+      <td>limit_price=75.93</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for SOL/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>LINK/USD</td>
+      <td>1h</td>
+      <td>limit_price=8.49172</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for LINK/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>NEAR/USD</td>
+      <td>1h</td>
+      <td>limit_price=1.8776</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for NEAR/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>EIGEN/USD</td>
+      <td>1h</td>
+      <td>limit_price=0.2274</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for EIGEN/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>RENDER/USD</td>
+      <td>1h</td>
+      <td>limit_price=1.487</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for RENDER/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>PAXG/USD</td>
+      <td>1h</td>
+      <td>limit_price=4045.76</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for PAXG/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>TAO/USD</td>
+      <td>1h</td>
+      <td>limit_price=193.3070</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for TAO/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>XRP/USD</td>
+      <td>1h</td>
+      <td>limit_price=1.10775</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for XRP/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>AVAX/USD</td>
+      <td>1h</td>
+      <td>limit_price=6.430</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for AVAX/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+    <tr>
+      <td>AKT/USD</td>
+      <td>1h</td>
+      <td>limit_price=0.5270</td>
+      <td><ul><li><span class="gate-pass">data_integrity: PASS</span> (observed 719 closed bars vs &gt;= 20 closed bars) — sufficient closed bar history</li><li><span class="gate-fail">setup: FAIL</span> (observed signal_tags=[] vs &gt;= 1 surviving signal_tag) — no surviving setup signal tags for AKT/USD (absent or dropped by regime gate)</li></ul></td>
+      <td><span class="grade-chip">wait</span></td>
+      <td>no confirmed setup</td>
+    </tr>
+    
+</tbody>
+</table>
+</div>
+<p>Generated at 2026-07-23 17:16:01.620313+00:00</p>
+</div>
+</body>
+</html>
