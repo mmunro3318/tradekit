@@ -2,6 +2,19 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-23 (Fable returns — half-usage retention past 7/20)
+
+- Resumed as CTO. Gate green @ 16a2cea (1000+ tests, 89 src files). Dirty tree
+  classified + committed (f4ec577: GitNexus CLAUDE/AGENTS blocks, docs/hud/hud.html).
+- **Diagnosis of "no results"**: ledger has ZERO AdvisoryTicketAcked and ZERO
+  ThesisGraded events — the loop works, S1 has just never fired. Collector
+  healthy (Mike). Remedy plan seeded: scan-attrition telemetry (measure WHICH
+  filter kills candidates) -> tune-vs-replace decision -> MTF-SCAN + S2.
+- Corrections: 7/20 handoff queue item 3 (T-PAGE-1) already done 7/19; ROADMAP
+  "GitHub remote" box stale — remote exists and is pushed.
+- New active seed: docs/handoff/HANDOFF-2026-07-23-fable-return-s1-silence.md
+  (supersedes ops-ready seed as queue; its red lines/seams remain binding).
+  CLAUDE.md Current focus updated.
 ## 2026-07-19 (Fable, last full session) — retention truth, MTF+strategy designs, PAXG probe, Sol skill
 
 - **Pagination RESOLVED with truth** (red a7d6be2 -> green 715beca,

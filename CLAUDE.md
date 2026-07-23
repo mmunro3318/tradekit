@@ -106,7 +106,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-P4-paper closed. Next: test-audit backlog (docs/reviews/test-audit-2026-07-18.md), then P5 planning.
+Ops loop live but silent (zero tickets/grades). Active seed: docs/handoff/HANDOFF-2026-07-23-fable-return-s1-silence.md — day-5 clock check, scan-attrition telemetry, then MTF-SCAN + S2. Test-audit backlog (docs/reviews/test-audit-2026-07-18.md) still queued behind it.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
