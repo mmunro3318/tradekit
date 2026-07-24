@@ -6,6 +6,16 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-07-23 — Kraken Prop UI: OSO/bracket order flow does not work as OPERATIONS.md describes `ops,kraken,money-path`
+- **Symptom:** Two live attempts tonight (2026-07-23) to place NEAR/USD as an OSO Bracketed Limit Order on the Kraken Prop account both failed to bracket; falling back to a plain limit entry + manual SL/TP resulted in stop-loss/take-profit orders sized 6036.6 and 4259.7 units against a 21.8-unit position (unexplained qty mismatch, likely UI/leverage unit confusion), which had to be flattened at market -- realized loss ~$36.43, account $5000.00 -> $4963.57
+- **Cause:** Unconfirmed -- either Kraken Prop's order form does not support the bracket flow OPERATIONS.md step 3 assumes, or the human operator's manual SL/TP entry hit a units mismatch (base qty vs notional/contracts) specific to the Prop margin UI
+- **Solution:** **NOT SOLVED**
+
+## 2026-07-23 — GitNexus FTS index version mismatch (db v42 vs build v40) `tooling,gitnexus`
+- **Symptom:** Every Bash PreToolUse hook spams FTS 'ensure failed' retry warnings; FTS search unusable
+- **Cause:** GitNexus index built by newer kuzu storage version than the currently installed gitnexus build
+- **Solution:** **NOT SOLVED**
+
 ## 2026-07-19 — Kraken Desktop has no UIA accessibility tree (grade C) `uia,bridge,kraken`
 - **Symptom:** UIA probe sees only title-bar chrome; zero child HWNDs; no renderer process
 - **Cause:** KrakenDesktop.exe is a single-process custom GPU-rendered native app (not Electron/WebView2); no UIA provider for content

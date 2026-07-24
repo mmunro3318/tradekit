@@ -96,6 +96,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 | docs/handoff/ | session seams (seed for next session) |
 
 ## Conventions
+- Vocabulary: consult docs/GLOSSARY.md before naming anything that crosses a module boundary — it is the source of truth for cross-module terms, enum values, and naming forms.
 - src layout: `src/tradekit/<module>/_impl.py` private modules behind `__init__` verbs.
 - Tests: `tests/unit|contract|replay|golden`; taxonomy + rubric in
   `~/.claude/tk-stack/references/tdd-examples.md`; conformance fixtures own their
@@ -106,7 +107,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-Ops loop live but silent (zero tickets/grades). Active seed: docs/handoff/HANDOFF-2026-07-23-fable-return-s1-silence.md — day-5 clock check, scan-attrition telemetry, then MTF-SCAN + S2. Test-audit backlog (docs/reviews/test-audit-2026-07-18.md) still queued behind it.
+S1 silence ROOT-CAUSED (macd enum bug, `hud/_build.py` "bullish" vs scanner "bullish_cross" → silent reject-all). Active seed: docs/handoff/HANDOFF-2026-07-23-evening-s1-rootcaused.md. FIRST BATCH: docs/tickets/TICKET-001-scan-attrition-telemetry.md (enum fix + loud-on-bad-value + attrition telemetry; watch test_scan_markets_verb.py:490 codifying the bug). Two audits landed/landing: docs/reviews/test-audit-2026-07-23.md (done) + docs/reviews/gating-filter-audit-2026-07-23.md (swarm, may still be running). Then MTF-SCAN + S2.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

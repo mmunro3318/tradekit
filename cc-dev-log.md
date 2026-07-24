@@ -2,6 +2,83 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-24 (Fable — standards research + canon drafting, post-audit response)
+
+- Mike's directive: research-grounded standards to stop the compounding
+  error classes (vocab drift, silent seams, untested flows). 4 sonnet research
+  agents dispatched (naming/vocab, readability, contract testing, behavior
+  flows) → memos in docs/research/standards-2026-07/ with citations +
+  [UNVERIFIED-RECALL] honesty flags.
+- **Drafted for Mike sit-down (all DRAFT, not yet canon):**
+  - docs/GLOSSARY.md — module-grouped vocab source of truth (DDD ubiquitous
+    language; Term/Definition/Code-form/Aliases-to-avoid; "bullish" is banned
+    alias #1). CLAUDE.md Conventions gained the consult-glossary imperative.
+  - docs/design/CORE-FLOWS.md — 5 codified user flows w/ behind-the-scenes
+    stages, user-facing gates, fail-info contracts, unhappy taxonomy U1-U6
+    (wrong-context / silent-state / repeat-action / refused / abandoned /
+    upstream-silence), sprint flow-review ritual. THE review deliverable.
+  - docs/design/ENGINEERING-CANON.md — decisions D1-D7: glossary+enums first
+    line of defense; seam-test policy (StrEnum/Literal + assert_never + one
+    un-mocked producer→consumer contract test; money gates deny on unknown);
+    readability = 12 anti-pattern rules + review dimension, NO line-count/
+    comment-density metrics (evidence doesn't support them); tests/flows/
+    meta-suite (plain pytest, no Gherkin; ~5 CUJs; in the gate); LLM-operator
+    rehearsal v1 scoped to invariant-checked procedure-fuzzing; boundary-
+    condition design duty + end-of-sprint interface-drift pass.
+- Rollout order proposed in canon §Rollout: ratify → TICKET-001 → money-path
+  audit bundle → flows M-F1/M-F2 → reviewer rubric → LLM rehearsal.
+- Mike separately engaging Codex/GPT-5.6 as external TDD/security consultant
+  (his hands; sol-brief already staged).
+
+## 2026-07-23 (evening — first live trade attempt; S1 silence ROOT-CAUSED; Opus)
+
+- **S1 silence is a one-word bug, not a market read.** `hud/_build.py`
+  `_SETUP_FILTERS` ships `macd_signal="bullish"`, but `_scanner.py` accepts only
+  `"bullish_cross"`/`"bearish_cross"` and sends everything else down an
+  unconditional `else: return None` — so the momentum filter has been a
+  guaranteed reject-all on every scan since the constant was written. Proven
+  live: scan with "bullish" → 0 matches / 0 warnings (silent else path). The
+  scanner docstring explicitly warned against the "bullish" spelling.
+- **Compounding fact**: even corrected to "bullish_cross", 0 matches tonight —
+  ALL 11 pairs have negative 4h MACD histograms (broad crypto weakness). S1
+  (momentum-long) correctly finds nothing. Silence = broken AND correctly-quiet
+  at once; telemetry is the only way to tell them apart. → TICKET-001.
+- **TICKET-001 written** (docs/tickets/) — enum fix (raise loud on bad value,
+  don't return None) + scan-attrition telemetry (per-stage pass/fail log +
+  ledger note, Mike's format). Ships as one batch w/ CTO sign-off; strategy
+  behavior change, honors seed red-line.
+- **First live-trade attempt (day-5 inactivity rule)**: served real hud-ack loop
+  (scripts/day5_manual_trade.py, seams ONLY the scan-preview policy — binding
+  policy real). Adjudicated NEAR/USD long, ~$41, R-005/R-008/R-012 co-compliant.
+  Prop account NET FLAT after the dust settled; realized −$36.43 ($5000→$4963.57).
+  Loss anatomy: the 21.8-unit thesis trade lost ~$0.17; the $36 was a fat-finger
+  4259.7-unit (2x-leveraged) take-profit-entered-as-BUY that had to be dumped at
+  market. Strategy/sizing were fine; the margin UI was not.
+- **Account-attribution trap**: the ~21.8 NEAR + OCO bracket Mike still holds is
+  on his REAL/spot account (11:14 fill @1.8766), NOT prop. Prop is flat.
+- **Money-path venue truth**: Kraken Prop has no working OSO/bracket flow;
+  Kraken Desktop is unusable for entry (mobile-only henceforth); manual exits.
+  OPERATIONS.md step 3 is WRONG. Logged to FRICTION.md.
+- **HUD-ack UX bug**: Confirm/Failed fire silently (subtle glitch, no message)
+  AND non-idempotently — Mike clicked repeatedly waiting for feedback; two
+  `failed` acks landed at 18:20:53 from that. Server-side chain is fine
+  (rehearsal + dry-run 204). Needs feedback + idempotency. Queued (not TICKET-001).
+- **Two audits dispatched.** (1) Test-suite audit (Opus subagent) —
+  docs/reviews/test-audit-2026-07-23.md: units strong, seams untested (suite
+  mocks both sides of every inter-module contract); found
+  test_scan_markets_verb.py:490 CODIFIES the macd silent-drop as correct (green
+  because broken). Sol brief for external second opinion:
+  test-audit-2026-07-23-sol-brief.md. (2) Gating/filter silent-failure swarm
+  (Haiku sniffers → Sonnet adjudicators, background workflow) —
+  docs/reviews/gating-filter-audit-2026-07-23.md: 58 chunks, 12 confirmed / 47
+  cleared. HIGH money-path (CTO-verified): H2 `_sizing.py` unguarded
+  `multiplier` → silent negative position size; H3 `policy/_evaluate.py:64`
+  `all([])` fails OPEN on unrecognized action.kind. Systemic pattern: unknown
+  input coerced to benign value instead of failing loud. Reports-only, no code
+  applied (money-path red-line).
+- Gate green @ fdc865f at session start (1000+ tests). No src changes committed
+  this session — diagnosis + tickets + audits + scripts/day5_manual_trade.py only.
+
 ## 2026-07-23 (Fable returns — half-usage retention past 7/20)
 
 - Resumed as CTO. Gate green @ 16a2cea (1000+ tests, 89 src files). Dirty tree
