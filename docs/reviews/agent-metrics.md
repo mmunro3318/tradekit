@@ -285,3 +285,23 @@ stage) and the new test was blind to it; CTO applied the 2-line dedupe +
 count assert directly post-ACCEPT, re-gated green. Remaining LOW carried to
 batch 2: ledger append in hud_scan unguarded (unadjudicated — ASSUMPTIONS
 164 covers only the log-file write).
+
+Audit-quality note (2026-07-24): gating-filter-audit L3 adjudicated a FALSE
+POSITIVE by the batch-2 red test-writer, CTO-verified (_rules._insufficient
+emits outcome="fail" w/ field in measured; hud filter already surfaces it).
+Swarm adjudicator (Sonnet) erred on L3; H1/H2/H3/M2/L1/L2 independently
+confirmed. P5 withdrawn from SPRINT-AUDIT-BUNDLE.
+
+## Round 12 — 2026-07-24 — SPRINT-AUDIT-BUNDLE money-path batch (red 794e9e1, green this commit)
+
+Reviewer: tk-reviewer (top model), mandatory money-path round. Verdict:
+ACCEPT (0 HIGH, 0 MED, 4 LOW — three folded into the commit by CTO, one
+spun off as a follow-up task). P6 residual-hole probe answered clean: the
+ValueError swallow set exactly equals the insufficient-context case
+(derivation pre-filters exit<=entry; empty-log raise is the only reachable
+swallow), so the narrowing adjudication holds.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tk-test-writer (red) | 14 tests, 6 files, ASSUMPTIONS 165-167 | 0 | 0 | 2 | A- | Rigorous hand-derived vectors; caught audit-L3 FALSE POSITIVE; correct keltner ASSUMPTIONS-FLAG; docked for the mis-fixtured P6 (could never green as written) and one unasserted verb-surface key. |
+| tk-implementer (green) | contracts kind Literal, policy _MUTATING/_context, sizing/correlation/indicator guards | 0 | 0 | 2 | A | Surgical diff exactly to pins; correctly STOPPED on the mis-fixtured P6 instead of bending the implementation; honest schema-drift report. Guard-placement nit only. |

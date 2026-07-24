@@ -2,6 +2,24 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-24 (Fable — SPRINT-AUDIT-BUNDLE SHIPPED; money-path fail-open dead)
+
+- Batch 2 through the cycle: red 794e9e1 (14 tests; test-writer CAUGHT audit
+  L3 as a false positive — CTO verified, P5 withdrawn, swarm adjudicator
+  graded down) → green (kind Literal == _MUTATING single-source, sizing
+  multiplier guard, correlation zero-variance→None+warnings, atr/ema period
+  guards, _context ValueError narrowing) → implementer STOPPED correctly on
+  mis-fixtured P6 (no SizingComputed → empty derived log) → CTO adjudicated
+  semantics + fixed fixture → money-path review round 12 **ACCEPT** (0 HIGH/
+  MED, 4 LOW: 3 folded by CTO, keltner/_ema guard spun off as task chip).
+- Policy gate can no longer fail open: unknown action kinds are
+  unrepresentable (pydantic) and every legal kind hits ≥1 rule (invariant
+  test). Old ledgered events with bogus kinds now fail loud at deserialize.
+- Schemas regenerated; commit includes pre-existing drift (RuleHit
+  not_configured, TICKET-001 event types, 6 never-exported contracts) —
+  source is authority, per reviewer recommendation.
+- Grades: red A-, green A (metrics round 12). Gate green pre-commit.
+
 ## 2026-07-24 (Fable — TICKET-001 SHIPPED via full batch cycle; canon ratified+committed)
 
 - Mike approved the standards plan; canon committed fa2a5a9 (GLOSSARY +

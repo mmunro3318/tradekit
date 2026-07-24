@@ -1,0 +1,50 @@
+{
+  "description": "One ranked row of CoinGecko `/api/v3/coins/markets` (SPRINT-P1A story 7).",
+  "properties": {
+    "coingecko_id": {
+      "title": "Coingecko Id",
+      "type": "string"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "price_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Price Usd"
+    },
+    "market_cap_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Market Cap Usd"
+    },
+    "rank": {
+      "title": "Rank",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "coingecko_id",
+    "symbol",
+    "price_usd",
+    "market_cap_usd",
+    "rank"
+  ],
+  "title": "CoinMarket",
+  "type": "object"
+}

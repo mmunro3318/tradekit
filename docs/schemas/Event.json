@@ -40,7 +40,10 @@
         "HaltCleared",
         "GateViolationDetected",
         "LessonRecorded",
-        "ReconciliationRun"
+        "ReconciliationRun",
+        "AccountCreated",
+        "AdvisoryTicketAcked",
+        "ScanAttritionRecorded"
       ],
       "title": "Type",
       "type": "string"

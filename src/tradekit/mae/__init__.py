@@ -184,7 +184,11 @@ def size_position(
 def get_correlation_matrix(
     symbols: list[str], window_days: int = 30, timeframe: str = "1d"
 ) -> dict[str, Any]:
-    """Rolling Pearson on daily log-returns, UTC inner-join (§9.1, R-013)."""
+    """Rolling Pearson on daily log-returns, UTC inner-join (§9.1, R-013).
+
+    `zero_variance_warnings` lists pairs whose correlation is undefined (a
+    constant-return leg) — their matrix cells are None, never a fabricated
+    0.0 (ASSUMPTIONS 166)."""
     series_by_symbol: dict[str, list[tuple[date, float]]] = {}
     for symbol in symbols:
         bars = _runtime.get_daily_bars(symbol, lookback_days=window_days)
@@ -206,6 +210,9 @@ def get_correlation_matrix(
         {"pair": [a, b], "overlap": overlap}
         for a, b, overlap in result.insufficient_overlap_warnings
     ]
+    zero_variance_warnings = [
+        {"pair": [a, b]} for a, b in result.zero_variance_warnings
+    ]
 
     return {
         "matrix": result.matrix,
@@ -213,6 +220,7 @@ def get_correlation_matrix(
         "as_of": _runtime.clock().isoformat(),
         "high_correlation_warnings": high_correlation_warnings,
         "insufficient_overlap_warnings": insufficient_overlap_warnings,
+        "zero_variance_warnings": zero_variance_warnings,
     }
 
 

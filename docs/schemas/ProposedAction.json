@@ -110,6 +110,12 @@
   },
   "properties": {
     "kind": {
+      "enum": [
+        "submit_order",
+        "cancel",
+        "promote",
+        "void"
+      ],
       "title": "Kind",
       "type": "string"
     },

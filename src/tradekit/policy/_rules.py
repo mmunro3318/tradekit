@@ -23,8 +23,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import get_args
 
-from tradekit.contracts import ProposedAction, RuleHit
+from tradekit.contracts import ProposedAction, ProposedActionKind, RuleHit
 from tradekit.policy._context import PolicyContext
 
 
@@ -401,7 +402,9 @@ def _check_r018(action: ProposedAction, ctx: PolicyContext) -> RuleHit:
     )
 
 
-_MUTATING = frozenset({"submit_order", "cancel", "promote", "void"})
+# One source of truth (ASSUMPTIONS 165): derived from the closed Literal so
+# _MUTATING can never drift from what ProposedAction.kind can represent.
+_MUTATING = frozenset(get_args(ProposedActionKind))
 
 RULES: tuple[Rule, ...] = (
     Rule(

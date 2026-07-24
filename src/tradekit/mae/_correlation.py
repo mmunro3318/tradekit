@@ -51,13 +51,20 @@ class CorrelationResult:
     """`matrix[a][b]` is `None` when the pair's joined-date overlap is below
     `min_overlap` (never a silently-computed number on too little data,
     R-013); self-pairs (`a == b`) are always exactly `1.0`, never computed.
-    `insufficient_overlap_warnings` and `high_correlation_warnings` each
-    name the pair once (unordered — `(a, b)` and `(b, a)` are the same
-    pair and appear only once, `a < b` lexicographically)."""
+    `matrix[a][b]` is also `None` when either leg has zero variance over the
+    joined dates (Pearson denominator exactly 0 — undefined, not a
+    fabricated 0.0; ASSUMPTIONS 166, mirrors the insufficient-overlap
+    precedent); that pair is recorded once in `zero_variance_warnings`
+    instead and skipped by the high-correlation check (no `r` to threshold
+    against). `insufficient_overlap_warnings`, `high_correlation_warnings`,
+    and `zero_variance_warnings` each name the pair once (unordered —
+    `(a, b)` and `(b, a)` are the same pair and appear only once, `a < b`
+    lexicographically)."""
 
     matrix: dict[str, dict[str, float | None]]
     insufficient_overlap_warnings: list[tuple[str, str, int]]
     high_correlation_warnings: list[tuple[str, str, float]]
+    zero_variance_warnings: list[tuple[str, str]]
 
 
 def compute_correlation(
@@ -75,15 +82,21 @@ def compute_correlation(
     sqrt(sum((x-mean_x)**2) * sum((y-mean_y)**2))`). If the joined overlap
     has fewer than `min_overlap` points, `matrix[a][b]` (and `matrix[b][a]`)
     is `None` and `(a, b, overlap_count)` (a < b) is appended to
-    `insufficient_overlap_warnings`. Otherwise the computed r populates both
-    `matrix[a][b]` and `matrix[b][a]` (correlation is symmetric), and if
-    `abs(r) > high_corr_threshold`, `(a, b, r)` (a < b) is appended to
+    `insufficient_overlap_warnings`. If either leg has zero variance over the
+    joined dates (Pearson denominator exactly 0), `matrix[a][b]` (and
+    `matrix[b][a]`) is `None` and `(a, b)` (a < b) is appended to
+    `zero_variance_warnings` instead — never a fabricated `0.0`
+    (ASSUMPTIONS 166) — and the high-correlation check is skipped for that
+    pair. Otherwise the computed r populates both `matrix[a][b]` and
+    `matrix[b][a]` (correlation is symmetric), and if `abs(r) >
+    high_corr_threshold`, `(a, b, r)` (a < b) is appended to
     `high_correlation_warnings`. Every `matrix[s][s]` is exactly `1.0`.
     """
     symbols = sorted(series_by_symbol)
     matrix: dict[str, dict[str, float | None]] = {s: {s: 1.0} for s in symbols}
     insufficient: list[tuple[str, str, int]] = []
     high_corr: list[tuple[str, str, float]] = []
+    zero_variance: list[tuple[str, str]] = []
 
     for i, a in enumerate(symbols):
         for b in symbols[i + 1 :]:
@@ -106,8 +119,18 @@ def compute_correlation(
             dy = [y - mean_y for y in ys]
             numerator = sum(px * py for px, py in zip(dx, dy, strict=True))
             denom = (sum(px * px for px in dx) * sum(py * py for py in dy)) ** 0.5
-            r = numerator / denom if denom != 0 else 0.0
 
+            if denom == 0:
+                # A zero-variance leg (denom == 0) makes r undefined, not
+                # 0.0 — a fabricated 0.0 would read as "measured no
+                # correlation" when in fact nothing was measured (ASSUMPTIONS
+                # 166, mirrors insufficient-overlap).
+                matrix[a][b] = None
+                matrix[b][a] = None
+                zero_variance.append((a, b))
+                continue
+
+            r = numerator / denom
             matrix[a][b] = r
             matrix[b][a] = r
             if abs(r) > high_corr_threshold:
@@ -117,6 +140,7 @@ def compute_correlation(
         matrix=matrix,
         insufficient_overlap_warnings=insufficient,
         high_correlation_warnings=high_corr,
+        zero_variance_warnings=zero_variance,
     )
 
 

@@ -7,6 +7,9 @@
     "status": {
       "enum": [
         "accepted",
+        "open",
+        "filled",
+        "canceled",
         "rejected"
       ],
       "title": "Status",

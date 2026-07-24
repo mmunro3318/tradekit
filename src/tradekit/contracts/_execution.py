@@ -43,8 +43,14 @@ class VerdictToken(FrozenModel):
     policy_version_hash: str
 
 
+ProposedActionKind = Literal["submit_order", "cancel", "promote", "void"]
+
+
 class ProposedAction(FrozenModel):
-    kind: str  # "submit_order" | "cancel" | "promote" | "void" | ... (open set until P2)
+    # Closed Literal == policy._rules._MUTATING (ASSUMPTIONS 165): every
+    # representable kind is guaranteed >=1 applicable rule by construction,
+    # so evaluate_pure needs no runtime guard against an unrepresented kind.
+    kind: ProposedActionKind
     account_ref: str
     requested_by: str
     thesis_id: str | None = None

@@ -51,6 +51,19 @@ def _seed_one_graded_trade() -> None:
         {"thesis_id": "th-1", "contract": {"account_ref": ACCOUNT}},
         EPOCH,
     )
+    # _trade_log_for_account skips (never guesses) a thesis missing its
+    # SizingComputed or an entry marker — seed both so the derived log is
+    # genuinely non-empty (CTO fixture fix after green-stage flag).
+    _append(
+        "SizingComputed",
+        {"thesis_id": "th-1", "sizing": {"recommended_size_usd": "50"}},
+        EPOCH + timedelta(hours=1),
+    )
+    _append(
+        "ThesisSubmitted",
+        {"thesis_id": "th-1"},
+        EPOCH + timedelta(hours=2),
+    )
     _append(
         "ThesisGraded",
         {

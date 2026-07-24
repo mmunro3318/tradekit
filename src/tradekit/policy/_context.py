@@ -679,8 +679,11 @@ def strategy_metrics_for_account(
     `None` when there is no trade log to evaluate yet (insufficient_context,
     never a fabricated verdict) — the call to `mae.compute_strategy_metrics`
     always happens (never short-circuited on an empty trade log BEFORE the
-    call) so a monkeypatched seam is always exercised; only the REAL
-    implementation's `ValueError` on an empty log is caught here."""
+    call) so a monkeypatched seam is always exercised. A `ValueError` is
+    swallowed into `None` ONLY when `trade_log` (this function's own
+    derivation, above) is empty (A2, ASSUMPTIONS 165-167); a `ValueError`
+    with a non-empty `trade_log` PROPAGATES, never silently swallowed into a
+    `None` that would look identical to "nothing to evaluate yet"."""
     trade_log = _trade_log_for_account(ledger, account_ref)
     try:
         return mae.compute_strategy_metrics(
@@ -689,6 +692,8 @@ def strategy_metrics_for_account(
             base_equity_usd=dials.paper_starting_equity_usd,
         )
     except ValueError:
+        if trade_log:
+            raise
         return None
 
 

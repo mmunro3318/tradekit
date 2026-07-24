@@ -55,7 +55,14 @@ of `atr()` (mirror of bollinger's existing guard). Check `keltner`/`_ema` for
 the same hole; guard if present (audit L2's `ema()` in trend.py IS in scope —
 same one-line guard).
 
-### P5 — L3: hud denial rationale names insufficient_context
+### P5 — WITHDRAWN (CTO adjudication 2026-07-24, red-phase flag confirmed)
+Audit finding L3 is a FALSE POSITIVE: `_rules._insufficient` emits
+`outcome="fail"` with `measured="insufficient_context:{field}"`, so hud's
+existing `outcome == "fail"` filter already surfaces the field in the
+rationale. CTO verified against `_rules.py:38-49`. No change; logged in
+agent-metrics as audit-quality feedback.
+
+### ~~P5 — L3: hud denial rationale names insufficient_context~~ (withdrawn)
 `hud/_build.py` `_default_evaluate_policy`:
 `failing = [hit for hit in verdict.rule_hits if hit.outcome not in ("pass", "not_configured")]`
 (keep the `or "policy denied action"` fallback).

@@ -1,0 +1,41 @@
+{
+  "description": "CoinGecko `/api/v3/global` snapshot (SPRINT-P1A story 7).\n\nSupplementary macro context, NOT a MarketDataPort result \u2014 CoinGecko is\nnot a bar provider (ASSUMPTIONS 34).",
+  "properties": {
+    "btc_dominance_pct": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Btc Dominance Pct"
+    },
+    "total_market_cap_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Total Market Cap Usd"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "btc_dominance_pct",
+    "total_market_cap_usd",
+    "ts"
+  ],
+  "title": "GlobalCrypto",
+  "type": "object"
+}

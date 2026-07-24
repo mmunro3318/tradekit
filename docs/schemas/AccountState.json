@@ -1,0 +1,53 @@
+{
+  "description": "`BrokerPort.account()`'s return shape (\u00a78.1): \"equity, settled cash,\nbuying power\". `Decimal` end-to-end \u2014 every field here is money.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "equity_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Equity Usd"
+    },
+    "settled_cash_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Settled Cash Usd"
+    },
+    "buying_power_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Buying Power Usd"
+    }
+  },
+  "required": [
+    "account_ref",
+    "equity_usd",
+    "settled_cash_usd",
+    "buying_power_usd"
+  ],
+  "title": "AccountState",
+  "type": "object"
+}

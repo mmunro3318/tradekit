@@ -80,6 +80,8 @@ def atr(
     Lookback: first non-None index = period-1 (13 for the default
     period=14 — addendum lookback table).
     """
+    if period < 1:
+        raise ValueError(f"period must be >= 1, got {period}")
     tr = cast(list[float], true_range(highs, lows, closes))  # TR never None
     n = len(tr)
     out: list[float | None] = [None] * n

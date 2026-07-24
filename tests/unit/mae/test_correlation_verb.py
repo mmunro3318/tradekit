@@ -405,7 +405,13 @@ def test_get_correlation_matrix_output_shape(monkeypatch) -> None:
 
     result = get_correlation_matrix(symbols=["BTC/USD", "SPY"], window_days=40, timeframe="1d")
 
-    assert set(result.keys()) >= {"window_days", "as_of", "matrix", "high_correlation_warnings"}
+    assert set(result.keys()) >= {
+        "window_days",
+        "as_of",
+        "matrix",
+        "high_correlation_warnings",
+        "zero_variance_warnings",
+    }
     assert result["window_days"] == 40
     assert isinstance(result["matrix"], dict)
     assert isinstance(result["high_correlation_warnings"], list)

@@ -45,6 +45,11 @@ def atr_position(
         raise ValueError("price and equity must be positive")
     if not 0.0 < risk_pct <= 0.05:
         raise ValueError(f"risk_pct {risk_pct} outside (0, 0.05] — 5%/trade is already reckless")
+    if multiplier <= 0.0:
+        raise ValueError(
+            f"multiplier {multiplier} must be positive — a non-positive ATR multiplier "
+            "flips the stop distance and sizes a wrong-way position"
+        )
 
     risk_usd = equity_usd * Decimal(str(risk_pct))
     stop_distance = atr * Decimal(str(multiplier))

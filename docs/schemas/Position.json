@@ -1,0 +1,61 @@
+{
+  "description": "One row of `BrokerPort.positions()` (\u00a78.1). `market_value_usd` is\n`None` when no live quote is available to mark it (e.g. a stale/absent\ncache entry) \u2014 never a fabricated value.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "qty": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Qty"
+    },
+    "avg_price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        }
+      ],
+      "title": "Avg Price"
+    },
+    "market_value_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Market Value Usd"
+    }
+  },
+  "required": [
+    "account_ref",
+    "symbol",
+    "qty",
+    "avg_price"
+  ],
+  "title": "Position",
+  "type": "object"
+}

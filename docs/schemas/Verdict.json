@@ -9,7 +9,8 @@
         "outcome": {
           "enum": [
             "pass",
-            "fail"
+            "fail",
+            "not_configured"
           ],
           "title": "Outcome",
           "type": "string"
