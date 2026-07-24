@@ -257,3 +257,31 @@ rows, wrong-tier collisions) in the pin list, not just spec-named errors.
 Per-agent: test-writer B+, implementer B (NotImplementedError trap caught at CTO gate), CTO fix round A-. Verdict: ACCEPT (pass-with-fixes, all MED fixes applied same round).
 
 Round 10b — hud-orderbook batch 2 (tk hud CLI): CTO inline review. Correctness A (atomic write, clock seam, exit 4), safety A (advisory-only; size_qty loud default makes production `tk hud` fail loud until T5 — intended), test quality A- (writer caught nothing to flag; implementer correctly STOPPED on the basename collision instead of hacking import mode — exemplary). Verdict: ACCEPT.
+
+## Round 11 — 2026-07-24 — TICKET-001 (red 8fb4b0c, green uncommitted, fix round in flight)
+
+Reviewer: tk-reviewer (top model). Verification: gate self-verified (pytest
+exit 0, ruff clean, mypy 90 files) + CTO gate in own shell. Verdict:
+FIX-FIRST (1 HIGH, 2 MED, 3 LOW). Test tree byte-identical to red anchor —
+no test-edit violation by implementer.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tk-test-writer (red) | 23 tests, 7 files | 1 (shared) | 1 (shared) | 1 | B- | Excellent P1-P3/P5 pins + the S1-catching un-mocked contract test; but under-pinned P4 (fixtures baked in the setup-collapse) and one vacuous header test (equity never asserted despite the name) — both holes the green walked through. |
+| tk-implementer (green) | mae vocab/scanner, hud, contracts, CLI | 1 | 2 | 3 | B | Pin-faithful scanner/vocab/CLI work, zero test edits, good why-comments; but implemented P4's "composes scanner attrition" as a gate-rename collapse — hud discarded the scanner's per-filter telemetry, reproducing the exact blindness the ticket cures (killer filter: "setup" 11/11). |
+
+Shared defect pattern (canonical, feeds the canon): the P4 gap was
+test-shaped before it was code-shaped — an under-pinned red let a
+plausible-but-wrong green stay green. Same lesson as the macd bug itself.
+First round graded on the canon D3 readability dimension: both agents clean
+(why-comments, no narration); reviewer flagged one load-bearing coupling
+(_precompute_indicators/_evaluate_symbol_timeframe stage-order lockstep)
+for a naming comment — folded into the fix round.
+
+Round 11 fix round (focused re-review, ACCEPT): fix-round implementer grade
+B — all four amendments landed, HIGH genuinely resolved end-to-end, but the
+splice deviated from the ratified 163b "bars mapping" clause (doubled bars
+stage) and the new test was blind to it; CTO applied the 2-line dedupe +
+count assert directly post-ACCEPT, re-gated green. Remaining LOW carried to
+batch 2: ledger append in hud_scan unguarded (unadjudicated — ASSUMPTIONS
+164 covers only the log-file write).

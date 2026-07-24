@@ -16,9 +16,10 @@ one `AdvisoryTicket`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
+from typing import Any
 
 import tradekit.mae._runtime as mae_runtime
 from tradekit.contracts import AdvisoryTicket, GateResult, HudState, ScanReportEntry
@@ -28,7 +29,7 @@ _TIMEFRAME = "1h"
 _LOOKBACK_DAYS = 30
 _MIN_BARS = 20
 _FEE_RATE = Decimal("0.0004")  # 4 bps/side (ASSUMPTIONS 144)
-_SETUP_FILTERS = {"macd_signal": "bullish", "volume_spike": 1.5}
+_SETUP_FILTERS = {"macd_signal": "bullish_cross", "volume_spike": 1.5}
 # Setup scan runs at 4h: the scanner's 90-day lookback at 1h implies 2160
 # bars > Kraken's 720-bar OHLC call cap (ProviderRangeError, smoke-tested
 # 2026-07-19); 4h -> 540 bars fits, and matches the doctrine's 4h/1h
@@ -57,6 +58,13 @@ class SizingInfo:
 @dataclass(frozen=True)
 class _SetupResult:
     signal_tags: list[str]
+    attrition_stages: list[dict[str, str]] = field(default_factory=list)
+    """A-FIX-1: the scanner's own P3 `stages` trail for this (symbol,
+    _SETUP_TIMEFRAME) — defaulted so pre-existing monkeypatched test
+    doubles (plain `signal_tags`-only objects) keep working. Empty means
+    "the scanner reported none" (attrition_stages absent from the seam
+    caller), in which case `_attrition_entry` falls back to the collapsed
+    hud-level "setup" gate name."""
 
 
 def _round2(value: Decimal) -> Decimal:
@@ -124,16 +132,25 @@ def _default_sizing_info(symbol: str, limit_price: Decimal, equity_usd: Decimal)
 def _default_scan_setup(symbol: str) -> _SetupResult:
     """Real setup scan (ASSUMPTIONS 159b): momentum + volume confirmation,
     post-regime-gate. Empty `signal_tags` when no match survives for the
-    symbol."""
+    symbol. `attrition_stages` (A-FIX-1/ASSUMPTIONS 163b) carries the
+    scanner's own P3 `stages` for this symbol, read off the scan result's
+    `"attrition"` key — the real per-filter killer, not a collapsed gate."""
     from tradekit import mae
 
     result = mae.scan_markets(
         "crypto", [_SETUP_TIMEFRAME], filters=_SETUP_FILTERS, symbols=[symbol], regime_gate=True
     )
+    stages: list[dict[str, str]] = []
+    for entry in result.get("attrition", []):
+        if entry.get("symbol") == symbol:
+            stages = list(entry.get("stages", []))
+            break
     for match in result["matches"]:
         if match.get("symbol") == symbol:
-            return _SetupResult(signal_tags=list(match.get("signal_tags", [])))
-    return _SetupResult(signal_tags=[])
+            return _SetupResult(
+                signal_tags=list(match.get("signal_tags", [])), attrition_stages=stages
+            )
+    return _SetupResult(signal_tags=[], attrition_stages=stages)
 
 
 # Test seams (ASSUMPTIONS 157a/158/159). Tests monkeypatch these module
@@ -232,6 +249,88 @@ def _make_proposal(symbol: str, thesis_id: str, fields: dict[str, Decimal]) -> o
     )
 
 
+def _attrition_entry(
+    symbol: str,
+    timeframe: str,
+    gates: tuple[GateResult, ...],
+    setup_stages: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Build a P4 attrition entry from the gates already assembled for this
+    symbol's `ScanReportEntry` — same per-symbol shape as `_scanner.scan`'s
+    P3 entries (`_build_ticket_fields` etc. never re-derive; this reuses the
+    gate trail build_state already walked). `data_integrity` is renamed to
+    `"bars"` to match the scanner's own stage vocabulary (P4: "same
+    per-symbol shape ... plus hud's own two extra stage names").
+
+    A-FIX-1/ASSUMPTIONS 163b: when `setup_stages` is non-empty (the scanner
+    reported its own per-filter trail via `_SetupResult.attrition_stages`),
+    the collapsed hud "setup" gate is SPLICED away and replaced by those
+    real stages (e.g. `macd_signal`) — the killer must never collapse into
+    an uninformative "setup" name. When empty (scanner reported none, or a
+    pre-existing test double without `attrition_stages`), the "setup" gate
+    is kept mapped as-is, unchanged from pre-fix behavior."""
+    stages: list[dict[str, str]] = []
+    for gate in gates:
+        name = "bars" if gate.name == "data_integrity" else gate.name
+        # ASSUMPTIONS 163b: hud's bars gate is kept only when the scanner
+        # reported no stages — scanner stages open with their own bars entry,
+        # and a doubled "bars" line misstates the funnel in the log.
+        if name == "bars" and setup_stages:
+            continue
+        if name == "setup" and setup_stages:
+            stages.extend(setup_stages)
+            continue
+        stages.append(
+            {
+                "name": name,
+                "outcome": "pass" if gate.passed else "fail",
+                "observed": gate.observed,
+            }
+        )
+    killed_by = stages[-1]["name"] if stages and stages[-1]["outcome"] == "fail" else None
+    return {"symbol": symbol, "timeframe": timeframe, "stages": stages, "killed_by": killed_by}
+
+
+def render_attrition_log(state: HudState, *, equity_usd: Decimal) -> str:
+    """Pure formatter (P4, TICKET-001 §4.2): header (timestamp + equity +
+    universe size) + per-symbol stage lines + a SUMMARY naming per-stage
+    kill counts and the overall killer filter. `equity_usd` is an explicit
+    parameter (A-FIX-2) — `HudState` is a render contract and carries no
+    equity field; equity is a scan input the CLI already holds. `observed`/
+    log text is human prose, not a parsing surface (ASSUMPTIONS 163) —
+    callers needing structured counts use `stage_kills`/`killer_filter` (see
+    `ScanAttritionRecordedPayload`), not this string."""
+    universe_n = len(state.attrition)
+    rule = "-" * 72
+    lines = [
+        "====== New Scan ======",
+        f"{state.generated_at.isoformat()}  equity=${equity_usd}  universe={universe_n} pairs",
+        rule,
+    ]
+
+    stage_kills: dict[str, int] = {}
+    for entry in state.attrition:
+        lines.append(str(entry["symbol"]))
+        for stage in entry["stages"]:
+            lines.append(f"  {stage['name']:<15} {stage['outcome'].upper():<4} {stage['observed']}")
+        killed_by = entry["killed_by"]
+        if killed_by is not None:
+            lines.append(f"  -> dropped at {killed_by}")
+            stage_kills[killed_by] = stage_kills.get(killed_by, 0) + 1
+
+    lines.append(rule)
+    lines.append(f"SUMMARY  scanned={universe_n}  tickets={len(state.tickets)}")
+    kills_line = " | ".join(f"{name} {count}" for name, count in stage_kills.items())
+    lines.append(f"  attrition: {kills_line}")
+    if stage_kills:
+        killer_name, killer_count = max(stage_kills.items(), key=lambda item: item[1])
+        lines.append(f"  killer filter: {killer_name} ({killer_count}/{universe_n})")
+    else:
+        lines.append("  killer filter: none")
+    lines.append("=" * 72)
+    return "\n".join(lines) + "\n"
+
+
 def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decimal) -> HudState:
     """Walk the funnel for each symbol, grading buy/sell/hold/wait, and
     assembling an `AdvisoryTicket` only when every gate passes AND policy
@@ -241,49 +340,54 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
     positions = open_position_symbols()
     tickets: list[AdvisoryTicket] = []
     report: list[ScanReportEntry] = []
+    attrition_entries: list[dict[str, Any]] = []
 
     for symbol in symbols:
         if symbol in positions:
+            gates: tuple[GateResult, ...] = (
+                GateResult(
+                    name="open_position",
+                    passed=True,
+                    observed="open",
+                    threshold="no open position",
+                    rationale=f"{symbol} has an open thesis/position; no exit signal",
+                ),
+            )
             report.append(
                 ScanReportEntry(
                     symbol=symbol,
                     timeframe=_TIMEFRAME,
                     indicators=(),
-                    gates=(
-                        GateResult(
-                            name="open_position",
-                            passed=True,
-                            observed="open",
-                            threshold="no open position",
-                            rationale=f"{symbol} has an open thesis/position; no exit signal",
-                        ),
-                    ),
+                    gates=gates,
                     grade="hold",
                     grade_rationale="open position with no exit signal — position safety trumps",
                 )
             )
+            attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates))
             continue
 
         bars, gap_reason = _fetch_bars(symbol)
         if bars is None:
+            gates = (
+                GateResult(
+                    name="data_integrity",
+                    passed=False,
+                    observed=gap_reason,
+                    threshold=f">= {_MIN_BARS} closed bars",
+                    rationale=f"insufficient closed bar history for {symbol}",
+                ),
+            )
             report.append(
                 ScanReportEntry(
                     symbol=symbol,
                     timeframe=_TIMEFRAME,
                     indicators=(),
-                    gates=(
-                        GateResult(
-                            name="data_integrity",
-                            passed=False,
-                            observed=gap_reason,
-                            threshold=f">= {_MIN_BARS} closed bars",
-                            rationale=f"insufficient closed bar history for {symbol}",
-                        ),
-                    ),
+                    gates=gates,
                     grade="wait",
                     grade_rationale="insufficient data to evaluate the setup",
                 )
             )
+            attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates))
             continue
 
         limit_price = bars.bars[-1].close
@@ -305,28 +409,34 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
             setup_error = f"provider error: {type(exc).__name__}"
         else:
             setup_error = ""
+        # A-FIX-1/ASSUMPTIONS 163b: `getattr` — pre-existing test doubles in
+        # the pinned batch suite duck-type only `.signal_tags`, no
+        # `.attrition_stages` attribute; they must keep working unchanged.
+        setup_stages: list[dict[str, str]] = getattr(setup, "attrition_stages", None) or []
         if not setup.signal_tags:
+            gates = (
+                data_gate,
+                GateResult(
+                    name="setup",
+                    passed=False,
+                    observed=setup_error or "signal_tags=[]",
+                    threshold=">= 1 surviving signal_tag",
+                    rationale=setup_error
+                    or f"no surviving setup signal tags for {symbol} "
+                    "(absent or dropped by regime gate)",
+                ),
+            )
             report.append(
                 ScanReportEntry(
                     symbol=symbol,
                     timeframe=_TIMEFRAME,
                     indicators=(("limit_price", str(limit_price)),),
-                    gates=(
-                        data_gate,
-                        GateResult(
-                            name="setup",
-                            passed=False,
-                            observed=setup_error or "signal_tags=[]",
-                            threshold=">= 1 surviving signal_tag",
-                            rationale=setup_error
-                            or f"no surviving setup signal tags for {symbol} "
-                            "(absent or dropped by regime gate)",
-                        ),
-                    ),
+                    gates=gates,
                     grade="wait",
                     grade_rationale="no confirmed setup",
                 )
             )
+            attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates, setup_stages))
             continue
 
         setup_gate = GateResult(
@@ -349,27 +459,28 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
         else:
             sizing_error = ""
         if sizing.qty <= 0:
+            gates = (
+                data_gate,
+                setup_gate,
+                GateResult(
+                    name="sizing",
+                    passed=False,
+                    observed=sizing_error or f"qty={sizing.qty}",
+                    threshold="qty > 0",
+                    rationale=sizing_error or f"sizing recommended no position for {symbol}",
+                ),
+            )
             report.append(
                 ScanReportEntry(
                     symbol=symbol,
                     timeframe=_TIMEFRAME,
                     indicators=(("limit_price", str(limit_price)),),
-                    gates=(
-                        data_gate,
-                        setup_gate,
-                        GateResult(
-                            name="sizing",
-                            passed=False,
-                            observed=sizing_error or f"qty={sizing.qty}",
-                            threshold="qty > 0",
-                            rationale=sizing_error
-                            or f"sizing recommended no position for {symbol}",
-                        ),
-                    ),
+                    gates=gates,
                     grade="wait",
                     grade_rationale="sizing produced no tradeable quantity",
                 )
             )
+            attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates, setup_stages))
             continue
 
         sizing_gate = GateResult(
@@ -394,27 +505,29 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
         decision = evaluate_policy(proposal)
 
         if not decision.allowed:
+            gates = (
+                data_gate,
+                setup_gate,
+                sizing_gate,
+                GateResult(
+                    name="policy_verdict",
+                    passed=False,
+                    observed="refused",
+                    threshold="allow",
+                    rationale=decision.rationale,
+                ),
+            )
             report.append(
                 ScanReportEntry(
                     symbol=symbol,
                     timeframe=_TIMEFRAME,
                     indicators=(("limit_price", str(limit_price)),),
-                    gates=(
-                        data_gate,
-                        setup_gate,
-                        sizing_gate,
-                        GateResult(
-                            name="policy_verdict",
-                            passed=False,
-                            observed="refused",
-                            threshold="allow",
-                            rationale=decision.rationale,
-                        ),
-                    ),
+                    gates=gates,
                     grade="wait",
                     grade_rationale=decision.rationale,
                 )
             )
+            attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates, setup_stages))
             continue
 
         assert decision.verdict_id is not None
@@ -445,33 +558,36 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
             created_at=captured_at,
         )
         tickets.append(ticket)
+        gates = (
+            data_gate,
+            setup_gate,
+            sizing_gate,
+            GateResult(
+                name="policy_verdict",
+                passed=True,
+                observed="allow",
+                threshold="allow",
+                rationale=decision.rationale,
+            ),
+        )
         report.append(
             ScanReportEntry(
                 symbol=symbol,
                 timeframe=_TIMEFRAME,
                 indicators=(("limit_price", str(limit_price)),),
-                gates=(
-                    data_gate,
-                    setup_gate,
-                    sizing_gate,
-                    GateResult(
-                        name="policy_verdict",
-                        passed=True,
-                        observed="allow",
-                        threshold="allow",
-                        rationale=decision.rationale,
-                    ),
-                ),
+                gates=gates,
                 grade="buy",
                 grade_rationale="all gates passed",
             )
         )
+        attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates, setup_stages))
 
     return HudState(
         generated_at=captured_at,
         tickets=tuple(tickets),
         report=tuple(report),
+        attrition=tuple(attrition_entries),
     )
 
 
-__all__ = ["build_state"]
+__all__ = ["build_state", "render_attrition_log"]

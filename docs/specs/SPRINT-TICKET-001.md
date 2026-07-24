@@ -92,6 +92,31 @@ Round-27 entry below is the authorization; cite it in the test docstring.
 - **164**: Scan-log write failure warns and continues; ledger
   `ScanAttritionRecorded` carries summary only.
 
+## FIX-round amendments (CTO, post-review 2026-07-24 — reviewer verdict FIX-FIRST)
+
+- **A-FIX-1 (seam shape, HIGH fix):** `_SetupResult` gains defaulted field
+  `attrition_stages: list[dict] = field(default_factory=list)` — the
+  scanner's P3 `stages` for that (symbol, timeframe). `_default_scan_setup`
+  populates it from the scan result's `attrition` key. `_attrition_entry`
+  SPLICES those stages in place of the collapsed `setup` gate (keeping
+  `bars` mapping only when the scanner reported none), then appends hud's
+  `sizing`/`policy_verdict`. Existing monkeypatched seams keep working via
+  the default. ASSUMPTIONS 163b.
+- **A-FIX-2 (equity in header, MED):** `render_attrition_log(state, *,
+  equity_usd: Decimal) -> str` — explicit parameter, HudState unchanged
+  (HudState is a render contract; equity is a scan input, CLI has it).
+  Strengthen the vacuous header test to assert the equity substring.
+- **A-FIX-3 (regime-killed matches, MED — ratified as ASSUMPTIONS 163c):**
+  a regime-gate-killed candidate REMAINS in `matches` with empty
+  `signal_tags` (preserves the scanner's documented pre-existing CTO call);
+  `attrition.killed_by` is the AUTHORITY for survivor counts — consumers
+  must not infer survivorship from `len(matches)`. Docstring note on scan().
+- **A-FIX-4 (LOW):** ledger append moves after the HTML atomic write;
+  killer_filter tie-break gets its why-comment.
+- Test-edit authorization for the fix round ONLY: new red tests for A-FIX-1/2,
+  strengthening test_hud_attrition's header + summary asserts, updating
+  `_SAMPLE_ATTRITION` fixtures to the spliced shape. Nothing else.
+
 ## Fences
 - Files touched: `mae/_vocab.py` (new), `mae/_scanner.py`, `mae/__init__.py`
   (export), `hud/_build.py`, hud CLI writer + `_render` if needed,

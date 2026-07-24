@@ -154,6 +154,7 @@ from typing import Any
 from tradekit import strategies
 from tradekit.mae import _regime, _runtime
 from tradekit.mae._indicators import momentum, volatility, volume
+from tradekit.mae._vocab import BBPosition, MacdSignal
 
 # Scanner-internal constants (not agent-facing inputs).
 _SCAN_LOOKBACK_DAYS = 90
@@ -184,6 +185,13 @@ _BB_POSITION_TAGS: dict[str, str] = {
 """`bb_position` value -> signal tag, per the module docstring's "Signal tag
 / strategy-family mapping" section."""
 
+# SPRINT-TICKET-001 P1/P2: closed vocabularies for the two enum-valued
+# filters, keyed off `_vocab`'s StrEnums (single source of truth) — `scan()`
+# validates an incoming filter value against these sets, loud, before any
+# bar fetch (P2); never a silent per-candidate drop (TICKET-001 §2a).
+_MACD_ALLOWED: set[str] = {member.value for member in MacdSignal}
+_BB_ALLOWED: set[str] = {member.value for member in BBPosition}
+
 
 class _InsufficientBars(Exception):
     """Raised internally when a present filter's required indicator has no
@@ -199,14 +207,80 @@ def _last_non_none(values: list[float | None]) -> float | None:
     return None
 
 
+def _precompute_indicators(
+    filters: dict[str, Any],
+    closes: list[float],
+    highs: list[float],
+    lows: list[float],
+    volumes: list[float],
+    symbol: str,
+    timeframe: str,
+) -> dict[str, Any]:
+    """Compute only the indicators `filters` needs, in the pinned stage
+    order (P3: rsi, macd_signal, bb_position, volume_spike,
+    atr_percentile). Raises `_InsufficientBars` on the FIRST present filter
+    whose indicator has no non-None value in the fetched window — this
+    becomes the single `"bars"` attrition stage (P3), never a per-filter
+    named failure."""
+    values: dict[str, Any] = {}
+
+    if "rsi_max" in filters or "rsi_min" in filters:
+        last_rsi = _last_non_none(momentum.rsi(closes, 14))
+        if last_rsi is None:
+            name = "rsi_max" if "rsi_max" in filters else "rsi_min"
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for {name}")
+        values["rsi"] = last_rsi
+
+    if "macd_signal" in filters:
+        last_hist = _last_non_none(momentum.macd(closes).histogram)
+        if last_hist is None:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for macd_signal")
+        values["macd_hist"] = last_hist
+
+    if "bb_position" in filters:
+        bb_result = volatility.bollinger(closes, 20, 2.0)
+        last_upper = _last_non_none(bb_result.upper)
+        last_lower = _last_non_none(bb_result.lower)
+        if last_upper is None or last_lower is None or not closes:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for bb_position")
+        last_close = closes[-1]
+        if last_close < last_lower:
+            values["bb_position_value"] = "below_lower"
+        elif last_close > last_upper:
+            values["bb_position_value"] = "above_upper"
+        else:
+            values["bb_position_value"] = "inside"
+
+    if "volume_spike" in filters:
+        last_vr = _last_non_none(volume.volume_ratio(volumes, 20))
+        if last_vr is None:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for volume_spike")
+        values["volume_ratio"] = last_vr
+
+    if "atr_percentile_min" in filters:
+        non_none_atr = [v for v in volatility.atr(highs, lows, closes, 14) if v is not None]
+        if not non_none_atr:
+            raise _InsufficientBars(
+                f"{symbol} {timeframe}: insufficient bars for atr_percentile_min"
+            )
+        last_atr = non_none_atr[-1]
+        values["atr"] = last_atr
+        values["atr_pctile"] = (
+            sum(1 for v in non_none_atr if v <= last_atr) / len(non_none_atr) * 100.0
+        )
+
+    return values
+
+
 def _evaluate_symbol_timeframe(
     symbol: str, timeframe: str, bars: list[Any], filters: dict[str, Any]
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[dict[str, str]], str | None]:
     """Compute only the indicators `filters` needs, apply the AND-composed
-    filter checks, and return a fully-populated match dict, or `None` if the
-    symbol/timeframe combo fails at least one filter. Raises
-    `_InsufficientBars` if a present filter's indicator has no non-None
-    value in the fetched window (caller converts this to a warning + skip)."""
+    filter checks in the pinned stage order, and return
+    `(match_or_None, stages, killed_by)` — `stages` is the P3 attrition
+    trail for this (symbol, timeframe): entries only for stages actually
+    evaluated (none after the killer). `killed_by` is the first failing
+    stage's name, or `None` if every present filter passed."""
     closes = [float(b.close) for b in bars]
     highs = [float(b.high) for b in bars]
     lows = [float(b.low) for b in bars]
@@ -223,87 +297,86 @@ def _evaluate_symbol_timeframe(
         "volume_ratio": None,
         "signal_tags": [],
     }
+
+    try:
+        values = _precompute_indicators(filters, closes, highs, lows, volumes, symbol, timeframe)
+    except _InsufficientBars as exc:
+        return None, [{"name": "bars", "outcome": "fail", "observed": str(exc)}], "bars"
+
+    stages: list[dict[str, str]] = [
+        {"name": "bars", "outcome": "pass", "observed": f"{len(bars)} bars"}
+    ]
     tags: list[str] = []
 
     if "rsi_max" in filters or "rsi_min" in filters:
-        rsi_vals = momentum.rsi(closes, 14)
-        last_rsi = _last_non_none(rsi_vals)
-        if last_rsi is None:
-            name = "rsi_max" if "rsi_max" in filters else "rsi_min"
-            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for {name}")
+        last_rsi = values["rsi"]
         candidate["rsi"] = last_rsi
+        observed = f"rsi={last_rsi}"
         if "rsi_max" in filters and last_rsi > filters["rsi_max"]:
-            return None
+            stages.append({"name": "rsi", "outcome": "fail", "observed": observed})
+            return None, stages, "rsi"
+        if "rsi_min" in filters and last_rsi < filters["rsi_min"]:
+            stages.append({"name": "rsi", "outcome": "fail", "observed": observed})
+            return None, stages, "rsi"
+        stages.append({"name": "rsi", "outcome": "pass", "observed": observed})
         if "rsi_max" in filters:
             tags.append("oversold")
-        if "rsi_min" in filters and last_rsi < filters["rsi_min"]:
-            return None
         if "rsi_min" in filters:
             tags.append("overbought")
 
     if "macd_signal" in filters:
-        macd_result = momentum.macd(closes)
-        last_hist = _last_non_none(macd_result.histogram)
-        if last_hist is None:
-            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for macd_signal")
+        last_hist = values["macd_hist"]
         candidate["macd_hist"] = last_hist
+        observed = f"hist={last_hist}"
         want = filters["macd_signal"]
-        if want == "bullish_cross":
-            if not (last_hist > 0.0):
-                return None
-            tags.append("macd_bullish")
-        elif want == "bearish_cross":
-            if not (last_hist < 0.0):
-                return None
-            tags.append("macd_bearish")
+        if want == MacdSignal.BULLISH_CROSS:
+            ok, tag = last_hist > 0.0, "macd_bullish"
+        elif want == MacdSignal.BEARISH_CROSS:
+            ok, tag = last_hist < 0.0, "macd_bearish"
         else:
-            return None
+            # Unreachable: scan() validates macd_signal against _MACD_ALLOWED
+            # before any candidate is evaluated (P2).
+            raise AssertionError(f"unreachable: unvalidated macd_signal value {want!r}")
+        if not ok:
+            stages.append({"name": "macd_signal", "outcome": "fail", "observed": observed})
+            return None, stages, "macd_signal"
+        stages.append({"name": "macd_signal", "outcome": "pass", "observed": observed})
+        tags.append(tag)
 
     if "bb_position" in filters:
-        bb_result = volatility.bollinger(closes, 20, 2.0)
-        last_upper = _last_non_none(bb_result.upper)
-        last_lower = _last_non_none(bb_result.lower)
-        if last_upper is None or last_lower is None or not closes:
-            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for bb_position")
-        last_close = closes[-1]
-        if last_close < last_lower:
-            position = "below_lower"
-        elif last_close > last_upper:
-            position = "above_upper"
-        else:
-            position = "inside"
+        position = values["bb_position_value"]
+        observed = f"position={position}"
         if position != filters["bb_position"]:
-            return None
+            stages.append({"name": "bb_position", "outcome": "fail", "observed": observed})
+            return None, stages, "bb_position"
+        stages.append({"name": "bb_position", "outcome": "pass", "observed": observed})
         tags.append(_BB_POSITION_TAGS[position])
 
     if "volume_spike" in filters:
-        vr_vals = volume.volume_ratio(volumes, 20)
-        last_vr = _last_non_none(vr_vals)
-        if last_vr is None:
-            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for volume_spike")
+        last_vr = values["volume_ratio"]
         candidate["volume_ratio"] = last_vr
+        observed = f"vr={last_vr}"
         if last_vr < filters["volume_spike"]:
-            return None
+            stages.append({"name": "volume_spike", "outcome": "fail", "observed": observed})
+            return None, stages, "volume_spike"
+        stages.append({"name": "volume_spike", "outcome": "pass", "observed": observed})
         tags.append("volume_spike")
 
     if "atr_percentile_min" in filters:
-        atr_vals = volatility.atr(highs, lows, closes, 14)
-        non_none_atr = [v for v in atr_vals if v is not None]
-        if not non_none_atr:
-            raise _InsufficientBars(
-                f"{symbol} {timeframe}: insufficient bars for atr_percentile_min"
-            )
-        last_atr = non_none_atr[-1]
-        pctile = sum(1 for v in non_none_atr if v <= last_atr) / len(non_none_atr) * 100.0
+        last_atr = values["atr"]
+        pctile = values["atr_pctile"]
+        observed = f"pctile={pctile}"
         if pctile < filters["atr_percentile_min"]:
-            return None
+            stages.append({"name": "atr_percentile", "outcome": "fail", "observed": observed})
+            return None, stages, "atr_percentile"
         candidate["atr"] = last_atr
         if candidate["price"] is not None:
             candidate["atr_pct_of_price"] = last_atr / candidate["price"] * 100.0
+        stages.append({"name": "atr_percentile", "outcome": "pass", "observed": observed})
         tags.append("high_volatility")
 
     candidate["signal_tags"] = tags
-    return candidate
+    return candidate, stages, None
 
 
 def _apply_regime_gate(tags: list[str], regime: dict[str, Any]) -> list[str]:
@@ -332,11 +405,22 @@ def scan(
     shape pins.
 
     `symbols is None` ("full universe" scan) is deferred past this sprint
-    and raises `ValueError` before any bar fetch. Otherwise: for every
-    symbol/timeframe pair, bars come ONLY from `_runtime.get_closed_bars`;
-    filters AND-compose; `regime_gate=True` calls `_regime.compute_regime`
-    at most once per symbol (cached), pruning each match's `signal_tags`
-    against that symbol's `recommended_strategies` (see module docstring).
+    and raises `ValueError` before any bar fetch. `macd_signal`/`bb_position`
+    filter VALUES are validated against their closed vocabularies before any
+    bar fetch too (P2/ASSUMPTIONS 162) — an unknown value raises `ValueError`
+    naming the bad value and the allowed set, never a silent empty `matches`.
+    Otherwise: for every symbol/timeframe pair, bars come ONLY from
+    `_runtime.get_closed_bars`; filters AND-compose; `regime_gate=True` calls
+    `_regime.compute_regime` at most once per symbol (cached), pruning each
+    match's `signal_tags` against that symbol's `recommended_strategies`
+    (see module docstring). The result additionally carries `"attrition"`
+    (P3): one entry per (symbol, timeframe) in input order, naming every
+    stage evaluated and which one (if any) killed the candidate.
+
+    A regime-gate-killed candidate REMAINS in `matches` with empty
+    `signal_tags` (pre-existing CTO call, preserved) — `attrition.killed_by`
+    is the AUTHORITY for survivor counts; callers must never infer
+    survivorship from `len(matches)` (ASSUMPTIONS 163c).
     """
     if symbols is None:
         raise ValueError(
@@ -345,23 +429,35 @@ def scan(
             "(docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4)"
         )
 
+    if "macd_signal" in filters and filters["macd_signal"] not in _MACD_ALLOWED:
+        value = filters["macd_signal"]
+        raise ValueError(
+            f"scan_markets: unknown macd_signal value {value!r}; expected one of "
+            f"{sorted(_MACD_ALLOWED)}"
+        )
+    if "bb_position" in filters and filters["bb_position"] not in _BB_ALLOWED:
+        value = filters["bb_position"]
+        raise ValueError(
+            f"scan_markets: unknown bb_position value {value!r}; expected one of "
+            f"{sorted(_BB_ALLOWED)}"
+        )
+
     matches: list[dict[str, Any]] = []
     warnings: list[str] = []
     regime_context: dict[str, Any] = {}
     regime_cache: dict[str, dict[str, Any]] = {}
+    attrition: list[dict[str, Any]] = []
 
     for symbol in symbols:
         for timeframe in timeframes:
             series = _runtime.get_closed_bars(symbol, timeframe, _SCAN_LOOKBACK_DAYS)
-            try:
-                match = _evaluate_symbol_timeframe(symbol, timeframe, series.bars, filters)
-            except _InsufficientBars as exc:
-                warnings.append(str(exc))
-                continue
-            if match is None:
-                continue
+            match, stages, killed_by = _evaluate_symbol_timeframe(
+                symbol, timeframe, series.bars, filters
+            )
+            if killed_by == "bars":
+                warnings.append(stages[0]["observed"])
 
-            if regime_gate:
+            if match is not None and regime_gate:
                 if symbol not in regime_cache:
                     regime_cache[symbol] = _regime.compute_regime(
                         symbol, _SCAN_REGIME_LOOKBACK_DAYS, _SCAN_REGIME_N_STATES
@@ -371,13 +467,36 @@ def scan(
                     "state": regime.get("current_state"),
                     "confidence": regime.get("confidence"),
                 }
-                match["signal_tags"] = _apply_regime_gate(match["signal_tags"], regime)
+                before_tags = match["signal_tags"]
+                after_tags = _apply_regime_gate(before_tags, regime)
+                match["signal_tags"] = after_tags
+                regime_observed = f"state={regime.get('current_state')}"
+                if before_tags and not after_tags:
+                    stages.append(
+                        {"name": "regime_gate", "outcome": "fail", "observed": regime_observed}
+                    )
+                    killed_by = "regime_gate"
+                else:
+                    stages.append(
+                        {"name": "regime_gate", "outcome": "pass", "observed": regime_observed}
+                    )
 
-            matches.append(match)
+            if match is not None:
+                matches.append(match)
+
+            attrition.append(
+                {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "stages": stages,
+                    "killed_by": killed_by,
+                }
+            )
 
     return {
         "scan_ts": _runtime.clock().isoformat(),
         "regime_context": regime_context,
         "matches": matches,
         "warnings": warnings,
+        "attrition": attrition,
     }

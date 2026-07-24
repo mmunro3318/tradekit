@@ -542,6 +542,69 @@ def bridge_snapshot() -> None:
     typer.echo(result.model_dump_json())
 
 
+def _write_scan_attrition_log(state: Any, captured_at: datetime, equity_usd: Decimal) -> None:
+    """SPRINT-TICKET-001 P4: append the rendered attrition log to
+    `data/scans/<UTC yyyy-mm-dd>/scan-<HHMMSS>.log` — `captured_at` (the
+    scan's own clock read, never a fresh wall-clock read) names both the
+    directory and the file. A write failure is a stderr warning, never a
+    scan failure (P4). `equity_usd` (A-FIX-2): the CLI's own input, threaded
+    through explicitly since `HudState` carries no equity field."""
+    from tradekit.hud._build import render_attrition_log
+
+    data_dir = Path(os.environ.get("TK_DATA_DIR", "data"))
+    day_dir = data_dir / "scans" / captured_at.strftime("%Y-%m-%d")
+    log_path = day_dir / f"scan-{captured_at.strftime('%H%M%S')}.log"
+    try:
+        day_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(render_attrition_log(state, equity_usd=equity_usd))
+    except OSError as exc:
+        typer.echo(f"warning: failed to write scan log {log_path}: {exc}", err=True)
+
+
+def _append_scan_attrition_recorded(
+    state: Any, universe: list[str], *, captured_at: datetime, equity_usd: Decimal
+) -> None:
+    """SPRINT-TICKET-001 P4: one `ScanAttritionRecorded` ledger note per
+    `build_state` call, appended by the CLI layer — not `build_state`
+    itself, which stays pure (P4). Summary only (ASSUMPTIONS 164): counts
+    per stage plus the overall killer filter, no per-symbol detail (that
+    lives in the scan log file)."""
+    from ulid import ULID
+
+    from tradekit.contracts import Event, ScanAttritionRecordedPayload
+
+    stage_kills: dict[str, int] = {}
+    for entry in state.attrition:
+        killed_by = entry["killed_by"]
+        if killed_by is not None:
+            stage_kills[killed_by] = stage_kills.get(killed_by, 0) + 1
+    # Ties broken by dict-insertion order (first stage evaluated wins) —
+    # deliberate: `max()` is stable and `stage_kills` is built in the pinned
+    # stage-evaluation order (A-FIX-4), so a tie names the earlier-evaluated
+    # (upstream) filter rather than an arbitrary one.
+    killer_filter = max(stage_kills, key=lambda name: stage_kills[name]) if stage_kills else None
+
+    payload = ScanAttritionRecordedPayload(
+        scan_ts=captured_at,
+        equity_usd=equity_usd,
+        universe=universe,
+        tickets=len(state.tickets),
+        stage_kills=stage_kills,
+        killer_filter=killer_filter,
+    )
+    event = Event(
+        event_id=str(ULID()),
+        ts_utc=captured_at,
+        type="ScanAttritionRecorded",
+        actor="system:hud",
+        run_id=None,
+        schema_ver=1,
+        payload=payload.model_dump(mode="json"),
+    )
+    default_ledger().append(event)
+
+
 @app.command("hud")
 def hud_scan(
     equity: Annotated[
@@ -599,6 +662,8 @@ def hud_scan(
     state = hud.build_state(symbol_list, captured_at=captured_at, equity_usd=Decimal(equity))
     html = hud.render(state)
 
+    _write_scan_attrition_log(state, captured_at, Decimal(equity))
+
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
@@ -616,6 +681,13 @@ def hud_scan(
     except OSError as exc:
         typer.echo(f"failed to write {out}: {exc}", err=True)
         raise typer.Exit(code=4) from exc
+
+    # A-FIX-4: ledger append moved after the atomic HTML write — the write
+    # is the part that can fail loudly (exit 4, above); the ledger note is
+    # advisory telemetry (ASSUMPTIONS 164) and should not race ahead of it.
+    _append_scan_attrition_recorded(
+        state, symbol_list, captured_at=captured_at, equity_usd=Decimal(equity)
+    )
 
     if open_browser:
         import webbrowser

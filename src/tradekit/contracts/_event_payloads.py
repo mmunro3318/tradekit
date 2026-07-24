@@ -573,6 +573,23 @@ class LessonRecordedPayload(StrictFrozenModel):
     salience: int = Field(ge=1, le=5)
 
 
+class ScanAttritionRecordedPayload(StrictFrozenModel):
+    """Producer: `tk hud` CLI layer, once per `hud.build_state` call
+    (SPRINT-TICKET-001 P4/ASSUMPTIONS 164) — a summary-only ledger note of a
+    scan's per-stage attrition so "which filter killed candidates on date
+    X?" is answerable without re-running the scan. Per-symbol detail lives
+    in the scan log file (`hud._build.render_attrition_log`), not here —
+    the ledger stays lean (`stage_kills`/`killer_filter` are the aggregate,
+    not the per-symbol trail)."""
+
+    scan_ts: AwareDatetime
+    equity_usd: Decimal
+    universe: list[str]
+    tickets: int
+    stage_kills: dict[str, int]
+    killer_filter: str | None
+
+
 __all__ = [
     "AccountCreatedPayload",
     "ActionProposedPayload",
@@ -594,6 +611,7 @@ __all__ = [
     "PromotionGrantedPayload",
     "ReconciliationRunPayload",
     "ReviewCompletedPayload",
+    "ScanAttritionRecordedPayload",
     "SeriesClosedPayload",
     "SizingComputedPayload",
     "ThesisActivatedPayload",

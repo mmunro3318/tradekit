@@ -18,6 +18,7 @@ from typing import Any
 from tradekit.contracts import StrategyMetrics, TradeRecord
 from tradekit.mae import _correlation, _metrics, _regime, _runtime, _scanner, _sizing
 from tradekit.mae._indicators import volatility
+from tradekit.mae._vocab import BBPosition, MacdSignal
 
 
 def scan_markets(
@@ -216,6 +217,8 @@ def get_correlation_matrix(
 
 
 __all__ = [
+    "BBPosition",
+    "MacdSignal",
     "compute_strategy_metrics",
     "get_correlation_matrix",
     "get_derivatives_context",

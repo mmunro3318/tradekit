@@ -10,7 +10,7 @@ transparency layer; `HudState` is the shared secret between
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AwareDatetime
 
@@ -63,6 +63,13 @@ class HudState(FrozenModel):
     generated_at: AwareDatetime
     tickets: tuple[AdvisoryTicket, ...]
     report: tuple[ScanReportEntry, ...]
+    # SPRINT-TICKET-001 P4: plain dicts, verbatim the scanner's `"attrition"`
+    # entry shape (`_scanner.scan`'s P3 output) plus hud's own two extra
+    # stage names ("sizing", "policy_verdict") — CTO-adjudicated, no
+    # dedicated pydantic model this batch (ASSUMPTIONS-FLAG in
+    # tests/unit/hud/test_hud_attrition.py). Defaults to `()` so pre-existing
+    # `HudState(...)` construction sites stay valid (additive field).
+    attrition: tuple[dict[str, Any], ...] = ()
 
 
 __all__ = [

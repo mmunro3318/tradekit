@@ -49,6 +49,8 @@ EventType = Literal[
     "AccountCreated",
     # hud-ack (SPEC-hud-ack.md): Mike's confirm/failed reverse channel.
     "AdvisoryTicketAcked",
+    # SPRINT-TICKET-001 P4: scan-attrition summary note (read-side only).
+    "ScanAttritionRecorded",
 ]
 
 

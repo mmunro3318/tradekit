@@ -218,6 +218,9 @@ class TestAFix1AttritionStagesSplice:
         entry = state.attrition[0]
         assert entry["killed_by"] == "macd_signal"
         assert "setup" not in {stage["name"] for stage in entry["stages"]}
+        # ASSUMPTIONS 163b: hud's bars gate yields to the scanner's own bars
+        # stage — a doubled "bars" line misstates the funnel.
+        assert [stage["name"] for stage in entry["stages"]].count("bars") == 1
         assert {"name": "macd_signal", "outcome": "fail", "observed": "hist=-0.0035"} in (
             entry["stages"]
         )

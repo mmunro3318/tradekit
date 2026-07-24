@@ -2,6 +2,30 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-24 (Fable — TICKET-001 SHIPPED via full batch cycle; canon ratified+committed)
+
+- Mike approved the standards plan; canon committed fa2a5a9 (GLOSSARY +
+  ENGINEERING-CANON D1-D7 + CORE-FLOWS ratified). Reverted keyboard-mash in
+  tests/conftest.py that had turned the gate red (accidental editor input).
+- **TICKET-001 through the full cycle**: pins e398211 (ASSUMPTIONS 162-164) →
+  red 8fb4b0c (23 tests incl. the S1-catching un-mocked contract test + the
+  authorized :490 inversion) → green (963 passed; "bullish"→"bullish_cross",
+  MacdSignal/BBPosition StrEnums, loud unknown-value raise before bar fetch,
+  attrition telemetry scanner→HudState→log→ScanAttritionRecorded event) →
+  review round 11 **FIX-FIRST** (HIGH: hud discarded scanner attrition,
+  rendered collapsed "setup" killer — the ticket's own blindness reproduced;
+  the gap was test-shaped first: under-pinned red let wrong green stay green)
+  → fix round 5dbb3f1 + impl (splice real per-filter stages, equity in
+  header, ASSUMPTIONS 163b/163c) → focused re-review **ACCEPT** (1 MED
+  deviation: doubled bars stage vs 163b wording — CTO applied 2-line dedupe
+  + assert directly, re-gated green).
+- Grades (round 11): test-writer B-, implementer B, fix-round B. Carried LOW
+  to batch 2: hud_scan ledger append unguarded (unadjudicated).
+- Batch 2 (SPRINT-AUDIT-BUNDLE) pinned + adjudicated: kind Literal ==
+  _MUTATING makes the all([]) fail-open unreachable by construction (no
+  runtime guard, one invariant test); _context except-narrowing per auditor.
+  Money-path review round mandatory. Dispatching next.
+
 ## 2026-07-24 (Fable — standards research + canon drafting, post-audit response)
 
 - Mike's directive: research-grounded standards to stop the compounding
