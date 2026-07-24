@@ -487,22 +487,28 @@ def test_macd_signal_bearish_cross_symbol_appears_in_matches(monkeypatch) -> Non
     assert "macd_bearish" in matches[0]["signal_tags"]
 
 
-def test_macd_signal_unknown_value_matches_nothing(monkeypatch) -> None:
-    """`macd_signal` values other than "bullish_cross"/"bearish_cross" must
-    hit the unknown-value guard -> no match (not a crash, not a pass)."""
-    series = _series(_MACD_BULLISH_CLOSES)
-    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+def test_macd_signal_unknown_value_raises_value_error(monkeypatch) -> None:
+    """CONTRACT — inverted per SPRINT-TICKET-001 P5 / ASSUMPTIONS 162
+    (CTO-ratified 2026-07-24). This test used to assert
+    `matches == []` for an unknown `macd_signal` value — that silent-drop
+    behavior is now a ratified DEFECT (the 2026-07-23 S1 outage: production
+    shipped `"bullish"`, an unknown value, and every scan silently rejected
+    every candidate with zero warnings). `scan()` must now raise `ValueError`
+    naming the bad value BEFORE any bar fetch even reaches the filter
+    evaluation stage — never return an empty `matches` silently."""
+    calls = _install_bars_by_symbol(monkeypatch, {})
     _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
 
-    result = _scanner.scan(
-        asset_class="crypto",
-        timeframes=["1d"],
-        filters={"macd_signal": "sideways"},
-        symbols=["BTC/USD"],
-        regime_gate=False,
-    )
+    with pytest.raises(ValueError, match="unknown macd_signal"):
+        _scanner.scan(
+            asset_class="crypto",
+            timeframes=["1d"],
+            filters={"macd_signal": "sideways"},
+            symbols=["BTC/USD"],
+            regime_gate=False,
+        )
 
-    assert result["matches"] == []
+    assert calls == [], "unknown filter value must raise BEFORE any bar fetch (P2 pin)"
 
 
 def test_atr_percentile_min_symbol_appears_in_matches(monkeypatch) -> None:

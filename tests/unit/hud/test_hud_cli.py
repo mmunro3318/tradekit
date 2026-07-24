@@ -284,6 +284,73 @@ class TestAC13MissingEquityIsUsageError:
         assert not out.exists()
 
 
+class TestScanAttritionRecordedAppendedOncePerScan:
+    """SPRINT-TICKET-001 P4: `tk hud` appends exactly one
+    `ScanAttritionRecorded` event per `build_state` call — appended by the
+    CLI layer (not `build_state` itself, which stays pure per P4: "Appended
+    once per `build_state` call by the CLI layer (not by build_state
+    itself — purity)"). Follows this file's own `_patch_allow_all` seam
+    pattern; queries the ledger the same way `ledger_query`/other CLI tests
+    in this suite do (`tradekit.ledger.default_ledger()`, isolated per test
+    by the autouse `TK_DATA_DIR` fixture in tests/conftest.py)."""
+
+    def test_hud_scan_appends_exactly_one_scan_attrition_recorded_event(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BEHAVIOR: a single `tk hud` invocation ledgers exactly one
+        `ScanAttritionRecorded` event, never zero (silent) and never more
+        than one (double-booking) — same idempotence discipline as this
+        file's `_append_ack` precedent."""
+        from tradekit.contracts import EventFilter
+        from tradekit.ledger import default_ledger
+
+        _patch_allow_all(monkeypatch)
+        out = tmp_path / "hud.html"
+
+        result = runner.invoke(
+            app,
+            ["hud", "--symbols", "LINK/USD", "--equity", EQUITY, "--out", str(out)],
+        )
+
+        assert result.exit_code == 0, result.output
+
+        events = list(
+            default_ledger().query(EventFilter(types=["ScanAttritionRecorded"]))
+        )
+        assert len(events) == 1
+
+    def test_recorded_event_payload_carries_summary_fields_matching_the_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BEHAVIOR: the ledgered payload's `universe`/`tickets` match the
+        actual scan just run — summary only, no per-symbol detail
+        (ASSUMPTIONS 164)."""
+        from tradekit.contracts import EventFilter
+        from tradekit.ledger import default_ledger
+
+        _patch_allow_all(monkeypatch)
+        out = tmp_path / "hud.html"
+
+        result = runner.invoke(
+            app,
+            ["hud", "--symbols", "LINK/USD", "--equity", EQUITY, "--out", str(out)],
+        )
+
+        assert result.exit_code == 0, result.output
+
+        events = list(
+            default_ledger().query(EventFilter(types=["ScanAttritionRecorded"]))
+        )
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["universe"] == ["LINK/USD"]
+        assert payload["equity_usd"] == EQUITY or Decimal(str(payload["equity_usd"])) == Decimal(
+            EQUITY
+        )
+        assert "stage_kills" in payload
+        assert "killer_filter" in payload
+
+
 class TestAC14OpenFlag:
     def test_open_flag_opens_written_file_in_browser(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
