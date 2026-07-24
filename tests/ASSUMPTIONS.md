@@ -3031,3 +3031,28 @@ barrier simulator), 2026-07-19
      loop (cap 20 pages, loud duplicate guard); Kraken pagination is
      impossible (720-bar retention verified live) — guard stays, message
      now states retention truth. CTO-verified via live probe.
+
+## Round-27 — TICKET-001 red-phase pins (scan vocab + attrition telemetry)
+
+### 162 — unknown closed-vocabulary filter value raises, never empty matches
+An unknown value for a closed-vocabulary scan filter (`macd_signal`,
+`bb_position`) raises `ValueError` at `scan()` entry — never an empty
+`matches` list. SUPERSEDES the silent-drop behavior previously pinned by
+tests/unit/mae/test_scan_markets_verb.py:490 (inverted this batch, CTO-
+authorized). WHY: ENGINEERING-CANON D4 (fail-safe defaults, Saltzer &
+Schroeder 1975); the 2026-07-23 S1 outage where `"bullish"` silently
+rejected 100% of candidates for days (docs/tickets/TICKET-001).
+
+### 163 — attrition telemetry taxonomy
+`scan_markets` result carries `attrition` per (symbol, timeframe): ordered
+`stages` [{name, outcome pass|fail, observed}], `killed_by` = first failing
+stage or None. Stage names: bars, rsi, macd_signal, bb_position,
+volume_spike, atr_percentile, regime_gate (+ hud-level: sizing,
+policy_verdict). Stages after the killer are ABSENT. `observed` is human
+prose, not a parsing surface — structured consumers read killed_by /
+stage_kills.
+
+### 164 — attrition outputs are advisory, never blocking
+Scan-log file write failure warns (stderr) and continues; the ledger event
+`ScanAttritionRecorded` carries the summary only (stage_kills,
+killer_filter, tickets, universe) — per-symbol detail lives in the log file.
