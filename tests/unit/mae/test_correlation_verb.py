@@ -170,6 +170,88 @@ def test_compute_correlation_high_correlation_flagged() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SPRINT-AUDIT-BUNDLE P3 (audit M2, ASSUMPTIONS 166): a zero-variance leg
+# (every return identical, so the Pearson denominator is exactly 0) must be
+# UNDEFINED (None + warning), never silently reported as 0.0 — mirrors the
+# insufficient-overlap precedent; R-013 consumers must treat None as "cannot
+# assess", not "measured zero correlation".
+# ---------------------------------------------------------------------------
+
+
+def test_compute_correlation_zero_variance_leg_is_none_both_orientations() -> None:
+    """CONTRACT: a constant-return series (B, zero variance -> Pearson
+    denominator 0) against a normal varying series (A) yields
+    `matrix[A][B] is None` AND `matrix[B][A] is None` — never a fabricated
+    0.0. >= min_overlap shared dates so this isn't the insufficient-overlap
+    path."""
+    dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(25)]
+    xs = [i / 100.0 for i in range(1, 26)]  # normal varying leg
+    ys = [0.01] * 25  # constant -> zero variance
+    series = {"A": list(zip(dates, xs, strict=True)), "B": list(zip(dates, ys, strict=True))}
+
+    result = _correlation.compute_correlation(series, min_overlap=20)
+
+    assert result.matrix["A"]["B"] is None
+    assert result.matrix["B"]["A"] is None
+
+
+def test_compute_correlation_zero_variance_pair_recorded_in_warnings() -> None:
+    """CONTRACT: the zero-variance pair is recorded once in the new
+    `zero_variance_warnings` field on `CorrelationResult` (a < b
+    lexicographic, mirroring `insufficient_overlap_warnings`'s convention).
+
+    RED: `CorrelationResult` has no `zero_variance_warnings` field yet ->
+    AttributeError inside this test, not at collection."""
+    dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(25)]
+    xs = [i / 100.0 for i in range(1, 26)]
+    ys = [0.01] * 25
+    series = {"A": list(zip(dates, xs, strict=True)), "B": list(zip(dates, ys, strict=True))}
+
+    result = _correlation.compute_correlation(series, min_overlap=20)
+
+    assert ("A", "B") in result.zero_variance_warnings or (
+        "B",
+        "A",
+    ) in result.zero_variance_warnings
+
+
+def test_compute_correlation_zero_variance_pair_not_in_high_correlation_warnings() -> None:
+    """CONTRACT: an undefined (None) correlation must never ALSO appear in
+    `high_correlation_warnings` — high-correlation flagging is skipped for a
+    zero-variance pair (there is no `r` to threshold against)."""
+    dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(25)]
+    xs = [i / 100.0 for i in range(1, 26)]
+    ys = [0.01] * 25
+    series = {"A": list(zip(dates, xs, strict=True)), "B": list(zip(dates, ys, strict=True))}
+
+    result = _correlation.compute_correlation(series, min_overlap=20, high_corr_threshold=0.75)
+
+    pairs = [(a, b) for (a, b, _r) in result.high_correlation_warnings]
+    assert ("A", "B") not in pairs and ("B", "A") not in pairs
+
+
+def test_compute_correlation_normal_pair_still_computes_float() -> None:
+    """BEHAVIOR (no-regression): a normal (non-zero-variance) pair in the
+    SAME series set as a zero-variance pair still computes a real float —
+    the zero-variance handling must not blanket-null the whole matrix."""
+    dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(25)]
+    xs = [i / 100.0 for i in range(1, 26)]
+    ys = [2 * v for v in xs]  # normal, perfectly correlated
+    zs = [0.01] * 25  # zero variance
+    series = {
+        "A": list(zip(dates, xs, strict=True)),
+        "B": list(zip(dates, ys, strict=True)),
+        "C": list(zip(dates, zs, strict=True)),
+    }
+
+    result = _correlation.compute_correlation(series, min_overlap=20)
+
+    assert result.matrix["A"]["B"] == pytest.approx(1.0, abs=1e-9)
+    assert result.matrix["A"]["C"] is None
+    assert result.matrix["B"]["C"] is None
+
+
+# ---------------------------------------------------------------------------
 # Verb-level tests: through PUBLIC mae.get_correlation_matrix with faked
 # runtime bars (BarSeries fixtures, monkeypatched via string path).
 # ---------------------------------------------------------------------------

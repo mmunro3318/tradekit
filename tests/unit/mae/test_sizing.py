@@ -67,3 +67,39 @@ def test_atr_rejects_zero_atr() -> None:
         )
     # zero ATR would size an infinite position — a data-layer glitch must die
     # here, not at the broker
+
+
+# ---------------------------------------------------------------------------
+# SPRINT-AUDIT-BUNDLE P1 (audit H2, ASSUMPTIONS 167): a non-positive ATR
+# multiplier flips the stop distance sign (or zeroes it) and sizes a
+# wrong-way/infinite position — must raise, never silently size wrong.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("multiplier", [-1.0, 0.0])
+def test_atr_position_rejects_nonpositive_multiplier(multiplier: float) -> None:
+    """CONTRACT: `multiplier <= 0.0` raises ValueError matching "must be
+    positive" — a non-positive ATR multiplier flips the stop distance and
+    sizes a wrong-way position."""
+    with pytest.raises(ValueError, match="must be positive"):
+        atr_position(
+            equity_usd=Decimal("1000"),
+            risk_pct=0.01,
+            atr=Decimal("2.0"),
+            multiplier=multiplier,
+            price=Decimal("100"),
+        )
+
+
+def test_atr_position_still_sizes_with_valid_multiplier() -> None:
+    """BEHAVIOR (no-regression): a valid positive multiplier still sizes —
+    same golden vector as `test_atr_position_golden_vector` above, hand-
+    derived: units = (1000*0.01)/(2.0*2.0) = 10/4 = 2.5."""
+    got = atr_position(
+        equity_usd=Decimal("1000"),
+        risk_pct=0.01,
+        atr=Decimal("2.0"),
+        multiplier=2.0,
+        price=Decimal("100"),
+    )
+    assert got["units"] == Decimal("2.5")

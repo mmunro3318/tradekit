@@ -117,6 +117,31 @@ def test_sma_properties_random_walk() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# SPRINT-AUDIT-BUNDLE P4 (audit L1/L2, ASSUMPTIONS 167): ema() has NO period
+# guard at all (unlike sma's `period < 1` check above) -- a non-positive
+# period silently returns/miscomputes instead of failing loudly.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("period", [0, -1, -5])
+def test_ema_rejects_degenerate_period(period: int) -> None:
+    with pytest.raises(ValueError, match="period must be >= 1"):
+        ema([1.0, 2.0, 3.0], period=period)
+
+
+def test_ema_still_computes_with_valid_period() -> None:
+    """BEHAVIOR (no-regression): hand-derived, period=2, values=[10,12,14].
+    Seed: ema[1] (index period-1=1) = mean(values[0:2]) = (10+12)/2 = 11.
+    k = 2/(period+1) = 2/3.
+    ema[2] = values[2]*k + ema[1]*(1-k) = 14*(2/3) + 11*(1/3) = 39/3 = 13.0.
+    """
+    out = ema([10.0, 12.0, 14.0], period=2)
+    assert out[0] is None
+    assert out[1] == pytest.approx(11.0, rel=1e-9)
+    assert out[2] == pytest.approx(13.0, rel=1e-9)
+
+
 def test_ema_golden_vector() -> None:
     g = _load("ema")
     out = ema(g["input"]["values"], period=20)

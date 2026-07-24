@@ -3074,3 +3074,54 @@ A regime-gate-killed candidate REMAINS in `matches` with empty
 `signal_tags` (preserves the scanner's documented pre-existing CTO call);
 `attrition.killed_by` is the AUTHORITY for survivor counts — consumers
 must not infer survivorship from `len(matches)`.
+
+## SPRINT-AUDIT-BUNDLE Round-28 (CTO, 2026-07-24)
+
+### 165 — ProposedAction.kind closes to the Literal == _MUTATING
+`ProposedAction.kind` is a closed `Literal["submit_order", "cancel",
+"promote", "void"]` == `policy._rules._MUTATING`; every legal kind has >=1
+applicable rule (enforced by an invariant test, `tests/unit/contracts/
+test_execution_kind.py`); unknown kinds are unrepresentable (pydantic
+`ValidationError` at construction). Retires "open set until P2". This makes
+the previously-unenforced "no representable kind escapes all rules"
+invariant true BY CONSTRUCTION — `evaluate_pure`'s `all([])` vacuous-allow
+becomes unreachable, per CTO adjudication A1 (canon D3 rule 6: define
+errors out of existence, no new runtime guard).
+
+### 166 — undefined correlation (zero-variance leg) is None + warning, never 0.0
+A zero-variance leg (Pearson denominator exactly 0) makes `matrix[a][b]`/
+`matrix[b][a]` `None`, records `(a, b)` in `CorrelationResult`'s new
+`zero_variance_warnings` field, and skips high-correlation flagging for
+that pair — mirrors the insufficient-overlap precedent; R-013 consumers
+must treat `None` as "cannot assess", the existing insufficient-overlap
+semantic, never as "measured zero correlation".
+
+### 167 — sizing/indicator numeric-parameter guards raise, never silently wrong
+`mae._sizing.atr_position`'s `multiplier` and `mae._indicators.volatility.
+atr`/`mae._indicators.trend.ema`'s `period` raise `ValueError` (module's
+standard message style: "must be positive" / "period must be >= 1") on a
+non-positive value; no silent wrong-sign or miscomputed output survives.
+
+### ASSUMPTIONS-FLAG (P5, hud/_build.py insufficient_context rationale, audit L3)
+The pin's stated root cause ("the filter matches only `outcome == 'fail'`")
+does not hold against the current code: `RuleHit.outcome` is
+`Literal["pass", "fail", "not_configured"]` (contracts/_execution.py:27) —
+there is no fourth `"insufficient_context"` outcome value; `_insufficient()`
+(policy/_rules.py:48-49) already emits `outcome="fail"` with
+`measured="insufficient_context:{field}"` folded in. `_default_evaluate_
+policy`'s EXISTING filter `hit.outcome == "fail"` therefore already
+includes every insufficient_context hit, and the existing join
+(`f"{hit.rule_id}: {hit.measured} vs {hit.limit}"`) already names the field
+— broadening to `outcome not in ("pass", "not_configured")` is
+behaviorally a no-op given the current 3-value Literal (a strict superset
+that adds no new members). Two readings: (a) the pin is a defensive/
+future-proofing rename with no observable behavior change today — write no
+test, since a "test" that already passes under the OLD code is not a valid
+red; or (b) there is a real repro the audit found that this analysis is
+missing (e.g. a code path that constructs a RuleHit with `outcome="fail"`
+but empty `measured`, or a verdict denied with a `rule_hits` list that
+excludes the insufficient_context hit entirely). No test written for P5
+this batch — CTO adjudication needed on which reading is correct before a
+test can be authored (a test written under reading (a) would be green
+today, i.e. not RED, and would silently pass gate without protecting
+anything).

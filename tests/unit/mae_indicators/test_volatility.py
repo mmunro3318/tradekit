@@ -137,6 +137,35 @@ def test_true_range_constant_price() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# SPRINT-AUDIT-BUNDLE P4 (audit L1, ASSUMPTIONS 167): atr() lacked bollinger's
+# period<1 guard -- a non-positive period silently produces wrong/empty
+# output instead of failing loudly. Mirror of test_bollinger_rejects_
+# degenerate_period below.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("period", [0, -1])
+def test_atr_rejects_degenerate_period(period: int) -> None:
+    with pytest.raises(ValueError, match="period must be >= 1"):
+        atr([10.0, 12.0, 11.0], [9.0, 10.0, 9.0], [9.5, 11.0, 10.0], period=period)
+
+
+def test_atr_still_computes_with_valid_period() -> None:
+    """BEHAVIOR (no-regression): hand-derived, period=2, 3 bars.
+    highs=[10,12,11] lows=[9,10,9] closes=[9.5,11,10].
+    TR[0] = highs[0]-lows[0] = 1.0 (no prior close).
+    TR[1] = max(12-10=2, |12-9.5|=2.5, |10-9.5|=0.5) = 2.5.
+    TR[2] = max(11-9=2, |11-11|=0, |9-11|=2) = 2.0.
+    atr[1] (seed, period-1=1) = mean(TR[0], TR[1]) = (1.0+2.5)/2 = 1.75.
+    atr[2] = (atr[1]*(period-1) + TR[2]) / period = (1.75*1 + 2.0)/2 = 1.875.
+    """
+    out = atr([10.0, 12.0, 11.0], [9.0, 10.0, 9.0], [9.5, 11.0, 10.0], period=2)
+    assert out[0] is None
+    assert out[1] == pytest.approx(1.75, rel=1e-9)
+    assert out[2] == pytest.approx(1.875, rel=1e-9)
+
+
 def test_atr_golden_vector() -> None:
     g = _load("atr")
     out = atr(g["input"]["highs"], g["input"]["lows"], g["input"]["closes"], period=14)
@@ -232,6 +261,16 @@ def test_bollinger_constant_price_collapses_to_mid() -> None:
     assert upper[19] == pytest.approx(100.0, abs=1e-9)
     assert lower[19] == pytest.approx(100.0, abs=1e-9)
 
+
+# ASSUMPTIONS-FLAG (SPRINT-AUDIT-BUNDLE P4/L2): `keltner` takes `ema_period`
+# and `atr_period`, not a single `period` param. It internally calls `_ema`
+# and `atr` (which itself gets a guard this batch); `_ema` (this module's
+# private duplicate of trend.ema, used to avoid an import cycle) has NO
+# period guard of its own. The pin says "check whether keltner takes a
+# period and cover it if so" -- it does not take one directly, and it is
+# ambiguous whether guarding `_ema`/`ema_period`/`atr_period` independently
+# is in this batch's scope or a separate follow-up. FLAGGED, not tested here
+# -- see tests/ASSUMPTIONS.md.
 
 # ---------------------------------------------------------------------------
 # keltner
