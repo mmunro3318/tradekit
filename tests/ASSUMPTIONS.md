@@ -3056,3 +3056,21 @@ stage_kills.
 Scan-log file write failure warns (stderr) and continues; the ledger event
 `ScanAttritionRecorded` carries the summary only (stage_kills,
 killer_filter, tickets, universe) — per-symbol detail lives in the log file.
+
+## FIX-round amendments (CTO, post-review 2026-07-24)
+
+### 163b — attrition_stages seam shape (A-FIX-1)
+`_SetupResult` gains defaulted field `attrition_stages: list[dict] =
+field(default_factory=list)` — the scanner's P3 `stages` for that (symbol,
+timeframe). `_default_scan_setup` populates it from the scan result's
+`attrition` key. `_attrition_entry` SPLICES those stages in place of the
+collapsed `setup` gate (keeping `bars` mapping only when the scanner
+reported none), then appends hud's `sizing`/`policy_verdict`. Existing
+monkeypatched seams keep working via the default.
+
+### 163c — regime-killed matches stay in `matches`; killed_by is the
+survivor-count authority (A-FIX-3)
+A regime-gate-killed candidate REMAINS in `matches` with empty
+`signal_tags` (preserves the scanner's documented pre-existing CTO call);
+`attrition.killed_by` is the AUTHORITY for survivor counts — consumers
+must not infer survivorship from `len(matches)`.
