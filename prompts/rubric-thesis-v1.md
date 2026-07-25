@@ -1,12 +1,13 @@
 # Thesis adversarial-review rubric — v1
 
-> **DRAFT for Mike's approval.** Written by the SPRINT P3 batch D TDD pass
-> to give `tradekit.review._rubric` something concrete to score against and
-> to give `run_review`'s attack/defense prompt something concrete to cite.
-> Nothing below is final: category list, wording, and severity scale are
-> all open to Mike's edit (sprint doc addendum: "rubric-thesis-v1.md shape
-> — draft for his edit"). DESIGN §12.1 is the binding mechanics doc; this
-> file is the CONTENT the mechanics run over.
+> **RATIFIED 2026-07-25** (Mike answered the open questions; CTO adjudicated —
+> see "Adjudication" section at bottom). Originally written by the SPRINT P3
+> batch D TDD pass to give `tradekit.review._rubric` something concrete to
+> score against and to give `run_review`'s attack/defense prompt something
+> concrete to cite. DESIGN §12.1 is the binding mechanics doc; this file is
+> the CONTENT the mechanics run over. One pending migration: the wound
+> severity scale (see Adjudication #2) — until that batch lands, `_rubric.py`
+> continues to pin int 1..5 and this schema block remains the live contract.
 
 ## Purpose
 
@@ -56,7 +57,37 @@ covers?" One exchange, `category: "invalidation_distinctness"` reused,
 single unresolved attack (severity >= threshold) as a refusal, same
 tally path as `run_review`.
 
-## Open questions for Mike
+## Adjudication (2026-07-25, CTO — Mike's answers preserved verbatim below)
+
+1. **Categories: keep all five, unchanged.** Mike's answer pins a scope rule,
+   not a category merge: his core portfolio and the engine's prop/AI account
+   run on permanently separate theses (his 10yr blockchain-as-AI-infra thesis
+   vs the engine's market-behavior/statistical edges). Therefore
+   `correlation_awareness` is scoped to the ENGINE'S OWN open positions only
+   (the R-013 snapshot) — reviewer attacks citing Mike's personal holdings are
+   out of rubric scope by definition. `correlation_awareness` is NOT folded
+   into a "portfolio context" category; there is no shared portfolio context
+   to fold it into.
+
+2. **Wound scale ADOPTED (minor/major/fatal), migration pending.** Severity
+   becomes the enum `"minor" | "major" | "fatal"`; `fatal` replaces the old
+   "severity >= 4" blocking class everywhere the tally logic reads severity.
+   Mapping for any historical exchanges: 1-2→minor, 3→major, 4-5→fatal.
+   This changes the exchange JSON schema pinned by `_rubric.py`, so it lands
+   as a proper spec'd batch (red→green→gate→review), not a doc edit. Until
+   that batch merges, the int 1..5 schema above stays live.
+
+3. **Threshold dial change ABORTED (Mike, 2026-07-25).** Mike's earlier
+   impulse to raise `unresolved_attack_threshold` to 2 was, per his own
+   follow-up, based on feeling rather than data — the change is withdrawn.
+   `unresolved_attack_threshold` stays at its default of 1: a single
+   unresolved fatal attack blocks approval. The two ideas inside the original
+   answer — per-category thresholds, and a "resolve-pass on unresolved
+   attacks when no other thesis stands" fallback — are PARKED as candidates,
+   to be revisited only with live review data showing the flat threshold
+   misbehaving. No policy dial moves; the policy hash is untouched.
+
+## Original open questions & Mike's answers (historical record)
 
 1. Category list/order — is five the right number, or should
    `correlation_awareness` be folded into a general "portfolio context"

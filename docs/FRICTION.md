@@ -6,6 +6,16 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-07-25 — worktree uv env lacks pywinauto extra -> mypy false-red `worktree,uv,mypy,env`
+- **Symptom:** gate mypy in .claude/worktrees/* reports import-not-found for pywinauto (bridge/_pywinauto.py) while main checkout is clean
+- **Cause:** uv run in a fresh worktree resolves an env without the windows-bridge extra installed in the main .venv
+- **Solution:** trust main-checkout gate for mypy verdicts on worktree branches, or uv sync --all-extras in the worktree before gating
+
+## 2026-07-25 — tk-bootstrap UnicodeEncodeError on Windows cp1252 console `tooling,windows,encoding`
+- **Symptom:** bootstrap.py exit 1 printing dev-log section containing U+2192 arrow; orientation output truncated
+- **Cause:** print() to cp1252 stdout without utf-8 reconfigure; dev-log uses unicode arrows
+- **Solution:** workaround: read dev-log/handoff directly; fix: add sys.stdout.reconfigure(encoding='utf-8', errors='replace') at top of bootstrap.py
+
 ## 2026-07-23 — Kraken Prop UI: OSO/bracket order flow does not work as OPERATIONS.md describes `ops,kraken,money-path`
 - **Symptom:** Two live attempts tonight (2026-07-23) to place NEAR/USD as an OSO Bracketed Limit Order on the Kraken Prop account both failed to bracket; falling back to a plain limit entry + manual SL/TP resulted in stop-loss/take-profit orders sized 6036.6 and 4259.7 units against a 21.8-unit position (unexplained qty mismatch, likely UI/leverage unit confusion), which had to be flattened at market -- realized loss ~$36.43, account $5000.00 -> $4963.57
 - **Cause:** Unconfirmed -- either Kraken Prop's order form does not support the bracket flow OPERATIONS.md step 3 assumes, or the human operator's manual SL/TP entry hit a units mismatch (base qty vs notional/contracts) specific to the Prop margin UI
