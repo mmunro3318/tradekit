@@ -2,6 +2,30 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-25c (Fable — AUDIT-UX-1 reading guides; formulas verified; GitNexus removed)
+
+- **AUDIT-UX-1 shipped** (red 65d41f9 → green 7f1b4ee, GATE green): every GATE
+  line in the audit log now followed by a `reading:` value-range guide (RSI
+  0-100/70/30, MACD sign>magnitude, vr anchored 1.0, ATR pctile 0-100
+  self-relative, BB ~2σ outlier, bars warm-up floor) — rendered even for
+  SKIPPED gates. Mike's direct UX feedback on the exhaustive output.
+- **Formulas independently VERIFIED** (background agent vs published refs):
+  RSI vs StockCharts spreadsheet (max diff 0.0049 = ref rounding), ATR +
+  Bollinger + MACD vs Tulip tables (≤0.005), volume_ratio hand-checked. All
+  conventions (Wilder seeds, SMA-seeded EMA, population stdev) = mainstream
+  standards. Zero code changes needed. Noted in SCAN-AUDIT-LOG.md.
+- **GitNexus FULLY REMOVED** (Mike: never worked): MCP server entry out of
+  ~/.claude.json (backup .bak-gitnexus-removal), Pre/PostToolUse hooks out of
+  ~/.claude/settings.json, hook scripts + .claude/skills/gitnexus/ +
+  .gitnexus/ deleted, CLAUDE.md + AGENTS.md blocks stripped. FRICTION FTS
+  entry now moot. Alternatives researched (agent): top pick
+  isaacphi/mcp-language-server (pyright), runner-up Serena; null option
+  (Grep+tests+review) judged legitimate for this repo size — no adoption
+  without Mike.
+- Clarified for Mike: SKIPPED(no filter set)/n/a = filter not configured in
+  this scan (hud default = macd_signal+volume_spike only), NOT unimplemented —
+  all 7 gates are implemented.
+
 ## 2026-07-25b (Fable — SCAN-AUDIT-LOG shipped; rubric RATIFIED; keltner LOW closed)
 
 - **Rubric adjudicated + RATIFIED** (prompts/rubric-thesis-v1.md): 5 categories

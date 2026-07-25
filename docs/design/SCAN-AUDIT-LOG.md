@@ -119,6 +119,18 @@ stdout (dev-time console + saved reviewable file — the D8 split).
 - HUD changes limited to the `--audit` flag passthrough (T-MTF-4 owns the
   bigger hud refactor).
 
+## Follow-up (AUDIT-UX-1, Mike's UX feedback — 2026-07-25) — DONE same day
+
+Every GATE line is now followed by a `reading:` line — a static plain-English
+value-range guide per gate (RSI 0-100/70/30 zones, MACD sign-not-magnitude,
+volume_ratio anchored at 1.0, ATR percentile self-relative 0-100, Bollinger
+~2-stdev outlier semantics, bars warm-up floor). Rendered for every gate
+including SKIPPED ones, so each dial is learnable before it is configured.
+Formula correctness independently verified same day against published
+references (StockCharts RSI spreadsheet, Tulip ATR/BBands/MACD tables): all
+five indicators MATCH within reference rounding; conventions (Wilder seeds,
+SMA-seeded EMA, population stdev) are the mainstream standards.
+
 ## Follow-up (T-AUDIT-2, review round F4 — 2026-07-25) — DONE same day
 
 Merged @ 476fd6d: `scan_markets(..., audit=)` passthrough, `tk hud --audit
