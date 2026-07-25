@@ -18,6 +18,7 @@ from typing import Any
 from tradekit.contracts import StrategyMetrics, TradeRecord
 from tradekit.mae import _correlation, _metrics, _regime, _runtime, _scanner, _sizing
 from tradekit.mae._indicators import volatility
+from tradekit.mae._scan_trace import ScanAuditMode
 from tradekit.mae._vocab import BBPosition, MacdSignal
 
 
@@ -27,14 +28,19 @@ def scan_markets(
     filters: dict[str, Any],
     symbols: list[str] | None = None,
     regime_gate: bool = True,
+    *,
+    audit: ScanAuditMode = "off",
 ) -> dict[str, Any]:
     """Screen a universe for setups matching TA filters (canonical §3).
 
     P1C batch C: thin delegate to `_scanner.scan` — see that module's
     docstring for the full fetch -> indicator -> filter -> regime-gate
     pipeline, filter semantics, and output-shape pins (internals never
-    re-exported here per DESIGN §1, same shape as `get_regime`)."""
-    return _scanner.scan(asset_class, timeframes, filters, symbols, regime_gate)
+    re-exported here per DESIGN §1, same shape as `get_regime`).
+
+    `audit` (T-AUDIT-2): passed through untouched to `_scanner.scan` — see
+    that function's docstring for the "off"/"on"/"exhaustive" contract."""
+    return _scanner.scan(asset_class, timeframes, filters, symbols, regime_gate, audit=audit)
 
 
 def get_regime(symbol: str, lookback_days: int = 90, n_states: int = 3) -> dict[str, Any]:
