@@ -130,6 +130,8 @@ def _ema(values: Sequence[float], period: int) -> list[float | None]:
     to avoid a volatility<->trend import cycle: `trend.supertrend` depends
     on `volatility.atr`, so `volatility` cannot depend back on `trend`.
     """
+    if period < 1:
+        raise ValueError(f"period must be >= 1, got {period}")
     n = len(values)
     out: list[float | None] = [None] * n
     if n < period:
