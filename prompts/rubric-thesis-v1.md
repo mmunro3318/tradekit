@@ -61,9 +61,12 @@ tally path as `run_review`.
 1. Category list/order — is five the right number, or should
    `correlation_awareness` be folded into a general "portfolio context"
    category?
+> [MIKE] Let's keep my core portfolio, and this prop account (or AI's trading account)  separate, because we'll always trade on different theseis (i had the tradekit engine on market behavior and statistical laws, and i stick to my 10+ long-horizon thesis on blackchain as AI infrastructure, and I've been right.)
 2. Severity scale — 1-5 chosen to match `RuleHit`-adjacent conventions
    elsewhere in the codebase; a 3-point scale (minor/major/fatal) might be
    easier for a reviewer model to apply consistently.
+> [MIKE] I agree -- I really like the wound scale (minor/major/fatal) and would like to adopt it into our workflow, if it would be easy. . 
 3. Should `unresolved_attack_threshold` be per-category (e.g. any single
    `ev_arithmetic` severity-5 blocks regardless of other categories) rather
    than the current flat count across all categories?
+> [MIKE] Hmmm... My impulse is to say "yes" -- leave the unresolved_attack_threshold to be at least two categories to block. Perhaps we raise the threshold to two, so two unresolveeds are definitely fata... but we have to try. I think if no other theses are standing, we then do a quick pass for the unresolved theses, and spend extra time on analysis to resolve them (why not, there's no other good trades wiith in our ystem.)

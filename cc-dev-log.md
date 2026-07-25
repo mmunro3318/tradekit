@@ -2,6 +2,24 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-25 (Fable — attrition telemetry PROVEN LIVE; P4 unblocked)
+
+- Mike ran `tk hud --equity 4963.57` against prop. First real attrition log
+  (data/scans/2026-07-25/scan-020850.log): `killer filter: macd_signal
+  (11/11)` — ALL 11 pairs negative 4h MACD hist. S1 silence is HONEST (bearish
+  universe, momentum-long finds nothing), NOT a bug. TICKET-001 fix confirmed
+  working live. The day-one question is answered.
+- **P4 UNBLOCKED**: Mike rotated both API key pairs, funded $50 live, answered
+  rubric-thesis-v1 open Qs ([MIKE] tags). Needs CTO next session: adjudicate
+  answers into the rubric (wound scale minor/major/fatal ADOPTED;
+  unresolved_attack_threshold→2 = a POLICY DIAL change, money-path batch), then
+  promotion→3 live trades (MVP done-gate).
+- MTF-SCAN T-MTF-1 (limits.py retention pins) dispatched to isolated worktree
+  — CTO review+merge pending. keltner/_ema guard: Mike's own worktree.
+- Live-trade counsel: no valid S1 setup tonight (all-bearish); day-5 clock
+  reset by 7/23 NEAR trade; don't force one. Seed:
+  docs/handoff/HANDOFF-2026-07-25-attrition-proven-p4-unblocked.md.
+
 ## 2026-07-24 (Fable — SPRINT-AUDIT-BUNDLE SHIPPED; money-path fail-open dead)
 
 - Batch 2 through the cycle: red 794e9e1 (14 tests; test-writer CAUGHT audit

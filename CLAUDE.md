@@ -107,7 +107,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-S1 silence ROOT-CAUSED (macd enum bug, `hud/_build.py` "bullish" vs scanner "bullish_cross" → silent reject-all). Active seed: docs/handoff/HANDOFF-2026-07-23-evening-s1-rootcaused.md. FIRST BATCH: docs/tickets/TICKET-001-scan-attrition-telemetry.md (enum fix + loud-on-bad-value + attrition telemetry; watch test_scan_markets_verb.py:490 codifying the bug). Two audits landed/landing: docs/reviews/test-audit-2026-07-23.md (done) + docs/reviews/gating-filter-audit-2026-07-23.md (swarm, may still be running). Then MTF-SCAN + S2.
+S1 silence RESOLVED — proven HONEST via live attrition log (killer macd_signal 11/11, bearish universe; TICKET-001 + audit bundle SHIPPED at f1b10bd). P4 now UNBLOCKED (Mike rotated keys, funded $50, answered rubric [MIKE] tags). Active seed: docs/handoff/HANDOFF-2026-07-25-attrition-proven-p4-unblocked.md. Next: (a) MTF-SCAN T-MTF-1 in worktree needs review+merge, then T-MTF-2..4 (docs/design/MTF-SCAN.md); (b) adjudicate rubric answers + spec unresolved_attack_threshold→2 dial change; (c) P4 promotion→3 live trades. Money-path discipline binding.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
