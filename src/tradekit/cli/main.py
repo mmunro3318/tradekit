@@ -687,6 +687,17 @@ def hud_scan(
     )
 
     captured_at = mae_runtime.clock()
+
+    # Snapshot pre-run audit logs so the tee below only emits THIS run's
+    # trace — a same-day earlier run's audit-*.log files must not re-tee.
+    pre_run_audit_logs: set[Path] = set()
+    if audit_mode != "off":
+        from tradekit.mae import _scan_trace
+
+        date_dir = _scan_trace._OUTPUT_ROOT / captured_at.strftime("%Y-%m-%d")
+        if date_dir.is_dir():
+            pre_run_audit_logs = set(date_dir.glob("audit-*.log"))
+
     state = hud.build_state(
         symbol_list, captured_at=captured_at, equity_usd=Decimal(equity), audit=audit_mode
     )
@@ -724,7 +735,7 @@ def hud_scan(
 
         date_dir = _scan_trace._OUTPUT_ROOT / captured_at.strftime("%Y-%m-%d")
         if date_dir.is_dir():
-            for log_path in sorted(date_dir.glob("audit-*.log")):
+            for log_path in sorted(set(date_dir.glob("audit-*.log")) - pre_run_audit_logs):
                 _tee_audit_log(log_path.read_text(encoding="utf-8"))
 
     if open_browser:
