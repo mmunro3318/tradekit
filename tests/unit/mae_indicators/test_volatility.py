@@ -271,10 +271,47 @@ def test_bollinger_constant_price_collapses_to_mid() -> None:
 # ambiguous whether guarding `_ema`/`ema_period`/`atr_period` independently
 # is in this batch's scope or a separate follow-up. FLAGGED, not tested here
 # -- see tests/ASSUMPTIONS.md.
+#
+# ADJUDICATED 2026-07-25 (CTO, tests/ASSUMPTIONS.md #168): in scope. The
+# guard lives in the private `_ema` helper (volatility.py ~line 127);
+# `keltner` delegates to it and must surface the same loud ValueError for a
+# degenerate `ema_period`. `atr_period` is already covered by `atr`'s own
+# guard (entry 167) -- `keltner` just has to not swallow it. Tests below
+# assert ONLY through the public `keltner()` surface, never importing or
+# calling `_ema` directly (tests protect behavior, not implementation).
 
 # ---------------------------------------------------------------------------
 # keltner
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ema_period", [0, -1, -5])
+def test_keltner_rejects_degenerate_ema_period(ema_period: int) -> None:
+    """BEHAVIOR (ASSUMPTIONS #168): a degenerate `ema_period` must raise
+    loudly through the public `keltner()` surface. Current buggy behavior
+    this pins against: ema_period=0 raises ZeroDivisionError inside the
+    private `_ema` helper (sum(values[:0]) / 0); negative ema_period does
+    not raise at all -- it silently miscomputes (e.g. `values[:-1]` slices
+    off the last input instead of failing)."""
+    with pytest.raises(ValueError, match="period must be >= 1, got"):
+        keltner(
+            [10.0, 12.0, 11.0], [9.0, 10.0, 9.0], [9.5, 11.0, 10.0],
+            ema_period=ema_period, atr_period=2, mult=2.0,
+        )
+
+
+@pytest.mark.parametrize("atr_period", [0, -1, -5])
+def test_keltner_rejects_degenerate_atr_period(atr_period: int) -> None:
+    """BEHAVIOR (ASSUMPTIONS #168): `atr_period` is already covered by
+    `atr`'s own guard (entry 167) -- this pins that `keltner` does not
+    swallow it. May already be green today for this parametrization only
+    (that is acceptable per the CTO pin); it stays here as a permanent
+    behavior pin through the public surface."""
+    with pytest.raises(ValueError, match="period must be >= 1, got"):
+        keltner(
+            [10.0, 12.0, 11.0], [9.0, 10.0, 9.0], [9.5, 11.0, 10.0],
+            ema_period=2, atr_period=atr_period, mult=2.0,
+        )
 
 
 def test_keltner_golden_vector() -> None:
