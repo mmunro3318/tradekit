@@ -3125,3 +3125,17 @@ this batch — CTO adjudication needed on which reading is correct before a
 test can be authored (a test written under reading (a) would be green
 today, i.e. not RED, and would silently pass gate without protecting
 anything).
+
+### 168 — keltner/_ema degenerate-period guard (resolves the P4/L2 FLAGGED
+comment in tests/unit/mae_indicators/test_volatility.py ~lines 265-273)
+`mae._indicators.volatility.keltner`'s `ema_period < 1` MUST raise
+`ValueError` with `f"period must be >= 1, got {P}"` (same convention as
+`atr`/`ema`/`bollinger`'s guards, entry 167). The guard lives in the
+private `_ema` helper (volatility.py ~line 127); `keltner` delegates to it
+rather than duplicating the check. `atr_period < 1` is already covered by
+`atr`'s own guard (entry 167) — `keltner` just must not swallow it; that
+parametrization may already be green. Current pre-fix behavior: ema_period=0
+raises ZeroDivisionError (sum of an empty slice divided by zero);
+negative ema_period does not raise at all and silently miscomputes.
+Tests assert only through the public `keltner()` surface, never importing
+`_ema` directly.
