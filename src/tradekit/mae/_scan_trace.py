@@ -203,10 +203,11 @@ class ScanTrace:
         regime_gate: bool,
     ) -> None:
         self._ts = ts
+        self._regime_gate = regime_gate
         self._lines: list[str] = [
             f"SCAN AUDIT LOG | scan_ts={ts.isoformat()} | mode={mode} | "
             f"asset_class={asset_class}",
-            f"  universe: {len(symbols)} symbols",
+            f"  universe: {symbols}",
             f"  timeframes: {timeframes}",
             f"  filters: {filters}",
             f"  regime_gate: {regime_gate}",
@@ -260,7 +261,17 @@ class ScanTrace:
             spec = GATE_SPECS[name]
             stage = stage_by_name.get(name)
             if stage is None:
-                observed, threshold, verdict = "n/a", "n/a", "SKIPPED(no filter set)"
+                if name == "regime_gate" and self._regime_gate:
+                    # regime_gate is active but this candidate never reached
+                    # it — it was killed by an earlier filter (review round
+                    # item 6).
+                    observed, threshold, verdict = (
+                        "n/a",
+                        "n/a",
+                        "SKIPPED(not reached — candidate killed earlier)",
+                    )
+                else:
+                    observed, threshold, verdict = "n/a", "n/a", "SKIPPED(no filter set)"
             else:
                 observed = stage["observed"]
                 threshold = _threshold_str(name, filters)

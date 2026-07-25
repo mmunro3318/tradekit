@@ -449,6 +449,33 @@ def test_overbought_rsi_symbol_appears_in_matches(monkeypatch) -> None:
     assert "overbought" in matches[0]["signal_tags"]
 
 
+def test_rsi_symbol_passing_both_bounds_gets_both_tags(monkeypatch) -> None:
+    """REGRESSION (SCAN-AUDIT-LOG review round item 1): the pre-refactor
+    scanner emitted BOTH tags when a candidate passes both `rsi_max` AND
+    `rsi_min` (old code: `if "rsi_max" in filters -> append "oversold"`;
+    `if "rsi_min" in filters -> append "overbought"`, independently). The
+    refactor collapsed this to a single tag. RSI=0.0 (the oversold fixture,
+    see module docstring) passes rsi_max=35 (0.0 <= 35) AND rsi_min=0
+    (0.0 >= 0) simultaneously — both tags must be present."""
+    series = _series(_RSI_OVERSOLD_CLOSES)
+    _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = _scanner.scan(
+        asset_class="crypto",
+        timeframes=["1d"],
+        filters={"rsi_max": 35, "rsi_min": 0},
+        symbols=["BTC/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["rsi"] == pytest.approx(0.0)
+    assert "oversold" in matches[0]["signal_tags"]
+    assert "overbought" in matches[0]["signal_tags"]
+
+
 def test_macd_signal_bullish_cross_symbol_appears_in_matches(monkeypatch) -> None:
     series = _series(_MACD_BULLISH_CLOSES)
     _install_bars_by_symbol(monkeypatch, {"BTC/USD": series})

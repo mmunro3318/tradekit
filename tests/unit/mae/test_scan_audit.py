@@ -226,6 +226,15 @@ class TestB2AuditOn:
         assert "volume_spike" in log_text
         assert "regime_gate" in log_text.lower()
 
+        # STRENGTHENED (review round item 3): the header itself must name
+        # the full universe as passed, not just somewhere later in the log
+        # (e.g. inside a per-symbol section).
+        header = log_text.split("--- SYMBOL", 1)[0]
+        assert _KILLER_SYMBOL in header, f"expected {_KILLER_SYMBOL} in header, got: {header!r}"
+        assert _SURVIVOR_SYMBOL in header, (
+            f"expected {_SURVIVOR_SYMBOL} in header, got: {header!r}"
+        )
+
     def test_on_mode_sidecar_csv_row_count_equals_bars_fed(self, monkeypatch, tmp_path):
         """CONTRACT: "Full dataset always lands in the sidecar CSV so every
         calculation is replicable" — row count (excluding header) must equal
@@ -325,6 +334,46 @@ class TestB2AuditOn:
             f"{gate_names_seen - _GATE_NAME_UNIVERSE}"
         )
 
+    def test_on_mode_slash_symbol_sidecar_flat_file_raw_symbol_in_log(
+        self, monkeypatch, tmp_path
+    ):
+        """REGRESSION (review round item 5, ratified/ASSUMPTIONS-FLAG 2): a
+        symbol containing "/" (e.g. "NEAR/USD") must sanitize to a flat
+        sidecar filename ("NEAR_USD-<tf>.csv"), never a nested "NEAR"
+        directory — and the log body must still show the raw, unsanitized
+        symbol."""
+        symbol = "NEAR/USD"
+        series_by_symbol = {
+            symbol: _series(
+                symbol,
+                _MACD_BULLISH_CLOSES,
+                [100.0] * (len(_MACD_BULLISH_CLOSES) - 1) + [1000.0],
+            )
+        }
+
+        def _fake(sym: str, timeframe: str, lookback_days: int) -> BarSeries:
+            return series_by_symbol[sym]
+
+        monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake)
+        monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _FIXED_CLOCK)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scanner.scan(
+            asset_class="crypto",
+            timeframes=[_TIMEFRAME],
+            filters=_FILTERS,
+            symbols=[symbol],
+            regime_gate=False,
+            audit="on",
+        )
+
+        sidecar_dir = root / _EXPECTED_DATE_DIR / _EXPECTED_LOG_STEM
+        assert (sidecar_dir / f"NEAR_USD-{_TIMEFRAME}.csv").is_file()
+        assert not (sidecar_dir / "NEAR").exists(), "must not create a nested 'NEAR' directory"
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        assert "NEAR/USD" in log_text, "the raw, unsanitized symbol must appear in the log body"
+
 
 class TestB3AuditExhaustive:
     def test_exhaustive_mode_matches_killed_by_warnings_identical_to_on(
@@ -359,10 +408,11 @@ class TestB3AuditExhaustive:
         _scan(audit="exhaustive")
 
         log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
-        killer_section = log_text.split(_KILLER_SYMBOL, 1)[1]
-        next_symbol_idx = killer_section.find(_SURVIVOR_SYMBOL)
-        if next_symbol_idx != -1:
-            killer_section = killer_section[:next_symbol_idx]
+        killer_marker = f"--- SYMBOL {_KILLER_SYMBOL} TIMEFRAME"
+        killer_section = log_text.split(killer_marker, 1)[1]
+        next_section_idx = killer_section.find("--- SYMBOL ")
+        if next_section_idx != -1:
+            killer_section = killer_section[:next_section_idx]
         assert "GATE macd_signal" in killer_section, "the real killing gate must have a verdict"
         assert "GATE volume_spike" in killer_section, (
             "exhaustive mode must ALSO evaluate volume_spike for the killer, "
@@ -382,10 +432,11 @@ class TestB3AuditExhaustive:
         _scan(audit="exhaustive")
 
         log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
-        killer_section = log_text.split(_KILLER_SYMBOL, 1)[1]
-        next_symbol_idx = killer_section.find(_SURVIVOR_SYMBOL)
-        if next_symbol_idx != -1:
-            killer_section = killer_section[:next_symbol_idx]
+        killer_marker = f"--- SYMBOL {_KILLER_SYMBOL} TIMEFRAME"
+        killer_section = log_text.split(killer_marker, 1)[1]
+        next_section_idx = killer_section.find("--- SYMBOL ")
+        if next_section_idx != -1:
+            killer_section = killer_section[:next_section_idx]
         volume_spike_block = killer_section.split("GATE volume_spike", 1)[1]
         gate_block_end = volume_spike_block.find("GATE ")
         if gate_block_end != -1:

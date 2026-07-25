@@ -328,16 +328,22 @@ def _evaluate_symbol_timeframe(
     tags: list[str] = []
     killed_by: str | None = None
 
-    def _check_rsi() -> tuple[bool, str, str | None]:
+    def _check_rsi() -> tuple[bool, str, list[str]]:
         last_rsi = values["rsi"]
         candidate["rsi"] = last_rsi
         observed = f"rsi={last_rsi}"
         if "rsi_max" in filters and last_rsi > filters["rsi_max"]:
-            return False, observed, None
+            return False, observed, []
         if "rsi_min" in filters and last_rsi < filters["rsi_min"]:
-            return False, observed, None
-        tag = "oversold" if "rsi_max" in filters else "overbought"
-        return True, observed, tag
+            return False, observed, []
+        # Restore pre-refactor dual-tag semantics: BOTH tags fire when both
+        # bounds are set and both pass (review round item 1).
+        rsi_tags: list[str] = []
+        if "rsi_max" in filters:
+            rsi_tags.append("oversold")
+        if "rsi_min" in filters:
+            rsi_tags.append("overbought")
+        return True, observed, rsi_tags
 
     def _check_macd() -> tuple[bool, str, str | None]:
         last_hist = values["macd_hist"]
@@ -404,7 +410,10 @@ def _evaluate_symbol_timeframe(
         stages.append(stage)
         if ok:
             if killed_by is None and tag is not None:
-                tags.append(tag)
+                if isinstance(tag, list):
+                    tags.extend(tag)
+                else:
+                    tags.append(tag)
         elif killed_by is None:
             killed_by = name
 
@@ -562,7 +571,11 @@ def scan(
             )
 
     result = {
-        "scan_ts": ts.isoformat(),
+        # Reverts to pre-refactor semantics (review round item 4): scan_ts
+        # is read HERE, at result assembly (end of scan), not the
+        # start-captured `ts` — which remains reserved for audit trace
+        # naming/header only.
+        "scan_ts": _runtime.clock().isoformat(),
         "regime_context": regime_context,
         "matches": matches,
         "warnings": warnings,
