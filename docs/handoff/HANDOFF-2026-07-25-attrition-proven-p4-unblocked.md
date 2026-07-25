@@ -45,13 +45,15 @@ NEEDS CTO ACTION next session:
    + two-man); enabling it is a deliberate CTO+Mike step.
 
 ## In flight
-- **MTF-SCAN T-MTF-1** dispatched to an ISOLATED WORKTREE (agent
-  abca0deb9f1506d5b): the `mae/_data/limits.py` retention-pin table
-  {"15m":6,"1h":25,"4h":90,"1d":365}, no money-path, red→green in-worktree.
-  STAYS in worktree for CTO review + merge — do not assume merged. Then
-  T-MTF-2 (scan_confluence verb) → T-MTF-3 (strategy registry + S1 migrated)
-  → T-MTF-4 (hud registry walk). Strict order; only T-MTF-4 touches hud.
-  Authority: docs/design/MTF-SCAN.md (delegation-ready, zero open Qs).
+- **MTF-SCAN T-MTF-1 MERGED to main** (`mae/_data/limits.py` retention-pin
+  table {"15m":6,"1h":25,"4h":90,"1d":365}) — CTO-reviewed, gate green @ 87cc30e,
+  worktree removed. NEXT: T-MTF-2 (`scan_confluence` verb — reuses
+  `_evaluate_symbol_timeframe`, AND-composes legs) → T-MTF-3 (strategy registry
+  + S1 migrated, behavior-identical, regression-pinned by existing hud tests) →
+  T-MTF-4 (hud scan_setup → registry walk). Strict order; only T-MTF-4 touches
+  hud; none touch money-path. Authority: docs/design/MTF-SCAN.md (zero open Qs).
+  Note: T-MTF-2 should rewire scanner's `_SCAN_LOOKBACK_DAYS=90` (mae/_scanner.py)
+  to consume the new table (T-MTF-1 deliberately left it in place).
 - **keltner/_ema period guard** — Mike running the task-chip fix in his own
   worktree (audit bundle's one deferred LOW). Don't double-work it.
 
