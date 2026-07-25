@@ -460,3 +460,78 @@ class TestB4AuditBogusValue:
 
         with pytest.raises(ValueError, match="bogus"):
             _scan(audit="bogus")
+
+
+class TestGateReadingGuide:
+    """AUDIT-UX-1 (Mike, 2026-07-25): every GATE block carries a `reading:`
+    line — a plain-English value-range guide (what range the number lives
+    in, what high/low/zero means, what a passing value looks like) so the
+    log is self-teaching. Rendered for EVERY gate, including SKIPPED ones,
+    so the dial is learnable before a filter is ever configured."""
+
+    def test_every_gate_line_is_followed_by_a_reading_line(self, monkeypatch, tmp_path):
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        lines = log_text.splitlines()
+        gate_indices = [
+            i for i, line in enumerate(lines) if line.strip().startswith("GATE ")
+        ]
+        assert gate_indices, "expected GATE lines in the audit log"
+        for i in gate_indices:
+            assert lines[i + 1].strip().startswith("reading:"), (
+                f"GATE line {lines[i]!r} must be immediately followed by a "
+                f"`reading:` guide line; got {lines[i + 1]!r}"
+            )
+
+    def test_reading_lines_state_concrete_ranges_for_bounded_indicators(
+        self, monkeypatch, tmp_path
+    ):
+        """The rsi guide must name the 0-100 bound and the classic 70/30
+        extremity zones (never negative); the volume_spike guide must anchor
+        1.0 as 'average'; the atr_percentile guide must name 0-100. These
+        are the bounded dials a reader can sanity-check instantly."""
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        lines = log_text.splitlines()
+
+        def reading_for(gate: str) -> str:
+            for i, line in enumerate(lines):
+                if line.strip().startswith(f"GATE {gate} "):
+                    return lines[i + 1]
+            raise AssertionError(f"no GATE {gate} line found")
+
+        rsi_reading = reading_for("rsi")
+        assert "0" in rsi_reading and "100" in rsi_reading, rsi_reading
+        assert "70" in rsi_reading and "30" in rsi_reading, rsi_reading
+        assert "1.0" in reading_for("volume_spike"), "volume_spike guide must anchor 1.0"
+        atr_reading = reading_for("atr_percentile")
+        assert "0" in atr_reading and "100" in atr_reading, atr_reading
+
+    def test_macd_reading_explains_sign_semantics(self, monkeypatch, tmp_path):
+        """MACD histogram is UNBOUNDED and in price units — the guide must
+        say sign is what matters (>0 bullish, <0 bearish) so a reader never
+        tries to interpret its magnitude against a fixed scale."""
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        lines = log_text.splitlines()
+        macd_reading = next(
+            lines[i + 1]
+            for i, line in enumerate(lines)
+            if line.strip().startswith("GATE macd_signal ")
+        )
+        assert "bullish" in macd_reading and "bearish" in macd_reading, macd_reading
+        assert ">0" in macd_reading or "> 0" in macd_reading or "positive" in (
+            macd_reading
+        ), macd_reading
