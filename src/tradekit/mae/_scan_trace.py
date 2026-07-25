@@ -52,6 +52,11 @@ class GateSpec:
     check: str
     why: str
     terminal: bool
+    reading: str
+    """Plain-English value-range guide (AUDIT-UX-1): what range the observed
+    number lives in, what high/low/zero means, and what a passing value looks
+    like — rendered as its own `reading:` line under every GATE line
+    (including SKIPPED ones) so the log is self-teaching."""
 
 
 # Pipeline order (matches `_scanner`'s evaluation order: bars first, then
@@ -63,6 +68,11 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="last non-None indicator value present in the fetched window",
         why="a match built on a fabricated or None value is worse than no match",
         terminal=True,
+        reading=(
+            "count is the fetched bar total; it must comfortably exceed the "
+            "longest indicator warm-up (~35 bars for MACD 12/26/9) — hundreds "
+            "is healthy, anything near the warm-up floor risks None values"
+        ),
     ),
     "rsi": GateSpec(
         name="rsi",
@@ -70,6 +80,12 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="last non-None RSI(14) vs rsi_max/rsi_min threshold",
         why="screens for over-extended momentum before entry",
         terminal=True,
+        reading=(
+            "RSI is bounded 0-100, never negative; 50 is the neutral midline. "
+            ">70 = overbought (stretched up), <30 = oversold (stretched down). "
+            "A filter rsi_max=30 hunts oversold bounces; rsi_min=70 hunts "
+            "overbought fades. 40-60 is no-signal territory"
+        ),
     ),
     "macd_signal": GateSpec(
         name="macd_signal",
@@ -77,6 +93,13 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="last non-None MACD histogram sign vs bullish_cross/bearish_cross",
         why="confirms trend direction agrees with the requested signal",
         terminal=True,
+        reading=(
+            "histogram is UNBOUNDED and in price units — sign is what matters, "
+            "not magnitude: >0 = bullish (MACD line above its signal line), "
+            "<0 = bearish. Near zero = the lines are about to cross (momentum "
+            "flip imminent). Judge magnitude only against the same symbol's "
+            "recent histogram values, never across symbols"
+        ),
     ),
     "bb_position": GateSpec(
         name="bb_position",
@@ -84,6 +107,13 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="last close vs Bollinger(20,2) upper/lower bands",
         why="confirms price sits at the requested band location",
         terminal=True,
+        reading=(
+            "position is categorical: below_lower = price stretched ~2 stdevs "
+            "under its 20-bar mean (statistically cheap), above_upper = "
+            "stretched ~2 stdevs over (statistically rich), inside = normal. "
+            "~95% of closes sit inside the bands, so a band touch is a genuine "
+            "outlier event"
+        ),
     ),
     "volume_spike": GateSpec(
         name="volume_spike",
@@ -91,6 +121,12 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="last non-None volume_ratio(20) vs threshold",
         why="confirms the move is backed by real volume, not noise",
         terminal=True,
+        reading=(
+            "vr is a ratio anchored at 1.0 = exactly the 20-bar average volume; "
+            "always positive. <1.0 = quieter than usual (0.25 = a quarter of "
+            "normal), 1.5 = 50% above average (the usual confirmation bar), "
+            ">2-3 = strong spike. Passing needs vr >= threshold on the LAST bar"
+        ),
     ),
     "atr_percentile": GateSpec(
         name="atr_percentile",
@@ -98,6 +134,13 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="ATR(14) <=-rank percentile within the fetched window vs atr_percentile_min",
         why="avoids low-volatility chop where setups tend to fail",
         terminal=True,
+        reading=(
+            "percentile is bounded 0-100: the rank of the current ATR within "
+            "this window's own history. <20 = dead-quiet regime (chop risk), "
+            "~50 = typical, >80 = unusually volatile. It is self-relative — "
+            "a 60 on BTC and a 60 on AKT mean the same thing: 'more volatile "
+            "than 60% of its own recent bars'"
+        ),
     ),
     "regime_gate": GateSpec(
         name="regime_gate",
@@ -105,6 +148,12 @@ GATE_SPECS: dict[str, GateSpec] = {
         check="signal_tags after regime pruning vs before",
         why="drops tags whose strategy family the current regime does not recommend",
         terminal=False,
+        reading=(
+            "not numeric: compares the tag list before vs after regime pruning. "
+            "All tags surviving = the current market regime recommends their "
+            "strategy families; a shrunken list = some setups exist but the "
+            "regime argues against trading them right now"
+        ),
     ),
 }
 
@@ -291,6 +340,9 @@ class ScanTrace:
                 f"  GATE {name} | purpose: {spec.purpose} | checks: {observed} vs {threshold} "
                 f"| why: {spec.why} | terminal: {terminal} | verdict: {verdict}"
             )
+            # AUDIT-UX-1: the reading guide renders for EVERY gate, including
+            # SKIPPED ones, so each dial is learnable before it is configured.
+            self._lines.append(f"    reading: {spec.reading}")
 
     def write(self, footer: dict[str, Any]) -> None:
         """Write sidecar CSVs (full bar series, one per symbol/timeframe)
