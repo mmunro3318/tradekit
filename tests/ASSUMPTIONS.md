@@ -3139,3 +3139,36 @@ raises ZeroDivisionError (sum of an empty slice divided by zero);
 negative ema_period does not raise at all and silently miscomputes.
 Tests assert only through the public `keltner()` surface, never importing
 `_ema` directly.
+
+### 169 — T-AUDIT-2 audit wiring: threading mechanism, tee seam, exit-2 choice (CTO adjudication, resolves T-AUDIT-2 red-stage ASSUMPTIONS flags)
+Three ratified decisions binding this batch's green implementation:
+
+1. **Audit threading**: `mae.scan_markets` gains keyword-only
+   `audit: ScanAuditMode = "off"` (imported from `mae._scan_trace`, its
+   existing home — never redefined), a thin passthrough to
+   `_scanner.scan(..., audit=audit)`. `hud._build._default_scan_setup`
+   gains keyword-only `audit: ScanAuditMode = "off"` and passes it through
+   to `mae.scan_markets`. `hud._build.build_state` gains keyword-only
+   `audit: ScanAuditMode = "off"`; it calls `scan_setup(symbol)` EXACTLY as
+   before when `audit == "off"` (preserves the existing
+   single-positional-arg test-double contract), and only
+   `scan_setup(symbol, audit=audit)` when `audit != "off"`.
+2. **Console tee seam**: no existing tee/stdout-boundary helper existed in
+   `src/` (red-stage grep confirmed). `tradekit.cli.main._tee_audit_log(text:
+   str) -> None` is the ratified new private seam — tries `sys.stdout.write`,
+   and on `UnicodeEncodeError` (strict cp1252 console) falls back to
+   `text.encode(stream.encoding or "utf-8", errors="replace")` written
+   straight to `sys.stdout.buffer` (bypassing the text-mode encoder that
+   raised), or re-decoding for a stream with no `.buffer`. `tk hud --audit`,
+   after a successful run, globs the run's `_scan_trace._OUTPUT_ROOT`
+   date-dir for `audit-*.log` and tees each one's content, in sorted order,
+   through this seam.
+3. **CLI surface / exit-2 choice**: `tk hud` gains `--audit`, typed
+   `Literal["on", "exhaustive"] | None` (default `None` == "off" internally)
+   — Typer synthesizes the same Click-Choice usage-error/exit-2 behavior
+   `click.Choice(["on", "exhaustive"])` would give directly; this repo's
+   installed Typer (0.26.8) vendors its own Click as `typer._click` and does
+   not expose a top-level importable `click` package, so the literal-type
+   route is the equivalent, dependency-free path to the same pinned
+   contract (unknown `--audit` value -> exit 2, matching AC-13's
+   missing-`--equity` precedent, `--out` never created).

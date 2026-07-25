@@ -24,6 +24,7 @@ from typing import Any
 import tradekit.mae._runtime as mae_runtime
 from tradekit.contracts import AdvisoryTicket, GateResult, HudState, ScanReportEntry
 from tradekit.contracts._marketdata import BarSeries
+from tradekit.mae._scan_trace import ScanAuditMode
 
 _TIMEFRAME = "1h"
 _LOOKBACK_DAYS = 30
@@ -129,16 +130,23 @@ def _default_sizing_info(symbol: str, limit_price: Decimal, equity_usd: Decimal)
     )
 
 
-def _default_scan_setup(symbol: str) -> _SetupResult:
+def _default_scan_setup(symbol: str, *, audit: ScanAuditMode = "off") -> _SetupResult:
     """Real setup scan (ASSUMPTIONS 159b): momentum + volume confirmation,
     post-regime-gate. Empty `signal_tags` when no match survives for the
     symbol. `attrition_stages` (A-FIX-1/ASSUMPTIONS 163b) carries the
     scanner's own P3 `stages` for this symbol, read off the scan result's
-    `"attrition"` key — the real per-filter killer, not a collapsed gate."""
+    `"attrition"` key — the real per-filter killer, not a collapsed gate.
+
+    `audit` (T-AUDIT-2): passed through untouched to `mae.scan_markets`."""
     from tradekit import mae
 
     result = mae.scan_markets(
-        "crypto", [_SETUP_TIMEFRAME], filters=_SETUP_FILTERS, symbols=[symbol], regime_gate=True
+        "crypto",
+        [_SETUP_TIMEFRAME],
+        filters=_SETUP_FILTERS,
+        symbols=[symbol],
+        regime_gate=True,
+        audit=audit,
     )
     stages: list[dict[str, str]] = []
     for entry in result.get("attrition", []):
@@ -331,12 +339,22 @@ def render_attrition_log(state: HudState, *, equity_usd: Decimal) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decimal) -> HudState:
+def build_state(
+    symbols: list[str],
+    *,
+    captured_at: datetime,
+    equity_usd: Decimal,
+    audit: ScanAuditMode = "off",
+) -> HudState:
     """Walk the funnel for each symbol, grading buy/sell/hold/wait, and
     assembling an `AdvisoryTicket` only when every gate passes AND policy
     allows. `captured_at` is verbatim `generated_at` — no wall-clock reads
     (AC-8). Gate order (ASSUMPTIONS 159): open-position (hold) ->
-    data_integrity -> setup -> sizing -> policy_verdict."""
+    data_integrity -> setup -> sizing -> policy_verdict.
+
+    `audit` (T-AUDIT-2): "off" (default) calls `scan_setup(symbol)` exactly
+    as before — existing single-positional-arg test doubles keep working
+    unchanged; any other mode calls `scan_setup(symbol, audit=audit)`."""
     positions = open_position_symbols()
     tickets: list[AdvisoryTicket] = []
     report: list[ScanReportEntry] = []
@@ -403,7 +421,7 @@ def build_state(symbols: list[str], *, captured_at: datetime, equity_usd: Decima
         # Error map: a provider/scan failure degrades to a failed setup
         # gate (grade wait), never an escaping exception.
         try:
-            setup = scan_setup(symbol)
+            setup = scan_setup(symbol) if audit == "off" else scan_setup(symbol, audit=audit)
         except Exception as exc:
             setup = _SetupResult(signal_tags=[])
             setup_error = f"provider error: {type(exc).__name__}"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -605,6 +606,24 @@ def _append_scan_attrition_recorded(
     default_ledger().append(event)
 
 
+def _tee_audit_log(text: str) -> None:
+    """Write `text` to stdout, crash-proof under a strict cp1252 console
+    (T-AUDIT-2 W3): falls back to encoding the text with `errors="replace"`
+    against the stream's own encoding and writing the raw bytes, bypassing
+    the text-mode encoder that would otherwise raise `UnicodeEncodeError`."""
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        data = text.encode(encoding, errors="replace")
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            buffer.write(data)
+        else:
+            sys.stdout.write(data.decode(encoding, errors="replace"))
+    sys.stdout.flush()
+
+
 @app.command("hud")
 def hud_scan(
     equity: Annotated[
@@ -629,6 +648,13 @@ def hud_scan(
     port: Annotated[
         int, typer.Option("--port", help="Port for --serve (default 7333).")
     ] = 7333,
+    audit: Annotated[
+        Literal["on", "exhaustive"] | None,
+        typer.Option(
+            "--audit",
+            help="Write a scan audit trace (SCAN-AUDIT-LOG) and tee it to stdout.",
+        ),
+    ] = None,
 ) -> None:
     """`tk hud` — advisory-only order-book HUD scan (SPEC-hud-orderbook AC-9/AC-10/AC-13).
     Writes a static HTML report to `--out` (atomic replace); exit 4 if the
@@ -639,6 +665,8 @@ def hud_scan(
     """
     from tradekit import hud
     from tradekit.mae import _runtime as mae_runtime
+
+    audit_mode: Literal["off", "on", "exhaustive"] = audit if audit else "off"
 
     if serve:
         # --serve implies --open (SPEC-hud-ack.md), regardless of the flag.
@@ -659,7 +687,20 @@ def hud_scan(
     )
 
     captured_at = mae_runtime.clock()
-    state = hud.build_state(symbol_list, captured_at=captured_at, equity_usd=Decimal(equity))
+
+    # Snapshot pre-run audit logs so the tee below only emits THIS run's
+    # trace — a same-day earlier run's audit-*.log files must not re-tee.
+    pre_run_audit_logs: set[Path] = set()
+    if audit_mode != "off":
+        from tradekit.mae import _scan_trace
+
+        date_dir = _scan_trace._OUTPUT_ROOT / captured_at.strftime("%Y-%m-%d")
+        if date_dir.is_dir():
+            pre_run_audit_logs = set(date_dir.glob("audit-*.log"))
+
+    state = hud.build_state(
+        symbol_list, captured_at=captured_at, equity_usd=Decimal(equity), audit=audit_mode
+    )
     html = hud.render(state)
 
     _write_scan_attrition_log(state, captured_at, Decimal(equity))
@@ -688,6 +729,14 @@ def hud_scan(
     _append_scan_attrition_recorded(
         state, symbol_list, captured_at=captured_at, equity_usd=Decimal(equity)
     )
+
+    if audit_mode != "off":
+        from tradekit.mae import _scan_trace
+
+        date_dir = _scan_trace._OUTPUT_ROOT / captured_at.strftime("%Y-%m-%d")
+        if date_dir.is_dir():
+            for log_path in sorted(set(date_dir.glob("audit-*.log")) - pre_run_audit_logs):
+                _tee_audit_log(log_path.read_text(encoding="utf-8"))
 
     if open_browser:
         import webbrowser
