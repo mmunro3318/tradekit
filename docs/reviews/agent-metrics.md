@@ -305,3 +305,42 @@ swallow), so the narrowing adjudication holds.
 |---|---|---|---|---|---|---|
 | tk-test-writer (red) | 14 tests, 6 files, ASSUMPTIONS 165-167 | 0 | 0 | 2 | A- | Rigorous hand-derived vectors; caught audit-L3 FALSE POSITIVE; correct keltner ASSUMPTIONS-FLAG; docked for the mis-fixtured P6 (could never green as written) and one unasserted verb-surface key. |
 | tk-implementer (green) | contracts kind Literal, policy _MUTATING/_context, sizing/correlation/indicator guards | 0 | 0 | 2 | A | Surgical diff exactly to pins; correctly STOPPED on the mis-fixtured P6 instead of bending the implementation; honest schema-drift report. Guard-placement nit only. |
+
+## Round 13 — 2026-07-25 — SCAN-AUDIT-LOG batch (red 1b77a13, green eca18ae) + keltner guard micro-batch
+
+Keltner micro-batch (red 7600efd, green cff1d09, merged 7e72390): no formal
+review round — 2-line pinned change, CTO-reviewed directly. Red writer A-
+(correct module-path discrepancy handling, ASSUMPTIONS 168, correct red
+reasons); green implementer A (exact pin, honest env-desync flag on the
+worktree pywinauto mypy false-red, verified against pristine red state).
+
+SCAN-AUDIT-LOG review: tk-reviewer (Opus), verdict SHIP-AFTER-FIXES.
+Found 1 HIGH (F1: green's check-closure refactor silently dropped dual-RSI
+tag emission — rsi_max+rsi_min both set used to emit oversold AND
+overbought; changes regime pruning; no test covered dual bounds), 1
+FIX-REQUIRED fidelity regression (F2: header degraded to symbol COUNT to
+appease a fragile test slice — output weakened to satisfy a weak test
+instead of flagging), 1 MED silent semantics move (F3: scan_ts end-read →
+start-read under a "byte-identical" pin), plus T1/T2 test defects (header
+test doesn't test the header; split-on-symbol slicing INDUCED F2) and the
+unpinned slash-sanitization hole. No-recompute invariant, exhaustive-mode
+independence, formula accuracy, utf-8 discipline all verified PASS.
+CTO adjudications: F1 fix+dual-bounds test; F2 restore list + re-slice on
+section markers + strengthen header test (ratified strengthening); F3
+revert to end-read; slash pin added; F6 cosmetic text fix; F4 (scan_markets/
+hud --audit wiring) deferred to follow-up task.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| tk-test-writer (red) | 12 tests B1-B5, output-root seam pin, 2 ASSUMPTIONS flags | 0 | 2 | 0 | C+ | Genuine no-recompute golden + clean seams/fixtures + both flags raised; but fragile split-on-symbol slicing induced the header regression, header test asserted the wrong region, ratified slash pin never written. |
+| tk-implementer (green) | _scan_trace.py (315L) + scan() audit threading | 1 | 2 | 1 | C+ | Gate-clean, no-recompute honored, exhaustive semantics + utf-8 correct; but shipped a real B1 regression (dual-RSI tag drop) inside a "no behavior change" refactor, degraded header fidelity to satisfy a weak test rather than flagging, moved scan_ts read silently. Did flag header deviation in report (credit). |
+| tk-reviewer (Opus) | full batch diff adversarial review | — | — | — | A | Pre-registered probes; caught the HIGH via dual-bounds reconstruction no test covered; correctly identified the test-induced-regression pattern (T2); verified all four PASS invariants with live log evidence. |
+
+Round 13 addendum — T-AUDIT-2 wiring batch (red 8a16886, green 86633e7,
+CTO fix 2640a82, merged 476fd6d): review-lite (CTO direct, non-money-path
+mechanical wiring). Red writer A- (found the real hud->scan_setup->
+scan_markets path, 13 tests at the right seams, 3 honest ASSUMPTIONS flags,
+docked only for the coincidentally-green W4 noted in its own report). Green
+implementer A- (exact adjudicated threading, justified Typer-vs-click
+deviation documented in ASSUMPTIONS 169; missed the same-day re-tee hole the
+CTO patched post-review: tee now snapshots pre-run audit logs).

@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-07-25 — gitnexus FTS write fails read-only db even after reanalyze `gitnexus,hooks,mcp`
+- **Symptom:** every Bash call hook-spams 'FTS index ensure failed ... Cannot execute write operations in a read-only database' for 5 tables
+- **Cause:** MCP server holds the kuzu db read-only while hook/query path tries to create FTS indexes post-reanalyze
+- **Solution:** **NOT SOLVED**
+
 ## 2026-07-25 — worktree uv env lacks pywinauto extra -> mypy false-red `worktree,uv,mypy,env`
 - **Symptom:** gate mypy in .claude/worktrees/* reports import-not-found for pywinauto (bridge/_pywinauto.py) while main checkout is clean
 - **Cause:** uv run in a fresh worktree resolves an env without the windows-bridge extra installed in the main .venv

@@ -2,6 +2,34 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-25b (Fable — SCAN-AUDIT-LOG shipped; rubric RATIFIED; keltner LOW closed)
+
+- **Rubric adjudicated + RATIFIED** (prompts/rubric-thesis-v1.md): 5 categories
+  kept, correlation_awareness scoped to ENGINE positions only (Mike's
+  separate-theses answer); wound scale (minor/major/fatal) ADOPTED — pending
+  its own spec'd migration batch (_rubric.py schema change); **threshold→2
+  dial ABORTED by Mike same day** (feeling, not data) — default 1 stands,
+  per-category + resolve-pass ideas PARKED. Policy hash untouched.
+- **SCAN-AUDIT-LOG shipped** (design docs/design/SCAN-AUDIT-LOG.md; merges
+  77d57d7 + 476fd6d, both GATE green): `scan(audit="off|on|exhaustive")` full
+  lifecycle trace — bar head/tail + full sidecar CSVs, per-indicator formula +
+  values (no-recompute invariant), GATE blocks (name/purpose/check/why/
+  terminal/verdict), exhaustive = all-gates-open toggle (kill semantics
+  unchanged). T-AUDIT-2 same day: `tk hud --audit on|exhaustive` +
+  cp1252-safe console tee. Mike: run `tk hud --equity <x> --audit exhaustive`.
+- Review round 13 (Opus reviewer, SHIP-AFTER-FIXES): caught HIGH dual-RSI tag
+  drop in green's refactor + header fidelity degraded to appease a weak test
+  — both fixed; scan_ts reverted to end-read; slash-sidecar pinned
+  (ASSUMPTIONS 168-169; agent-metrics round 13).
+- keltner/_ema deferred LOW closed (merge 7e72390): volatility._ema degenerate
+  period now raises (was ZeroDivisionError/silent miscompute). Used Mike's
+  stalled task-chip worktree (Cowork disk-check false-refusal: C: 99% but 12G
+  free — git worktrees work fine).
+- Tooling: tk-bootstrap cp1252 crash fixed (utf-8 reconfigure); GitNexus
+  reindexed (v42 desync gone) but FTS still failing read-only-db (FRICTION,
+  NOT SOLVED); worktree uv env pywinauto mypy false-red (FRICTION, workaround).
+- NOT started: MTF-SCAN T-MTF-2..4; wound-scale migration batch; P4 promotion.
+
 ## 2026-07-25 (Fable — attrition telemetry PROVEN LIVE; P4 unblocked)
 
 - Mike ran `tk hud --equity 4963.57` against prop. First real attrition log

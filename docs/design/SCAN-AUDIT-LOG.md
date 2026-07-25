@@ -118,3 +118,11 @@ stdout (dev-time console + saved reviewable file — the D8 split).
 - No change to which filters exist or their thresholds.
 - HUD changes limited to the `--audit` flag passthrough (T-MTF-4 owns the
   bigger hud refactor).
+
+## Follow-up (T-AUDIT-2, review round F4 — 2026-07-25) — DONE same day
+
+Merged @ 476fd6d: `scan_markets(..., audit=)` passthrough, `tk hud --audit
+[on|exhaustive]` (Typer Literal choice, exit 2 on bad value), cp1252-safe
+console tee of THIS run's audit logs (pre-run snapshot excludes same-day
+earlier runs). Threading mechanism + tee seam + CLI pin ratified as
+tests/ASSUMPTIONS.md #169. The trace is production-reachable.

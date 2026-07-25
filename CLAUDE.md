@@ -107,7 +107,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-S1 silence RESOLVED — proven HONEST via live attrition log (killer macd_signal 11/11, bearish universe; TICKET-001 + audit bundle SHIPPED at f1b10bd). P4 now UNBLOCKED (Mike rotated keys, funded $50, answered rubric [MIKE] tags). Active seed: docs/handoff/HANDOFF-2026-07-25-attrition-proven-p4-unblocked.md. Next: (a) MTF-SCAN T-MTF-1 in worktree needs review+merge, then T-MTF-2..4 (docs/design/MTF-SCAN.md); (b) adjudicate rubric answers + spec unresolved_attack_threshold→2 dial change; (c) P4 promotion→3 live trades. Money-path discipline binding.
+SCAN-AUDIT-LOG SHIPPED (476fd6d, gate green): `tk hud --audit on|exhaustive` traces the full scan lifecycle (formulas, values, GATE verdicts, sidecar CSVs; exhaustive = all-gates-open toggle). Rubric RATIFIED (threshold→2 dial ABORTED by Mike; wound-scale severity migration = pending spec'd batch). keltner/_ema LOW closed. Active seed: docs/handoff/HANDOFF-2026-07-25b-scan-audit-shipped.md. Next: (a) P4 promotion flow → 3 live trades (all Mike-side blockers cleared); (b) MTF-SCAN T-MTF-2..4 (docs/design/MTF-SCAN.md); (c) wound-scale migration batch (_rubric.py); (d) D8 visibility-standard spec (generalize SCAN-AUDIT-LOG pattern). Money-path discipline binding.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
