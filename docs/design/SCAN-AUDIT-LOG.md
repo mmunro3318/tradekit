@@ -83,6 +83,16 @@ Log structure:
 Console echo: when invoked through hud with `--audit`, the same lines tee to
 stdout (dev-time console + saved reviewable file — the D8 split).
 
+## Red-stage adjudications (CTO, 2026-07-25)
+
+- **Output-root seam (ratified):** `_scan_trace._OUTPUT_ROOT: Path` is the
+  module-level base dir (defaults to `data/scans`), monkeypatched in tests
+  exactly like `_runtime._cache_path`. No other path override mechanism.
+- **Sidecar name sanitization (ratified):** symbols may contain `/`
+  (e.g. `NEAR/USD`); sidecar filenames replace `/` with `_` →
+  `NEAR_USD-<tf>.csv`. Log body still shows the raw symbol. Pinning test
+  added in the review round (red-stage fixtures used slash-free symbols).
+
 ## Behavior pins (tests consume these directly)
 
 - **B1** `audit="off"`: `scan()` return value and existing scan-log behavior

@@ -152,8 +152,9 @@ from __future__ import annotations
 from typing import Any
 
 from tradekit import strategies
-from tradekit.mae import _regime, _runtime
+from tradekit.mae import _regime, _runtime, _scan_trace
 from tradekit.mae._indicators import momentum, volatility, volume
+from tradekit.mae._scan_trace import ScanAuditMode
 from tradekit.mae._vocab import BBPosition, MacdSignal
 
 # Scanner-internal constants (not agent-facing inputs).
@@ -191,6 +192,10 @@ _BB_POSITION_TAGS: dict[str, str] = {
 # bar fetch (P2); never a silent per-candidate drop (TICKET-001 §2a).
 _MACD_ALLOWED: set[str] = {member.value for member in MacdSignal}
 _BB_ALLOWED: set[str] = {member.value for member in BBPosition}
+
+# SCAN-AUDIT-LOG: closed vocabulary for the `audit` param (design doc B4,
+# same TICKET-001 convention as the two sets above).
+_AUDIT_ALLOWED: set[str] = {"off", "on", "exhaustive"}
 
 
 class _InsufficientBars(Exception):
@@ -273,14 +278,29 @@ def _precompute_indicators(
 
 
 def _evaluate_symbol_timeframe(
-    symbol: str, timeframe: str, bars: list[Any], filters: dict[str, Any]
-) -> tuple[dict[str, Any] | None, list[dict[str, str]], str | None]:
+    symbol: str,
+    timeframe: str,
+    bars: list[Any],
+    filters: dict[str, Any],
+    exhaustive: bool = False,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None, dict[str, Any]]:
     """Compute only the indicators `filters` needs, apply the AND-composed
     filter checks in the pinned stage order, and return
-    `(match_or_None, stages, killed_by)` — `stages` is the P3 attrition
-    trail for this (symbol, timeframe): entries only for stages actually
-    evaluated (none after the killer). `killed_by` is the first failing
-    stage's name, or `None` if every present filter passed."""
+    `(match_or_None, stages, killed_by, values)`. `stages` is the P3
+    attrition trail for this (symbol, timeframe). `killed_by` is the first
+    failing stage's name, or `None` if every present filter passed. `values`
+    is the raw `_precompute_indicators` output (SCAN-AUDIT-LOG: handed to
+    the audit trace so a logged number can never drift from the number a
+    gate actually compared — never recomputed there).
+
+    `exhaustive=False` (default): stops at the first failure, same as
+    before this batch — `stages` holds no entries past the killer.
+    `exhaustive=True` (SCAN-AUDIT-LOG audit="exhaustive" only): keeps
+    evaluating every remaining PRESENT filter after the first failure.
+    `killed_by`/the returned match are governed ONLY by the first failure
+    either way (design doc B3: "kill semantics unchanged") — stages
+    evaluated after the kill carry `"post_kill": True`, trace-only, never
+    affecting `killed_by` or the match."""
     closes = [float(b.close) for b in bars]
     highs = [float(b.high) for b in bars]
     lows = [float(b.low) for b in bars]
@@ -301,30 +321,25 @@ def _evaluate_symbol_timeframe(
     try:
         values = _precompute_indicators(filters, closes, highs, lows, volumes, symbol, timeframe)
     except _InsufficientBars as exc:
-        return None, [{"name": "bars", "outcome": "fail", "observed": str(exc)}], "bars"
+        stages: list[dict[str, Any]] = [{"name": "bars", "outcome": "fail", "observed": str(exc)}]
+        return None, stages, "bars", {}
 
-    stages: list[dict[str, str]] = [
-        {"name": "bars", "outcome": "pass", "observed": f"{len(bars)} bars"}
-    ]
+    stages = [{"name": "bars", "outcome": "pass", "observed": f"{len(bars)} bars"}]
     tags: list[str] = []
+    killed_by: str | None = None
 
-    if "rsi_max" in filters or "rsi_min" in filters:
+    def _check_rsi() -> tuple[bool, str, str | None]:
         last_rsi = values["rsi"]
         candidate["rsi"] = last_rsi
         observed = f"rsi={last_rsi}"
         if "rsi_max" in filters and last_rsi > filters["rsi_max"]:
-            stages.append({"name": "rsi", "outcome": "fail", "observed": observed})
-            return None, stages, "rsi"
+            return False, observed, None
         if "rsi_min" in filters and last_rsi < filters["rsi_min"]:
-            stages.append({"name": "rsi", "outcome": "fail", "observed": observed})
-            return None, stages, "rsi"
-        stages.append({"name": "rsi", "outcome": "pass", "observed": observed})
-        if "rsi_max" in filters:
-            tags.append("oversold")
-        if "rsi_min" in filters:
-            tags.append("overbought")
+            return False, observed, None
+        tag = "oversold" if "rsi_max" in filters else "overbought"
+        return True, observed, tag
 
-    if "macd_signal" in filters:
+    def _check_macd() -> tuple[bool, str, str | None]:
         last_hist = values["macd_hist"]
         candidate["macd_hist"] = last_hist
         observed = f"hist={last_hist}"
@@ -337,46 +352,67 @@ def _evaluate_symbol_timeframe(
             # Unreachable: scan() validates macd_signal against _MACD_ALLOWED
             # before any candidate is evaluated (P2).
             raise AssertionError(f"unreachable: unvalidated macd_signal value {want!r}")
-        if not ok:
-            stages.append({"name": "macd_signal", "outcome": "fail", "observed": observed})
-            return None, stages, "macd_signal"
-        stages.append({"name": "macd_signal", "outcome": "pass", "observed": observed})
-        tags.append(tag)
+        return ok, observed, tag if ok else None
 
-    if "bb_position" in filters:
+    def _check_bb() -> tuple[bool, str, str | None]:
         position = values["bb_position_value"]
         observed = f"position={position}"
-        if position != filters["bb_position"]:
-            stages.append({"name": "bb_position", "outcome": "fail", "observed": observed})
-            return None, stages, "bb_position"
-        stages.append({"name": "bb_position", "outcome": "pass", "observed": observed})
-        tags.append(_BB_POSITION_TAGS[position])
+        ok = position == filters["bb_position"]
+        return ok, observed, _BB_POSITION_TAGS[position] if ok else None
 
-    if "volume_spike" in filters:
+    def _check_volume() -> tuple[bool, str, str | None]:
         last_vr = values["volume_ratio"]
         candidate["volume_ratio"] = last_vr
         observed = f"vr={last_vr}"
-        if last_vr < filters["volume_spike"]:
-            stages.append({"name": "volume_spike", "outcome": "fail", "observed": observed})
-            return None, stages, "volume_spike"
-        stages.append({"name": "volume_spike", "outcome": "pass", "observed": observed})
-        tags.append("volume_spike")
+        ok = last_vr >= filters["volume_spike"]
+        return ok, observed, "volume_spike" if ok else None
 
-    if "atr_percentile_min" in filters:
+    def _check_atr() -> tuple[bool, str, str | None]:
         last_atr = values["atr"]
         pctile = values["atr_pctile"]
         observed = f"pctile={pctile}"
-        if pctile < filters["atr_percentile_min"]:
-            stages.append({"name": "atr_percentile", "outcome": "fail", "observed": observed})
-            return None, stages, "atr_percentile"
-        candidate["atr"] = last_atr
-        if candidate["price"] is not None:
-            candidate["atr_pct_of_price"] = last_atr / candidate["price"] * 100.0
-        stages.append({"name": "atr_percentile", "outcome": "pass", "observed": observed})
-        tags.append("high_volatility")
+        ok = pctile >= filters["atr_percentile_min"]
+        if ok:
+            candidate["atr"] = last_atr
+            if candidate["price"] is not None:
+                candidate["atr_pct_of_price"] = last_atr / candidate["price"] * 100.0
+        return ok, observed, "high_volatility" if ok else None
+
+    checks: list[tuple[str, Any]] = []
+    if "rsi_max" in filters or "rsi_min" in filters:
+        checks.append(("rsi", _check_rsi))
+    if "macd_signal" in filters:
+        checks.append(("macd_signal", _check_macd))
+    if "bb_position" in filters:
+        checks.append(("bb_position", _check_bb))
+    if "volume_spike" in filters:
+        checks.append(("volume_spike", _check_volume))
+    if "atr_percentile_min" in filters:
+        checks.append(("atr_percentile", _check_atr))
+
+    for name, check_fn in checks:
+        if killed_by is not None and not exhaustive:
+            break
+        ok, observed, tag = check_fn()
+        stage: dict[str, Any] = {
+            "name": name,
+            "outcome": "pass" if ok else "fail",
+            "observed": observed,
+        }
+        if killed_by is not None:
+            stage["post_kill"] = True
+        stages.append(stage)
+        if ok:
+            if killed_by is None and tag is not None:
+                tags.append(tag)
+        elif killed_by is None:
+            killed_by = name
+
+    if killed_by is not None:
+        return None, stages, killed_by, values
 
     candidate["signal_tags"] = tags
-    return candidate, stages, None
+    return candidate, stages, None, values
 
 
 def _apply_regime_gate(tags: list[str], regime: dict[str, Any]) -> list[str]:
@@ -398,11 +434,21 @@ def scan(
     filters: dict[str, Any],
     symbols: list[str] | None,
     regime_gate: bool,
+    audit: ScanAuditMode = "off",
 ) -> dict[str, Any]:
     """Screen `symbols` across `timeframes` for setups matching `filters`
     (canonical §3 `scan_markets`). See module docstring for the full
     pipeline, filter semantics, regime-gate caching/drop rule, and output
     shape pins.
+
+    `audit` (SCAN-AUDIT-LOG, docs/design/SCAN-AUDIT-LOG.md): `"off"`
+    (default) is today's behavior, byte-identical, zero disk writes.
+    `"on"` writes a full-lifecycle trace under `_scan_trace._OUTPUT_ROOT`
+    without changing scan semantics. `"exhaustive"` additionally evaluates
+    every PRESENT filter for every candidate that passed the `bars` stage,
+    even after the first failure — kill semantics (`killed_by`, `matches`)
+    stay identical to `"on"`; post-kill verdicts are trace-only. An unknown
+    `audit` value raises `ValueError` naming it (TICKET-001 convention).
 
     `symbols is None` ("full universe" scan) is deferred past this sprint
     and raises `ValueError` before any bar fetch. `macd_signal`/`bb_position`
@@ -429,6 +475,12 @@ def scan(
             "(docs/handoff/SPRINT-P1C-regime-scanner-sizing.md story 4)"
         )
 
+    if audit not in _AUDIT_ALLOWED:
+        raise ValueError(
+            f"scan_markets: unknown audit value {audit!r}; expected one of "
+            f"{sorted(_AUDIT_ALLOWED)}"
+        )
+
     if "macd_signal" in filters and filters["macd_signal"] not in _MACD_ALLOWED:
         value = filters["macd_signal"]
         raise ValueError(
@@ -448,11 +500,21 @@ def scan(
     regime_cache: dict[str, dict[str, Any]] = {}
     attrition: list[dict[str, Any]] = []
 
+    # SCAN-AUDIT-LOG: timestamp captured ONCE, from `_runtime.clock()` only,
+    # and reused for both `scan_ts` and the trace's file names/header — a
+    # single scan never straddles two clock reads.
+    ts = _runtime.clock()
+    trace = (
+        _scan_trace.ScanTrace(ts, audit, asset_class, timeframes, filters, symbols, regime_gate)
+        if audit != "off"
+        else None
+    )
+
     for symbol in symbols:
         for timeframe in timeframes:
             series = _runtime.get_closed_bars(symbol, timeframe, _SCAN_LOOKBACK_DAYS)
-            match, stages, killed_by = _evaluate_symbol_timeframe(
-                symbol, timeframe, series.bars, filters
+            match, stages, killed_by, values = _evaluate_symbol_timeframe(
+                symbol, timeframe, series.bars, filters, exhaustive=(audit == "exhaustive")
             )
             if killed_by == "bars":
                 warnings.append(stages[0]["observed"])
@@ -484,6 +546,12 @@ def scan(
             if match is not None:
                 matches.append(match)
 
+            if trace is not None:
+                trace.record_symbol_timeframe(
+                    symbol, timeframe, series.bars, series.source, _SCAN_LOOKBACK_DAYS,
+                    values, stages, filters,
+                )
+
             attrition.append(
                 {
                     "symbol": symbol,
@@ -493,10 +561,15 @@ def scan(
                 }
             )
 
-    return {
-        "scan_ts": _runtime.clock().isoformat(),
+    result = {
+        "scan_ts": ts.isoformat(),
         "regime_context": regime_context,
         "matches": matches,
         "warnings": warnings,
         "attrition": attrition,
     }
+
+    if trace is not None:
+        trace.write({"attrition": attrition, "matches": matches, "warnings": warnings})
+
+    return result
