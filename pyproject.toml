@@ -112,6 +112,12 @@ module = ["hmmlearn", "hmmlearn.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# pyarrow ships no py.typed marker / stubs (book collectors' lazy import in
+# ParquetSink) — untyped-import noise only, same pattern as yfinance above.
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = [
     "tradekit.contracts.*",
     "tradekit.ledger.*",
