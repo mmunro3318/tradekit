@@ -202,3 +202,21 @@ class TestImportsWithoutOptionalDeps:
                 top_level_imports.append(node.module)
         assert "websockets" not in top_level_imports
         assert "pyarrow" not in top_level_imports
+
+
+class TestResolveDataDir:
+    """External-drive preference (Mike, 2026-07-26): ticks land on
+    D:/tradekit-data/ticks when the external root exists, repo-local
+    data/ticks otherwise — collection never stops for a missing drive."""
+
+    def test_prefers_external_ticks_dir_when_root_exists(self, tmp_path):
+        external = tmp_path / "tradekit-data"
+        external.mkdir()
+        assert ct.resolve_data_dir(
+            external_root=external, local_dir=Path("data/ticks")
+        ) == external / "ticks"
+
+    def test_falls_back_to_local_when_external_root_absent(self, tmp_path):
+        assert ct.resolve_data_dir(
+            external_root=tmp_path / "no-such-drive", local_dir=Path("data/ticks")
+        ) == Path("data/ticks")

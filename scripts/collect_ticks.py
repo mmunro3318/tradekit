@@ -56,7 +56,27 @@ import httpx
 
 WS_URL = "wss://ws.kraken.com/v2"
 REST_ASSET_PAIRS_URL = "https://api.kraken.com/0/public/AssetPairs"
-DATA_DIR = Path("data/ticks")
+
+# Tick data prefers the external drive (Mike, 2026-07-26: C: is nearly full,
+# 1.2G of ticks and growing) and falls back to the repo-local dir whenever
+# D:\tradekit-data is absent (drive unplugged) so collection never stops.
+_EXTERNAL_DATA_ROOT = Path("D:/tradekit-data")
+_LOCAL_DATA_DIR = Path("data/ticks")
+
+
+def resolve_data_dir(
+    external_root: Path = _EXTERNAL_DATA_ROOT, local_dir: Path = _LOCAL_DATA_DIR
+) -> Path:
+    """`<external_root>/ticks` when the external root dir exists, else the
+    repo-local fallback. Checked at process start, not per flush — a drive
+    that vanishes mid-run surfaces as a loud write error, never a silent
+    mid-stream relocation."""
+    if external_root.is_dir():
+        return external_root / "ticks"
+    return local_dir
+
+
+DATA_DIR = resolve_data_dir()
 BOOK_DEPTH = 10
 FLUSH_INTERVAL_S = 60.0
 FLUSH_ROW_LIMIT = 5000

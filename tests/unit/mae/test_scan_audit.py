@@ -535,3 +535,62 @@ class TestGateReadingGuide:
         assert ">0" in macd_reading or "> 0" in macd_reading or "positive" in (
             macd_reading
         ), macd_reading
+
+
+class TestIndicatorVarsLine:
+    """AUDIT-UX-2 (Mike, 2026-07-26): each indicator block carries a `vars:`
+    line naming every input variable and intermediate the calculation used
+    (from the SAME computation the gate read — no-recompute invariant), so a
+    reader in disbelief can rebuild the number by hand."""
+
+    def test_macd_vars_line_names_line_signal_and_close(self, monkeypatch, tmp_path):
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        lines = log_text.splitlines()
+        macd_vars = next(
+            (line for line in lines if line.strip().startswith("vars:") and "macd_line=" in line),
+            None,
+        )
+        assert macd_vars is not None, "expected a vars: line with macd_line= for the macd block"
+        assert "signal=" in macd_vars and "close=" in macd_vars, macd_vars
+
+    def test_macd_vars_are_arithmetically_consistent_with_logged_hist(
+        self, monkeypatch, tmp_path
+    ):
+        """hist must equal macd_line - signal to float precision — the vars
+        line is only trustworthy if its members actually reproduce the
+        headline number."""
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        result = _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        macd_vars = next(
+            line
+            for line in log_text.splitlines()
+            if line.strip().startswith("vars:") and "macd_line=" in line
+        )
+        parts = dict(
+            kv.split("=", 1) for kv in macd_vars.strip().removeprefix("vars: ").split(" | ")
+        )
+        assert float(parts["macd_line"]) - float(parts["signal"]) == pytest.approx(
+            float(parts["hist"]), abs=1e-12
+        )
+        del result
+
+    def test_volume_vars_line_names_last_volume(self, monkeypatch, tmp_path):
+        _install_bars_and_clock(monkeypatch)
+        root = _install_audit_root(monkeypatch, tmp_path)
+
+        _scan(audit="on")
+
+        log_text = (root / _EXPECTED_DATE_DIR / f"{_EXPECTED_LOG_STEM}.log").read_text()
+        assert any(
+            line.strip().startswith("vars:") and "last_volume=" in line
+            for line in log_text.splitlines()
+        ), "expected a vars: line with last_volume= for the volume_ratio block"
