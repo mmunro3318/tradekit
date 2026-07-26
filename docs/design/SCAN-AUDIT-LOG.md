@@ -119,6 +119,14 @@ stdout (dev-time console + saved reviewable file — the D8 split).
 - HUD changes limited to the `--audit` flag passthrough (T-MTF-4 owns the
   bigger hud refactor).
 
+## Follow-up (AUDIT-UX-2, Mike's UX feedback — 2026-07-26) — DONE same day
+
+Each indicator block now carries a `vars:` line naming every input variable
+and intermediate the calculation used (e.g. macd: close | macd_line | signal
+| hist), read off the SAME computation results the gate compared —
+`_precompute_indicators` stashes them under `values["_vars"]`, never
+re-derived. Red b70b0d0 → green 3742de4.
+
 ## Follow-up (AUDIT-UX-1, Mike's UX feedback — 2026-07-25) — DONE same day
 
 Every GATE line is now followed by a `reading:` line — a static plain-English

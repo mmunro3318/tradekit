@@ -2,6 +2,27 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-26 (Fable — AUDIT-UX-2 vars lines; ticks → D:; repo-map + script-ify skills)
+
+- **AUDIT-UX-2 shipped** (red b70b0d0 → green 3742de4, GATE green): `vars:`
+  line under each indicator block — every input/intermediate from the SAME
+  computation the gate read (macd_line/signal/hist/close, last_volume, bb
+  upper/lower, atr window_n), no recompute. Mike's hand-replication ask.
+- **Tick data → D:\tradekit-data\ticks** (1.19 GB robocopy'd off the ~full
+  C:): collect_ticks.py `resolve_data_dir()` prefers D:, falls back local if
+  drive absent (tested); Startup launcher .cmd updated (log too). Collector
+  was found NOT RUNNING (unnoticed since unknown) — restarted, fresh parquet
+  verified on D:. Consider a liveness check in tk-bootstrap.
+- **New global skills** (Mike's ask): `repo-map` (~/.claude/skills/repo-map —
+  stdlib-ast cached map, module→defs+linenos, 0.2s cached, --symbol lookup;
+  the null-option code intel) and `script-ify` (meta-skill: mechanics→script
+  reflex, token-cut target ≥50%, save-to-skill rules).
+- Convergence msg in hud output = hmmlearn EM monitor stderr print (regime
+  HMM); anti-permissive fallback to rules regime already handles it
+  (_regime.py hmm_non_convergence). Explained to Mike; no code change.
+- Next: walk Mike through P4 promotion (3 live trades — Alpaca recommended;
+  prop has no API, Kraken live path untested), MTF-SCAN T-MTF-2.
+
 ## 2026-07-25c (Fable — AUDIT-UX-1 reading guides; formulas verified; GitNexus removed)
 
 - **AUDIT-UX-1 shipped** (red 65d41f9 → green 7f1b4ee, GATE green): every GATE
