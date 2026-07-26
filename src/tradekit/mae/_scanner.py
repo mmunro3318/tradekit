@@ -228,6 +228,11 @@ def _precompute_indicators(
     becomes the single `"bars"` attrition stage (P3), never a per-filter
     named failure."""
     values: dict[str, Any] = {}
+    # AUDIT-UX-2: per-indicator input/intermediate variables for the audit
+    # trace's `vars:` line — read off the SAME computation results the gate
+    # values come from (no-recompute invariant), never re-derived.
+    indicator_vars: dict[str, dict[str, Any]] = {}
+    values["_vars"] = indicator_vars
 
     if "rsi_max" in filters or "rsi_min" in filters:
         last_rsi = _last_non_none(momentum.rsi(closes, 14))
@@ -235,12 +240,20 @@ def _precompute_indicators(
             name = "rsi_max" if "rsi_max" in filters else "rsi_min"
             raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for {name}")
         values["rsi"] = last_rsi
+        indicator_vars["rsi"] = {"period": 14, "close": closes[-1], "rsi": last_rsi}
 
     if "macd_signal" in filters:
-        last_hist = _last_non_none(momentum.macd(closes).histogram)
+        macd_result = momentum.macd(closes)
+        last_hist = _last_non_none(macd_result.histogram)
         if last_hist is None:
             raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for macd_signal")
         values["macd_hist"] = last_hist
+        indicator_vars["macd_signal"] = {
+            "close": closes[-1],
+            "macd_line": _last_non_none(macd_result.macd),
+            "signal": _last_non_none(macd_result.signal),
+            "hist": last_hist,
+        }
 
     if "bb_position" in filters:
         bb_result = volatility.bollinger(closes, 20, 2.0)
@@ -255,12 +268,23 @@ def _precompute_indicators(
             values["bb_position_value"] = "above_upper"
         else:
             values["bb_position_value"] = "inside"
+        indicator_vars["bb_position"] = {
+            "close": last_close,
+            "upper": last_upper,
+            "lower": last_lower,
+            "position": values["bb_position_value"],
+        }
 
     if "volume_spike" in filters:
         last_vr = _last_non_none(volume.volume_ratio(volumes, 20))
         if last_vr is None:
             raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for volume_spike")
         values["volume_ratio"] = last_vr
+        indicator_vars["volume_spike"] = {
+            "period": 20,
+            "last_volume": volumes[-1],
+            "volume_ratio": last_vr,
+        }
 
     if "atr_percentile_min" in filters:
         non_none_atr = [v for v in volatility.atr(highs, lows, closes, 14) if v is not None]
@@ -273,6 +297,12 @@ def _precompute_indicators(
         values["atr_pctile"] = (
             sum(1 for v in non_none_atr if v <= last_atr) / len(non_none_atr) * 100.0
         )
+        indicator_vars["atr_percentile"] = {
+            "period": 14,
+            "atr": last_atr,
+            "window_n": len(non_none_atr),
+            "pctile": values["atr_pctile"],
+        }
 
     return values
 

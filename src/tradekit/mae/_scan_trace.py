@@ -302,6 +302,12 @@ class ScanTrace:
                 continue
             self._lines.append(f"  indicator {label}: {FORMULAE[formula_key]}")
             self._lines.append(f"    value: {values_key}={values[values_key]}")
+            # AUDIT-UX-2: every input/intermediate the calculation used, from
+            # the same computation the gate read — hand-replication fodder.
+            indicator_vars = values.get("_vars", {}).get(formula_key)
+            if indicator_vars:
+                rendered = " | ".join(f"{k}={v}" for k, v in indicator_vars.items())
+                self._lines.append(f"    vars: {rendered}")
         if "atr_pctile" in values:
             self._lines.append(f"    value: atr_pctile={values['atr_pctile']}")
 
