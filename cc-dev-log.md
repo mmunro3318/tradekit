@@ -2,6 +2,27 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-26b (Fable — LIVE round-trip PASSED; P4 path ratified Option A; backfill complete)
+
+- **LIVE $5 ETH round-trip PASSED** (Mike-run, one-shot scratch script, deleted
+  after): buy 0.002602483 @ 1883.57 → hold 30s → sell full position @ 1882.03
+  → flat YES, net -$0.0163. Proves live auth/order/fill/close/reconcile path.
+  Preflight: account ACTIVE, crypto ACTIVE, $50, no blocks.
+- **FINDING (pin for P4 sprint): Alpaca takes crypto fees IN-KIND** — buy
+  filled 0.002602483 but position held 0.002595976 (fee deducted in ETH).
+  CostModel/ledger assume USD fees (ASSUMPTIONS 144) → live crypto reconcile
+  would flag phantom shortfalls. Needs a spec'd fix before probation trades.
+- **P4 "done" RATIFIED with Mike = Option A**: 3 live trades are the T2
+  probation sequence (live_sequence_remaining=3), NOT an ad-hoc goal; ladder
+  stands unweakened (30 graded + positive edge + clean series → grant →
+  Mike's `tk promote confirm`). 30-trade dial's intent = vet the autonomous
+  bot, which is the actual product ("bot can SURVIVE going live" = done).
+  Promotion state read: T1, 1/30 graded, all four T2 criteria false.
+- **Tick backfill COMPLETE**: 269 REST requests, ~246k rows, all 11 pairs
+  0 missing hours (incl. 4 book-anchored pairs from 07-19 14h). Watchdog
+  scheduled task (15min) live. Next: multi-venue order-book harvesters
+  (Binance/Coinbase, free public APIs only — Mike's open-data mission).
+
 ## 2026-07-26 (Fable — AUDIT-UX-2 vars lines; ticks → D:; repo-map + script-ify skills)
 
 - **AUDIT-UX-2 shipped** (red b70b0d0 → green 3742de4, GATE green): `vars:`
