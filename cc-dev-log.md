@@ -2,6 +2,21 @@
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
 
+## 2026-07-27 (Fable — three-thread fork seeded; dispatch skeleton codified)
+
+- Three handoff seeds written+committed (Mike forking to clean threads):
+  paper-sprint (CRITICAL PATH — fee fix, S2/S4, MTF-2, autonomous paper
+  cadence w/ funnel-only rule), indicator-lab (experiments/ only, teach+test,
+  next-period-entry check mandatory), stratchpad (charting SPA wishlist →
+  starts at tk-brainstorm; read-only red line). CLAUDE.md focus points at all
+  three.
+- Subagent-seeding methodology CODIFIED into spawn-mvm SKILL.md: 9-part
+  canonical skeleton (context/study-first/mission/PINNED/probe-before-parse/
+  scope-fence/ASSUMPTIONS-hatch/self-verify/report-format) — skeleton fixed,
+  content always bespoke.
+- Funnel drought diagnosis stands: long-only bullish_cross starved in bear
+  leg; fix = strategy breadth, never threshold loosening.
+
 ## 2026-07-26b (Fable — LIVE round-trip PASSED; P4 path ratified Option A; backfill complete)
 
 - **LIVE $5 ETH round-trip PASSED** (Mike-run, one-shot scratch script, deleted
