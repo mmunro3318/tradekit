@@ -35,7 +35,11 @@ only the indicators the filters need", sprint doc): `rsi_max`/`rsi_min` ->
 `_indicators.volume.volume_ratio(volumes, 20)`; `atr_percentile_min` ->
 `_indicators.volatility.atr(highs, lows, closes, 14)` (percentile computed
 over the fetched window's own non-None ATR values, `<=`-rank, same
-convention as `_regime._rules_fallback`'s `vol_pctile`).
+convention as `_regime._rules_fallback`'s `vol_pctile`). STRATEGY-PACK.md
+vocabulary additions (S2): `ema_above` -> `_indicators.trend.ema(closes, n)`;
+`rsi_band` -> `_indicators.momentum.rsi(closes, 14)` (same computation the
+`rsi_max`/`rsi_min` filters share when both are present — never
+recomputed).
 
 **Filter semantics** (aligned to canonical §3's input schema where it
 speaks; flagged where it does not — see `tests/ASSUMPTIONS.md`'s new P1C
@@ -66,6 +70,15 @@ batch C entry for the full flag text, summarized here):
   - `atr_percentile_min`: last non-None ATR(14)'s `<=`-rank percentile
     within the fetched window's non-None ATR values (0-100 scale, matching
     canonical §3's `atr_percentile_min: 40` style) >= value.
+  - `ema_above: n` (STRATEGY-PACK.md S2 vocabulary addition): last close
+    STRICTLY greater than the last non-None `EMA(n)` of closes (fewer than
+    `n` closed bars in the fetched window -> insufficient-bars). Tags
+    `trend_up` on hit.
+  - `rsi_band: [lo, hi]` (STRATEGY-PACK.md S2 vocabulary addition): `lo <=`
+    last non-None `RSI(14)` `<= hi`, inclusive both ends. Tags `pullback`
+    on hit. `[lo, hi]` is validated (arity 2, both numeric, `lo <= hi`)
+    BEFORE any bar fetch, same TICKET-001 doctrine as `macd_signal`/
+    `bb_position`'s closed-vocabulary checks.
   - ALL supplied filters AND together — a symbol/timeframe must clear every
     filter present in the input dict to appear in `matches`.
 
@@ -122,6 +135,8 @@ as `_regime._STRATEGY_TAGS`'s own docstring precedent):
     bb_position inside      -> "bb_inside"      -> (no strategy affiliation)
     volume_spike hit        -> "volume_spike"   -> breakout
     atr_percentile_min hit  -> "high_volatility"-> breakout
+    ema_above hit           -> "trend_up"       -> momentum
+    rsi_band hit            -> "pullback"       -> momentum
 
 **Output** (canonical §3 shape + additive house keys, floor-not-ceiling
 rule): `scan_ts` (canonical's OWN field name — NOT the dispatch note's
@@ -153,7 +168,7 @@ from typing import Any
 
 from tradekit import strategies
 from tradekit.mae import _regime, _runtime, _scan_trace
-from tradekit.mae._indicators import momentum, volatility, volume
+from tradekit.mae._indicators import momentum, trend, volatility, volume
 from tradekit.mae._scan_trace import ScanAuditMode
 from tradekit.mae._vocab import BBPosition, MacdSignal
 
@@ -198,6 +213,30 @@ _BB_ALLOWED: set[str] = {member.value for member in BBPosition}
 _AUDIT_ALLOWED: set[str] = {"off", "on", "exhaustive"}
 
 
+def _validate_rsi_band(filters: dict[str, Any], caller: str) -> None:
+    """Validate `rsi_band`'s structural well-formedness before any bar fetch
+    (TICKET-001 doctrine, STRATEGY-PACK.md S2 vocabulary addition) — a
+    malformed arity, non-numeric bound, or inverted `[lo, hi]` all raise
+    `ValueError` naming `rsi_band`. Shared by `scan()` and `_confluence.
+    confluence()` (both scan-vocabulary entry points must reject the same
+    malformed input)."""
+    if "rsi_band" not in filters:
+        return
+    value = filters["rsi_band"]
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError(f"{caller}: rsi_band must be a [lo, hi] pair, got {value!r}")
+    lo, hi = value
+    if (
+        isinstance(lo, bool)
+        or isinstance(hi, bool)
+        or not isinstance(lo, (int, float))
+        or not isinstance(hi, (int, float))
+    ):
+        raise ValueError(f"{caller}: rsi_band bounds must be numeric, got {value!r}")
+    if lo > hi:
+        raise ValueError(f"{caller}: rsi_band bounds must satisfy lo <= hi, got {value!r}")
+
+
 class _InsufficientBars(Exception):
     """Raised internally when a present filter's required indicator has no
     non-None value in the fetched window — caught by `scan`, which converts
@@ -234,10 +273,23 @@ def _precompute_indicators(
     indicator_vars: dict[str, dict[str, Any]] = {}
     values["_vars"] = indicator_vars
 
-    if "rsi_max" in filters or "rsi_min" in filters:
+    if "ema_above" in filters:
+        period = filters["ema_above"]
+        last_ema = _last_non_none(trend.ema(closes, period))
+        if last_ema is None:
+            raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for ema_above")
+        values["ema"] = last_ema
+        indicator_vars["ema_above"] = {"period": period, "close": closes[-1], "ema": last_ema}
+
+    if "rsi_max" in filters or "rsi_min" in filters or "rsi_band" in filters:
         last_rsi = _last_non_none(momentum.rsi(closes, 14))
         if last_rsi is None:
-            name = "rsi_max" if "rsi_max" in filters else "rsi_min"
+            if "rsi_max" in filters:
+                name = "rsi_max"
+            elif "rsi_min" in filters:
+                name = "rsi_min"
+            else:
+                name = "rsi_band"
             raise _InsufficientBars(f"{symbol} {timeframe}: insufficient bars for {name}")
         values["rsi"] = last_rsi
         indicator_vars["rsi"] = {"period": 14, "close": closes[-1], "rsi": last_rsi}
@@ -358,6 +410,13 @@ def _evaluate_symbol_timeframe(
     tags: list[str] = []
     killed_by: str | None = None
 
+    def _check_ema_above() -> tuple[bool, str, str | None]:
+        last_ema = values["ema"]
+        last_close = closes[-1]
+        observed = f"close={last_close} ema={last_ema}"
+        ok = last_close > last_ema
+        return ok, observed, "trend_up" if ok else None
+
     def _check_rsi() -> tuple[bool, str, list[str]]:
         last_rsi = values["rsi"]
         candidate["rsi"] = last_rsi
@@ -374,6 +433,14 @@ def _evaluate_symbol_timeframe(
         if "rsi_min" in filters:
             rsi_tags.append("overbought")
         return True, observed, rsi_tags
+
+    def _check_rsi_band() -> tuple[bool, str, str | None]:
+        last_rsi = values["rsi"]
+        candidate["rsi"] = last_rsi
+        lo, hi = filters["rsi_band"]
+        observed = f"rsi={last_rsi}"
+        ok = lo <= last_rsi <= hi
+        return ok, observed, "pullback" if ok else None
 
     def _check_macd() -> tuple[bool, str, str | None]:
         last_hist = values["macd_hist"]
@@ -415,8 +482,12 @@ def _evaluate_symbol_timeframe(
         return ok, observed, "high_volatility" if ok else None
 
     checks: list[tuple[str, Any]] = []
+    if "ema_above" in filters:
+        checks.append(("ema_above", _check_ema_above))
     if "rsi_max" in filters or "rsi_min" in filters:
         checks.append(("rsi", _check_rsi))
+    if "rsi_band" in filters:
+        checks.append(("rsi_band", _check_rsi_band))
     if "macd_signal" in filters:
         checks.append(("macd_signal", _check_macd))
     if "bb_position" in filters:
@@ -532,6 +603,7 @@ def scan(
             f"scan_markets: unknown bb_position value {value!r}; expected one of "
             f"{sorted(_BB_ALLOWED)}"
         )
+    _validate_rsi_band(filters, "scan_markets")
 
     matches: list[dict[str, Any]] = []
     warnings: list[str] = []

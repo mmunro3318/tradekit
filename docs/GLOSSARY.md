@@ -53,6 +53,8 @@
 | signal tag | strategy-affiliated marker a surviving candidate carries out of the scan | `signal_tags: list[str]`, members like `"macd_bullish"`, `"volume_spike"` | ~~setup_tags~~, ~~signals~~ |
 | closed bar | a candle whose interval has completed; the ONLY bar the setup gate may read | `get_closed_bars(...)` | ~~candle~~ (prose ok, not identifiers), ~~finished bar~~ |
 | attrition | per-filter count of candidates killed at each scan stage (TICKET-001) | `ScanAttrition*` | ~~funnel loss~~, ~~drop-off~~ |
+| ema_above / trend_up | S2 filter: last close strictly > EMA(n) (SMA-seeded); fires tag trend_up (momentum family) — ASSUMPTIONS 174 | `{"ema_above": 50}` -> `"trend_up"` | ~~above ema~~, ~~uptrend~~ |
+| rsi_band / pullback | S2 filter: lo <= RSI(14) <= hi inclusive both ends; fires tag pullback (momentum family) — ASSUMPTIONS 174 | `{"rsi_band": [35, 50]}` -> `"pullback"` | ~~rsi range~~ (rsi_max/rsi_min are the open-ended forms) |
 | regime | HMM/EWMA market-state classification gating strategy tags | `get_regime`, states incl. `"neutral"` | ~~market mode~~ |
 
 ## policy context

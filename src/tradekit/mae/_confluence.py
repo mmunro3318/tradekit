@@ -107,6 +107,7 @@ def confluence(
                 f"scan_confluence: unknown bb_position value {value!r}; expected one of "
                 f"{sorted(_scanner._BB_ALLOWED)}"
             )
+        _scanner._validate_rsi_band(filters, "scan_confluence")
 
     matches: list[dict[str, Any]] = []
     warnings: list[str] = []

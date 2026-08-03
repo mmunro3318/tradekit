@@ -1,3 +1,18 @@
+## 2026-08-03e (Fable — paper-sprint batch E: S2 pullback GREEN, verdict ACCEPT)
+
+- S2 pullback-continuation live in the registry: 4h {ema_above 50 +
+  macd bullish_cross} min_tags 2 -> 1h {rsi_band [35,50]} min_tags 1.
+  New vocab wired into the SHARED evaluation path (both scan verbs);
+  trend_up/pullback tags -> momentum. EMA already existed (SMA-seeded,
+  golden-covered) -- only wiring needed. Red fd86be4 (22 tests incl.
+  hand-derived RSI 35.0/50.0 exact-boundary goldens), review round 18
+  ACCEPT (first clean verdict; red-s2 graded A). ASSUMPTIONS 174 pins
+  strict-> / inclusive-band semantics + the S2-1 residual + the
+  regime_families tension deferred to T-MTF-4. GATE green.
+- THE FUNNEL NOW HAS A SECOND WAY TO FIRE. Next: S4 restricted reversion
+  (the bear-regime strategy) + horizon_hours thesis field, then T-MTF-4
+  walk + funnel-only cadence.
+
 ## 2026-08-03d (Fable — paper-sprint batch D: T-MTF-3 registry GREEN)
 
 - Strategy registry landed (mae/_strategies.py: frozen 7-field StrategyDef,

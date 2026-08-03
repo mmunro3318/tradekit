@@ -51,7 +51,28 @@ _S1_MOMENTUM = StrategyDef(
     tag="s1_momentum",
 )
 
-STRATEGIES: tuple[StrategyDef, ...] = (_S1_MOMENTUM,)
+_S2_PULLBACK = StrategyDef(
+    key="s2_pullback",
+    side="buy",
+    legs=(
+        {
+            "timeframe": "4h",
+            "filters": {"ema_above": 50, "macd_signal": "bullish_cross"},
+            "min_tags": 2,
+        },
+        {
+            "timeframe": "1h",
+            "filters": {"rsi_band": [35, 50]},
+            "min_tags": 1,
+        },
+    ),
+    regime_families=("momentum", "breakout"),
+    size_scale=Decimal("1"),
+    r_multiple_override=None,
+    tag="s2_pullback",
+)
+
+STRATEGIES: tuple[StrategyDef, ...] = (_S1_MOMENTUM, _S2_PULLBACK)
 
 
 def build_registry(defs: tuple[StrategyDef, ...]) -> dict[str, StrategyDef]:

@@ -42,6 +42,10 @@ TAGS: dict[str, str | None] = {
     "bb_inside": None,
     "volume_spike": "breakout",
     "high_volatility": "breakout",
+    # STRATEGY-PACK.md S2 vocabulary additions ("Vocabulary additions" table,
+    # both pinned "momentum" verbatim by the doc's own family column).
+    "trend_up": "momentum",
+    "pullback": "momentum",
 }
 
 # The canonical strategy-family vocabulary, derived from TAGS's own non-None

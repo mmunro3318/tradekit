@@ -429,3 +429,19 @@ GLOSSARY (no rename — Surgical Changes).
 ASSUMPTIONS 173 pins the re-adjudication + the T-MTF-4 non-empty-tags
 prerequisite. Hygiene backlog: --import-mode=importlib (retire basename
 collisions suite-wide).
+
+## Round 18 — 2026-08-03 — STRATEGY-PACK S2 pullback (red fd86be4, green this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate + mutant probes (>=-mutant,
+band-widening mutant, float knife-edge checks) + digit-by-digit golden
+re-derivation. Verdict ACCEPT — first clean verdict of the sprint. 1 MED
+(pre-flagged S2-1: exclusive-side rsi_band boundary unexercised by bars —
+ratified with residual, ASSUMPTIONS 174.3), 3 LOW (garbled docstring line
+fixed at close-out; ema_above param loud-but-late per volume_spike
+convention; regime_families-vs-tag-family latent tension deferred to
+T-MTF-4).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-s2 | 3 test files, 22 tests | 0 | 1 | 0 | A | Hand-derived goldens all float-verified correct; vacuous-at-red trio honestly flagged; doc typo caught per precedent; escape hatch escalated, never improvised. |
+| green-s2 | _scanner/_confluence/strategies/_strategies | 0 | 0 | 1 | A− | Surgical wiring, RSI series shared (no recompute drift), one shared validator pre-fetch in both verbs; docked one garbled docstring sentence. |
