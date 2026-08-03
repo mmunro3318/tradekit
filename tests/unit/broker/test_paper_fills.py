@@ -21,7 +21,7 @@ fake.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 import pytest
 from ulid import ULID
@@ -43,6 +43,16 @@ from tradekit.contracts import (
 from tradekit.ledger import default_ledger
 
 _ASSET = AssetRef(symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01"))
+# In-kind-fee fixtures (SPEC-inkind-fees, AC-2..5) — venue MUST be alpaca:
+# the in-kind withhold arithmetic is scoped to (venue="alpaca",
+# asset_class="crypto") only; kraken keeps the USD-fee model (spec's
+# "out of scope" list) and every _ASSET-based test above stays untouched.
+_ALPACA_CRYPTO = AssetRef(
+    symbol="ETH/USD", venue="alpaca", asset_class="crypto", tick_size=Decimal("0.01")
+)
+_ALPACA_EQUITY = AssetRef(
+    symbol="AAPL", venue="alpaca", asset_class="equity", tick_size=Decimal("0.01")
+)
 _ACCOUNT_REF = "paper:fills-test"
 _VERDICT = VerdictToken(verdict_id="v-1", policy_version_hash="0" * 64)
 _T0 = datetime(2026, 1, 2, tzinfo=UTC)
@@ -648,3 +658,302 @@ def test_submit_accepts_an_allow_token_when_a_later_verdict_is_also_an_allow(
 
     fills = broker.fills(_T0)
     assert len(fills) == 1, "the earlier allow token is still valid — no newer DENY exists"
+
+
+# ---------------------------------------------------------------------------
+# In-kind crypto fee physics (SPEC-inkind-fees, AC-2..5) — venue=alpaca,
+# asset_class=crypto ONLY (kraken/equity keep the OLD USD-fee model, out of
+# scope). `FillRecordedPayload.fee_asset_qty` does not exist on the model
+# yet, so every assertion below that reads it off the raw ledger payload
+# (subscript, not `.get(..., default)`) fails with a KeyError until the
+# dev pass adds the field — the RIGHT reason for red here.
+# ---------------------------------------------------------------------------
+
+
+def _last_fill_payload(account_ref: str) -> dict:
+    """This account's most-recently-appended `FillRecorded` payload, as the
+    RAW ledger dict (not the `contracts.Fill` projection, which never
+    carries `fee_asset_qty` — only `FillRecordedPayload`, the producer-side
+    contract, does per the SPEC's interface pins)."""
+    events = [
+        e
+        for e in default_ledger().query(EventFilter(types=["FillRecorded"]))
+        if e.payload.get("account_ref") == account_ref
+    ]
+    assert events, f"no FillRecorded event for account_ref={account_ref!r}"
+    return events[-1].payload
+
+
+def test_market_buy_alpaca_crypto_withholds_fee_in_kind_and_cash_delta_is_exact_notional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2 (SPEC-inkind-fees), market path: mid=1883.57 (2026-07-26
+    live-receipt mid), qty=0.002602483 (same live-receipt buy).
+        half_spread_rate (alpaca/crypto, costs._TABLE) = 0.0010
+        fill_price = mid * 1.0010 = 1885.45357
+        fee_asset_qty = ceil9(0.0025 * 0.002602483) = 0.000006507
+        fees_usd = fee_asset_qty * fill_price   (USD valuation only)
+    Cash delta must be EXACTLY -(qty * fill_price) — no separate fee
+    deduction; the withhold is embodied in the RECEIVED qty, not cash."""
+    mid = Decimal("1883.57")
+    qty = Decimal("0.002602483")
+    bar = _bar(_T0, open_="1883.57", high="1900.00", low="1870.00", close=str(mid))
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-buy-alpaca-market")
+    order = OrderRequest(
+        thesis_id="TH-buy-alpaca-market",
+        account_ref=_ACCOUNT_REF,
+        asset=_ALPACA_CRYPTO,
+        side="buy",
+        order_type="market",
+        qty=qty,
+    )
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(order, _VERDICT)
+
+    expected_fee_asset_qty = (Decimal("0.0025") * qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    assert expected_fee_asset_qty == Decimal("0.000006507"), (
+        "sanity check on the hand-derived rounding-up (spec's own measured example)"
+    )
+    expected_fill_price = mid * (Decimal("1") + Decimal("0.0010"))
+    expected_fees_usd = expected_fee_asset_qty * expected_fill_price
+
+    payload = _last_fill_payload(_ACCOUNT_REF)
+    assert Decimal(str(payload["fee_asset_qty"])) == expected_fee_asset_qty
+    assert Decimal(str(payload["fees_usd"])) == expected_fees_usd
+
+    account = PaperBroker(account_ref=_ACCOUNT_REF).account()
+    assert account.settled_cash_usd == -(qty * expected_fill_price), (
+        "AC-2: cash delta is EXACTLY -(qty * fill_price) — no principal seeded, so the "
+        "account's whole settled cash IS the delta"
+    )
+
+
+def test_limit_buy_alpaca_crypto_withholds_fee_in_kind_and_cash_delta_is_exact_notional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2 (SPEC-inkind-fees), limit path (`_record_limit_fill`) — same
+    physics as the market path, fill price is the LIMIT price itself.
+        limit=2000.00, qty=0.001
+        fee_asset_qty = ceil9(0.0025 * 0.001) = 0.0000025 (exact, no
+            rounding-up needed at this qty — the market-path test above
+            covers the non-exact-boundary rounding case)
+        fees_usd = fee_asset_qty * limit_price = 0.0000025 * 2000.00 = 0.005
+    """
+    limit_price = Decimal("2000.00")
+    qty = Decimal("0.001")
+    quiet_bar = _bar(_T0, open_="2010", high="2020", low="2005", close="2010.00")
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([quiet_bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0)
+
+    _seed_allow_verdict(thesis_id="TH-buy-alpaca-limit")
+    order = OrderRequest(
+        thesis_id="TH-buy-alpaca-limit",
+        account_ref=_ACCOUNT_REF,
+        asset=_ALPACA_CRYPTO,
+        side="buy",
+        order_type="limit",
+        qty=qty,
+        limit_price=limit_price,
+    )
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    ack = broker.submit(order, _VERDICT)
+    assert broker.order_status(ack.order_id).status == "open"
+
+    through_ts = _T0 + timedelta(days=1)
+    through_bar = _bar(through_ts, open_="2005", high="2010", low="1999.99", close="2001")
+    monkeypatch.setattr(
+        "tradekit.mae._runtime.get_closed_bars",
+        _bars([quiet_bar, through_bar]),
+    )
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: through_ts + timedelta(hours=1))
+    status = broker.order_status(ack.order_id)
+    assert status.status == "filled"
+
+    expected_fee_asset_qty = (Decimal("0.0025") * qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    assert expected_fee_asset_qty == Decimal("0.0000025")
+    expected_fees_usd = expected_fee_asset_qty * limit_price
+    assert expected_fees_usd == Decimal("0.005"), "0.0000025 * 2000.00 = 0.005"
+
+    payload = _last_fill_payload(_ACCOUNT_REF)
+    assert Decimal(str(payload["fee_asset_qty"])) == expected_fee_asset_qty
+    assert Decimal(str(payload["fees_usd"])) == expected_fees_usd
+
+    account = PaperBroker(account_ref=_ACCOUNT_REF).account()
+    assert account.settled_cash_usd == -(qty * limit_price), (
+        "AC-2: cash delta is EXACTLY -(qty * limit_price), no separate fee deduction"
+    )
+
+
+def test_market_sell_alpaca_crypto_fee_asset_qty_is_zero_and_sell_physics_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-3 (SPEC-inkind-fees): a SELL never withholds in-kind (the fee
+    comes out of USD proceeds, exactly like before) — `fee_asset_qty == 0`
+    and `fees_usd`/cash delta follow the UNCHANGED `price_friction` sell
+    physics (the same formula this file's kraken sell test already pins)."""
+    mid = Decimal("1882.03")
+    qty = Decimal("0.002595976")
+    bar = _bar(_T0, open_="1882.03", high="1900.00", low="1870.00", close=str(mid))
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-sell-alpaca-market")
+    order = OrderRequest(
+        thesis_id="TH-sell-alpaca-market",
+        account_ref=_ACCOUNT_REF,
+        asset=_ALPACA_CRYPTO,
+        side="sell",
+        order_type="market",
+        qty=qty,
+    )
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(order, _VERDICT)
+
+    fill_price = mid * (Decimal("1") - Decimal("0.0010"))
+    notional_usd = mid * qty  # friction prices off the PRE-adjustment mid (module docstring)
+    expected_fees_usd = Decimal("0.0025") * notional_usd
+
+    payload = _last_fill_payload(_ACCOUNT_REF)
+    assert Decimal(str(payload["fee_asset_qty"])) == Decimal("0"), (
+        "AC-3: sells never withhold in-kind"
+    )
+    assert Decimal(str(payload["fees_usd"])) == expected_fees_usd
+
+    account = PaperBroker(account_ref=_ACCOUNT_REF).account()
+    assert account.settled_cash_usd == (qty * fill_price) - expected_fees_usd, (
+        "AC-3: cash delta == +(qty * fill_price) - fees_usd, unchanged sell physics"
+    )
+
+
+def test_market_buy_alpaca_equity_fee_asset_qty_is_zero_byte_identical_to_today(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-4 (SPEC-inkind-fees): the in-kind withhold arithmetic is scoped to
+    (venue="alpaca", asset_class="crypto") only — an alpaca EQUITY buy gets
+    `fee_asset_qty == 0` (fee_rate("alpaca","equity") == 0 anyway) and
+    behavior identical to today's zero-commission equity physics."""
+    mid = Decimal("190.00")
+    qty = Decimal("1")
+    bar = _bar(_T0, open_="190.00", high="192.00", low="188.00", close=str(mid))
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-buy-alpaca-equity")
+    order = OrderRequest(
+        thesis_id="TH-buy-alpaca-equity",
+        account_ref=_ACCOUNT_REF,
+        asset=_ALPACA_EQUITY,
+        side="buy",
+        order_type="market",
+        qty=qty,
+    )
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(order, _VERDICT)
+
+    payload = _last_fill_payload(_ACCOUNT_REF)
+    assert Decimal(str(payload["fee_asset_qty"])) == Decimal("0")
+    assert Decimal(str(payload["fees_usd"])) == Decimal("0"), "zero-commission equities"
+
+    fill_price = mid * (Decimal("1") + Decimal("0.0001"))  # alpaca/equity half_spread_rate
+    account = PaperBroker(account_ref=_ACCOUNT_REF).account()
+    assert account.settled_cash_usd == -(qty * fill_price)
+
+
+def test_positions_after_alpaca_crypto_buy_reflects_the_net_in_kind_held_qty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5 (SPEC-inkind-fees): `PaperBroker.positions()` qty derivation is
+    `sum(buy.qty - buy.fee_asset_qty) - sum(sell.qty)` — the position must
+    show the NET held amount (Q - W), not the gross filled qty Q, matching
+    the live-receipt held amount 0.002595976 (dev-log 07-26b)."""
+    mid = Decimal("1883.57")
+    qty = Decimal("0.002602483")
+    bar = _bar(_T0, open_="1883.57", high="1900.00", low="1870.00", close=str(mid))
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-buy-alpaca-positions")
+    order = OrderRequest(
+        thesis_id="TH-buy-alpaca-positions",
+        account_ref=_ACCOUNT_REF,
+        asset=_ALPACA_CRYPTO,
+        side="buy",
+        order_type="market",
+        qty=qty,
+    )
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(order, _VERDICT)
+
+    expected_fee_asset_qty = (Decimal("0.0025") * qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    expected_held_qty = qty - expected_fee_asset_qty
+    assert expected_held_qty == Decimal("0.002595976"), (
+        "matches the 2026-07-26 live receipt's held ETH amount"
+    )
+
+    positions = broker.positions()
+    assert len(positions) == 1
+    assert positions[0].qty == expected_held_qty
+
+
+def test_positions_flat_after_selling_exactly_the_net_in_kind_held_qty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5 round trip: selling EXACTLY the net held qty (Q - W, never the
+    original filled qty Q — a full-qty sell would be rejected/leave dust
+    per the live smoke run, spec's out-of-scope note) leaves the account
+    flat, same zero-qty-row-omitted representation as today."""
+    buy_mid = Decimal("1883.57")
+    buy_qty = Decimal("0.002602483")
+    buy_bar = _bar(_T0, open_="1883.57", high="1900.00", low="1870.00", close=str(buy_mid))
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _bars([buy_bar]))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: _T0 + timedelta(days=1))
+
+    _seed_allow_verdict(thesis_id="TH-roundtrip-alpaca")
+    broker = PaperBroker(account_ref=_ACCOUNT_REF)
+    broker.submit(
+        OrderRequest(
+            thesis_id="TH-roundtrip-alpaca",
+            account_ref=_ACCOUNT_REF,
+            asset=_ALPACA_CRYPTO,
+            side="buy",
+            order_type="market",
+            qty=buy_qty,
+        ),
+        _VERDICT,
+    )
+
+    expected_fee_asset_qty = (Decimal("0.0025") * buy_qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    held_qty = buy_qty - expected_fee_asset_qty
+
+    sell_ts = _T0 + timedelta(days=2)
+    sell_bar = _bar(sell_ts, open_="1882.03", high="1890.00", low="1875.00", close="1882.03")
+    monkeypatch.setattr(
+        "tradekit.mae._runtime.get_closed_bars", _bars([buy_bar, sell_bar])
+    )
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: sell_ts + timedelta(hours=1))
+    broker.submit(
+        OrderRequest(
+            thesis_id="TH-roundtrip-alpaca",
+            account_ref=_ACCOUNT_REF,
+            asset=_ALPACA_CRYPTO,
+            side="sell",
+            order_type="market",
+            qty=held_qty,
+        ),
+        _VERDICT,
+    )
+
+    assert broker.positions() == [], (
+        "AC-5: selling exactly the net post-fee held qty must leave the account flat"
+    )

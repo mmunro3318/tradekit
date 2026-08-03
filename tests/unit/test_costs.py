@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from tradekit.costs import price_friction
+from tradekit.costs import fee_rate, price_friction
 
 
 def test_alpaca_crypto_ten_dollar_side() -> None:
@@ -37,5 +37,36 @@ def test_unknown_venue_dies_loudly() -> None:
         price_friction("robinhood", "equity", Decimal("10"), "buy")
     # A venue without a cost table must NEVER price as free — silent zero
     # friction is exactly the simulation-optimism TD-8 exists to kill.
+
+
+# ---------------------------------------------------------------------------
+# AC-10 (SPEC-inkind-fees) — costs.fee_rate(venue, asset_class) -> Decimal,
+# a one-side accessor onto the SAME _TABLE price_friction reads from.
+# ---------------------------------------------------------------------------
+
+
+def test_fee_rate_alpaca_crypto_matches_the_table() -> None:
+    """BEHAVIOR: `fee_rate` reads the SAME `_TABLE` cell `price_friction`
+    prices off — `_TABLE[("alpaca", "crypto")]` = (fee_rate=0.0025, ...),
+    the exact rate the in-kind withhold arithmetic (SPEC interface pins)
+    multiplies against `qty`."""
+    assert fee_rate("alpaca", "crypto") == Decimal("0.0025")
+
+
+def test_fee_rate_alpaca_equity_is_zero() -> None:
+    assert fee_rate("alpaca", "equity") == Decimal("0")
+
+
+def test_fee_rate_kraken_crypto_matches_the_table() -> None:
+    assert fee_rate("kraken", "crypto") == Decimal("0.0026")
+
+
+def test_fee_rate_unknown_venue_raises_the_same_error_price_friction_raises() -> None:
+    """AC-10: `fee_rate("nosuch", "crypto")` must raise the SAME loud error
+    taxonomy `price_friction` raises on an unknown `(venue, asset_class)` —
+    never a silent `Decimal("0")`, the exact fabrication class TD-8 exists
+    to kill."""
+    with pytest.raises(ValueError, match="cost table"):
+        fee_rate("nosuch", "crypto")
 
 

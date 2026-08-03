@@ -31,6 +31,21 @@ _SLIPPAGE_FREE_NOTIONAL = Decimal("100")
 _SLIPPAGE_RATE = Decimal("0.0005")
 
 
+def fee_rate(venue: str, asset_class: str) -> Decimal:
+    """One-side taker fee rate, read off the SAME `_TABLE` `price_friction`
+    prices from (SPEC-inkind-fees) — the in-kind withhold arithmetic needs
+    the bare rate, not a full `Friction` breakdown. Unknown venues die
+    loudly, same taxonomy as `price_friction` (never a silent free price)."""
+    try:
+        rate, _half_spread_rate = _TABLE[(venue, asset_class)]
+    except KeyError:
+        raise ValueError(
+            f"no cost table for venue={venue!r} asset_class={asset_class!r} — "
+            f"add it to tradekit.costs._TABLE with a WHY (TD-8), known: {sorted(_TABLE)}"
+        ) from None
+    return rate
+
+
 def price_friction(
     venue: str,
     asset_class: str,

@@ -245,3 +245,10 @@ over time via the tick collector, not provider-side pagination.
 
 See ASSUMPTIONS 161 (supersedes 33) and
 `src/tradekit/mae/_data/{kraken,alpaca_data}.py`.
+
+## Paper-record sprint (seed: HANDOFF-2026-07-27-paper-sprint.md)
+
+### In-kind fee fix (SPEC-inkind-fees.md, feature/inkind-fees)
+- [x] T1: fill payload field + fee_rate accessor
+- [x] T2: broker fill physics (paper + alpaca in-kind withhold) — MONEY-PATH review round
+- [x] T3: compute_pnl in-kind arithmetic + live-receipts golden + docs

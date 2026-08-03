@@ -24,6 +24,7 @@ from ulid import ULID
 from tradekit.contracts import (
     DemotedPayload,
     Event,
+    FillRecordedPayload,
     GateViolationDetectedPayload,
     HaltClearedPayload,
     HaltSetPayload,
@@ -304,3 +305,74 @@ def test_producer_round_trip_pattern_thesis_submitted() -> None:
         "reconstruct) must be lossless — this is the ASSUMPTIONS-10 ratified contract "
         "every P2/P3 producer relies on"
     )
+
+
+# ---------------------------------------------------------------------------
+# AC-1 (SPEC-inkind-fees) — FillRecordedPayload.fee_asset_qty: Decimal =
+# Decimal("0") default, backward-compat with every serialized FillRecorded
+# event written before this field existed.
+# ---------------------------------------------------------------------------
+
+_FILL_KWARGS_NO_FEE_ASSET_QTY: dict = dict(
+    order_id="ord-1",
+    thesis_id="th-1",
+    account_ref="paper:alpha",
+    ts_utc=T0,
+    price=Decimal("50000.00"),
+    qty=Decimal("0.001"),
+    fees_usd=Decimal("0.13"),
+    side="buy",
+    quote_snapshot={},
+    symbol="BTC/USD",
+)
+
+
+def test_fill_recorded_payload_fee_asset_qty_defaults_to_zero_on_construction() -> None:
+    """CONTRACT: constructing `FillRecordedPayload` with no `fee_asset_qty`
+    kwarg (every pre-this-batch producer call site) must succeed and yield
+    `Decimal("0")` — the SPEC's pinned default (interface pins block)."""
+    payload = FillRecordedPayload(**_FILL_KWARGS_NO_FEE_ASSET_QTY)
+    assert payload.fee_asset_qty == Decimal("0")
+
+
+def test_fill_recorded_payload_from_pre_batch_serialized_event_validates_defaults_zero() -> None:
+    """AC-1 (SPEC-inkind-fees): a serialized `FillRecorded` event written
+    BEFORE this change (a raw envelope-payload dict with no `fee_asset_qty`
+    key at all — simulating a row already on a real ledger) must still
+    validate successfully through `FillRecordedPayload`, and the missing
+    field must resolve to `Decimal("0")`, never a validation error."""
+    old_event = Event(
+        event_id=str(ULID()),
+        ts_utc=T0,
+        type="FillRecorded",
+        actor="system:paper-broker",
+        run_id=None,
+        schema_ver=1,
+        payload={
+            "order_id": "ord-1",
+            "thesis_id": "th-1",
+            "account_ref": "paper:alpha",
+            "ts_utc": T0.isoformat(),
+            "price": "50000.00",
+            "qty": "0.001",
+            "fees_usd": "0.13",
+            "side": "buy",
+            "quote_snapshot": {},
+            "symbol": "BTC/USD",
+            # no "fee_asset_qty" key — the pre-batch shape.
+        },
+    )
+
+    reconstructed = FillRecordedPayload.model_validate(old_event.payload)
+
+    assert reconstructed.fee_asset_qty == Decimal("0")
+
+
+def test_fill_recorded_payload_accepts_an_explicit_nonzero_fee_asset_qty() -> None:
+    """CONTRACT: a producer MAY set `fee_asset_qty` explicitly (an in-kind
+    crypto buy withhold) and it round-trips through the model unchanged —
+    the field is a real Decimal, not silently coerced to the default."""
+    payload = FillRecordedPayload(
+        **{**_FILL_KWARGS_NO_FEE_ASSET_QTY, "fee_asset_qty": Decimal("0.000006507")}
+    )
+    assert payload.fee_asset_qty == Decimal("0.000006507")

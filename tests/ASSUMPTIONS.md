@@ -3172,3 +3172,30 @@ Three ratified decisions binding this batch's green implementation:
    route is the equivalent, dependency-free path to the same pinned
    contract (unknown `--audit` value -> exit 2, matching AC-13's
    missing-`--equity` precedent, `--out` never created).
+
+### 170 — in-kind crypto fee convention (SPEC-inkind-fees, supersedes 142's USD-only framing; live-measured 2026-07-26)
+Alpaca withholds crypto fees IN-KIND from the RECEIVED asset: buys — fee
+in the crypto (position held = filled_qty − fee_asset_qty); sells — fee in
+the USD proceeds (unchanged fees_usd physics). Ratified pins:
+
+1. **Withhold arithmetic**: `fee_asset_qty = (costs.fee_rate("alpaca",
+   "crypto") * qty).quantize(Decimal("1e-9"), ROUND_CEILING)`;
+   `fees_usd = fee_asset_qty * fill_price` (USD valuation, reporting/P&L
+   only). Scope: (venue="alpaca", asset_class="crypto", side="buy") ONLY —
+   kraken venue and equities keep the USD-fee model. **ROUND_CEILING at
+   1e-9 is PROVISIONAL** (single live observation: 0.0025×0.002602483 →
+   0.000006507, HALF_EVEN would give ...506); re-measure on the 3
+   probationary live trades and amend here if contradicted (spec U1).
+2. **Paper avg_price convention**: venue-style fill price (single buy →
+   avg_price == fill price, matching Alpaca's own avg_entry_price on an
+   in-kind buy), qty net of withhold. NOT cash-paid/net-qty cost basis —
+   position notional understates cash paid by the withhold's value.
+   Nothing downstream may size or price off paper avg_price; exit sizing
+   uses positions() qty (the net amount), never entry filled_qty.
+3. **compute_pnl domain**: the long-branch two-term formula (exit
+   proceeds − exit fees − entry cost, entry fees dropped iff
+   fee_asset_qty > 0 to avoid double-counting the in-kind withhold) is
+   defined for ≤2 fills per thesis. Middle-fill fees of a 3+-fill thesis
+   are NOT part of the formula — multi-fill/partial exits remain out of
+   scope (pre-existing compute_pnl docstring pin) and need their own
+   spec'd batch before any producer emits them.

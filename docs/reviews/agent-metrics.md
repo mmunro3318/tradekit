@@ -344,3 +344,24 @@ docked only for the coincidentally-green W4 noted in its own report). Green
 implementer A- (exact adjudicated threading, justified Typer-vs-click
 deviation documented in ASSUMPTIONS 169; missed the same-day re-tee hole the
 CTO patched post-review: tee now snapshots pre-run audit logs).
+
+## Round 14 — 2026-08-03 — SPEC-inkind-fees money-path batch (red 004a097+5bcfd53, green this commit)
+
+Reviewer: tk-reviewer (top model). Verification: reviewer self-ran full gate
+(pytest green, ruff clean, mypy clean 92 files); CTO re-gated post-fix.
+Verdict FIX-FIRST — zero code-behavior defects; blocking items were AC-11
+docs (undelivered at review time; CTO close-out duty) and one false comment.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-inkind | 7 test files, AC-1..10 | 0 | 0 | 2 | A− | Behavior-first, independently derived goldens, red-for-right-reason discipline; AC-8 anti-double-deduction trap exemplary. Docked: 0.005 sanity-literal typo, golden entry-fee weakness (both CTO-caught), unpinned avg_price. |
+| green-inkind | 5 src files | 0 | 1 | 2 | A− | Surgically scoped, every pinned arithmetic path correct, backward compat at every reader, legacy events replay under recorded physics. Docked: false avg_price comment (MED, misleads exit-verb batch), undocumented 3+-fill semantic delta. |
+
+CTO adjudications: golden entry fees_usd 0→realistic (strengthens, catches
+double-subtraction); test typo 0.000005→0.005 (self-contradicting literal);
+avg_price behavior ACCEPTED as venue-style fill price / comment REJECTED and
+rewritten (ASSUMPTIONS 170.2); 3+-fill fee semantics pinned out-of-domain
+(ASSUMPTIONS 170.3). Latent watch items (not defects): _alpaca side-default
+routes missing-side crypto fills to in-kind branch; ManualBroker legacy
+physics would double-count if it ever shared an account_ref with alpaca
+in-kind fills (no such ref exists).
