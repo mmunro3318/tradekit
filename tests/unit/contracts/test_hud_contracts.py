@@ -179,6 +179,21 @@ class TestAdvisoryTicketContract:
         with pytest.raises(ValidationError):
             _ticket(created_at=datetime(2026, 7, 20, 12, 0))  # naive
 
+    def test_strategy_key_defaults_to_empty_string(self) -> None:
+        """T1-AC-2 (docs/specs/SPEC-cadence.md): `AdvisoryTicket` gains an
+        additive `strategy_key: str = ""` field -- an old-style fixture
+        construction (this file's own `_ticket()` helper, unmodified, which
+        is exactly every pre-batch call site's shape) must still validate,
+        with strategy_key defaulting to the empty/unclaimed sentinel."""
+        ticket = _ticket()
+        assert ticket.strategy_key == ""
+
+    def test_strategy_key_accepts_the_claiming_strategy_defs_key(self) -> None:
+        """T1-AC-2: strategy_key round-trips the claiming def's key
+        verbatim when explicitly set."""
+        ticket = _ticket(strategy_key="s4_reversion")
+        assert ticket.strategy_key == "s4_reversion"
+
 
 class TestHudStateContract:
     def test_frozen(self) -> None:

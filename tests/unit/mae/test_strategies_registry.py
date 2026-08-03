@@ -130,6 +130,10 @@ _S1_VOLUMES = [100.0] * (len(_S1_MACD_BULLISH_CLOSES) - 1) + [1000.0]
 
 
 def test_strategy_def_field_set_matches_pinned_shape() -> None:
+    # SPEC-cadence T1 (supersedes 173.1's batch-scoped 7-field ruling):
+    # StrategyDef gains an 8th field, horizon_hours, so the walk's claiming
+    # def can drive the ticket/thesis horizon (docs/specs/SPEC-cadence.md
+    # T1 interface pins).
     field_names = {f.name for f in dataclasses.fields(StrategyDef)}
     assert field_names == {
         "key",
@@ -139,6 +143,7 @@ def test_strategy_def_field_set_matches_pinned_shape() -> None:
         "size_scale",
         "r_multiple_override",
         "tag",
+        "horizon_hours",
     }
 
 
@@ -210,6 +215,9 @@ def test_s1_strategy_def_encodes_todays_hud_setup_battery() -> None:
     assert s1.size_scale == Decimal("1")
     assert s1.r_multiple_override is None
     assert s1.tag == "s1_momentum"
+    # SPEC-cadence T1-AC-5: S1 default horizon_hours 168 (7d, byte-identical
+    # to every pre-batch thesis per ASSUMPTIONS 175.3).
+    assert s1.horizon_hours == 168
     # ASSUMPTION-FLAG 1: regime_families not pinned verbatim by MTF-SCAN.md
     # for S1. Derived from the two tags S1's filters can emit
     # (`_scanner.py`:118-123: macd_signal bullish_cross -> "macd_bullish" ->

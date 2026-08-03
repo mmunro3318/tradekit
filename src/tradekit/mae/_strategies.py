@@ -33,6 +33,11 @@ class StrategyDef:
     size_scale: Decimal
     r_multiple_override: Decimal | None
     tag: str
+    # SPEC-cadence T1 (supersedes ASSUMPTIONS 173.1's batch-scoped 7-field
+    # ruling): the walk's claiming def drives the ticket/thesis horizon.
+    # 168h (7d) default matches every pre-batch thesis; S4 overrides to 48h
+    # (its time-stop restriction, STRATEGY-PACK.md "restricted reversion").
+    horizon_hours: int = 168
 
 
 _S1_MOMENTUM = StrategyDef(
@@ -94,6 +99,7 @@ _S4_REVERSION = StrategyDef(
     size_scale=Decimal("0.5"),
     r_multiple_override=Decimal("1"),
     tag="s4_reversion",
+    horizon_hours=48,
 )
 
 STRATEGIES: tuple[StrategyDef, ...] = (_S1_MOMENTUM, _S2_PULLBACK, _S4_REVERSION)

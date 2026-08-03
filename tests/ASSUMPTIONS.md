@@ -3347,3 +3347,72 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    normal-mode scans can diverge until then — documented, not silent.
 8. HMM economy residual: walk regime pre-filter + per-def confluence
    regime = 2+ fits/symbol/scan (ticketed: regime pass-through param).
+
+### 177 — cadence T1+T2: strategy-aware chain + exit verb (SPEC-cadence, review round 21)
+1. StrategyDef gains `horizon_hours: int = 168` (8th field; S4 sets 48) —
+   SUPERSEDES 173.1's batch-scoped 7-field ruling, per STRATEGY-PACK
+   "make it strategy-aware via StrategyDef".
+2. `exit_trigger(close, stop_price, target_price, now, horizon_end)` —
+   pure, Decimal prices, aware datetimes, returns
+   "stop"|"target"|"horizon"|None. ALL touches inclusive (<=, >=, gap-
+   through pinned); stop wins a same-evaluation stop+target (conservative
+   stop-first, mirrors grading's ambiguous-bar doctrine).
+3. Exit reference price (RATIFIED DEVIATION): `execute_exit`'s
+   OrderRequest.limit_price reuses `_entry_price` (the thesis's approved
+   entry economics), NOT a fresh bar close — the R-rule notional checks
+   are side-blind, and a fresh price on an appreciated position would
+   spuriously DENY the exit (R-012's 1% sizing tolerance vs the 0.25%
+   in-kind qty shrink is the quantitative margin this depends on).
+   WATCH-ITEM: revisit iff R-rules become side-aware.
+4. EXIT-FREEZE SURFACE (extends T2-AC-3's halt ruling): policy sees exits
+   as submit_order, so exits are frozen not only by R-001 halts but by
+   R-009 (30d drawdown >= 10% denies all mutating actions — positions
+   cannot be flattened exactly when losing; deliberate, ledger-visible,
+   resume/dial changes are the release valve) and R-007 (daily action cap
+   counts exits; cap-hit defers exits to UTC midnight). Ratified
+   deliberate for the paper record; MUST be re-examined before any live
+   probation trade.
+5. Ticket→def plumbing: the wire ticket carries strategy_key; the /ack
+   handler resolves via mae.STRATEGY_BY_KEY — "" → manual path
+   (hud-ack-manual, 168h), unknown NON-EMPTY key → 400, nothing ledgered.
+   build_state does NOT re-validate its own walk's key (it comes from
+   STRATEGY_BY_KEY by construction; validate at TRUST BOUNDARIES —
+   the wire is one, our own walk is not). Asymmetry ratified.
+6. exit ProposedAction.kind = "submit_order" (no new kind; R-catalog
+   awareness unchanged).
+
+### 178 — cadence T3: the autonomous runner (SPEC-cadence, review round 22)
+1. run_once(*, digest_dir: Path = docs/digest); CadenceAccountRefused
+   (pre-digest, propagates) for any default_account_ref not starting
+   "paper:". `alpaca-paper:*` is DELIBERATELY refused — the cadence runs
+   the local paper sim only; driving Alpaca's paper API unattended is a
+   scope expansion needing its own ratification. Belt-and-braces: each
+   built contract's account_ref re-checked post-build (TOCTOU guard).
+2. TWO-PHASE POLICY, REDESIGNED UNDER CONSTRAINT (supersedes the literal
+   "evaluate before draft" fix-round instruction): R-010/R-012 resolve
+   review/sizing context off the REAL ledger by thesis_id and never pass
+   vacuously — a pre-draft evaluate denies ALL entries. The binding
+   evaluate therefore runs at state `reviewed` (first state with real
+   context), and a deny → thesis.reject (terminal; never `approved`).
+   Consequences ratified: a denied entry DOES leave ThesisDrafted/
+   Submitted/ReviewCompleted/ThesisRejected events (honest audit trail,
+   no approved orphans, no unbounded accumulation — rejected theses are
+   terminal); execute_order's evaluate remains the second phase.
+3. FAILURE ENVELOPE: any unexpected exception post-guard appends
+   "### Run FAILED <ts>: <exc>" to the digest then re-raises (an
+   unattended run must never die traceless); per-symbol equity-marking
+   failures degrade (symbol skipped from the Σ, digest warning — equity
+   understated is conservative); per-thesis exit-phase parsing contained;
+   grade decoupled from exit ("grade failed after successful exit"
+   warning) with a flat+active recovery branch that grades directly — a
+   grade hiccup must not orphan a trade out of the promotion record.
+4. Fixture-reality pin: production ticket quantities derive from the SAME
+   mae.size_position call SizingComputed re-invokes (agreement within
+   R-012's 1% is structural, not luck); hand-built test tickets must
+   match the sizing derivation or R-012 legitimately denies them.
+5. Red flags reconciled: digest drought marker = case-insensitive
+   "drought" substring; active_theses_with_symbol() accessor added
+   (ledger/_models.py) and hud's inline walk refactored onto it.
+6. Scheduler: schtasks hourly via the cd /d working-directory-safe form
+   (documented in scripts/run_cadence.py header); registration is MIKE'S
+   step, never auto-executed. Script exits: 2 refusal, 1 unexpected.

@@ -51,6 +51,15 @@ wiring — this is scope for a future T-MTF-4/cadence batch, not this one.
 Consequently `StrategyDef` stays the pinned 7-field shape (no
 `horizon_hours` field added to it this batch); `horizon_hours` lives ONLY
 on `ThesisContract` per the dispatch's PINNED block.
+
+UPDATE (SPEC-cadence T1, supersedes S4-2 above): the deferred wiring has
+now landed its spec. `StrategyDef` gains `horizon_hours: int = 168` (S4
+sets 48) and `hud/_serve.py`'s contract builder becomes strategy-aware
+(docs/specs/SPEC-cadence.md T1 interface pins) -- `test_s4_strategy_def_
+field_for_field_pin` below is extended with the `horizon_hours == 48`
+assertion; the field-set re-pin itself lives in
+`test_strategies_registry.py` per that file's own 173.1-superseding
+comment.
 """
 
 from __future__ import annotations
@@ -197,6 +206,9 @@ def test_s4_strategy_def_field_for_field_pin() -> None:
     assert s4.size_scale == Decimal("0.5")
     assert s4.r_multiple_override == Decimal("1")
     assert s4.tag == "s4_reversion"
+    # SPEC-cadence T1-AC-5: S4's time-stop restriction -- 48h, not the 168h
+    # default (STRATEGY-PACK.md "restricted reversion").
+    assert s4.horizon_hours == 48
 
 
 def test_s4_registered_last_in_strategies_tuple() -> None:

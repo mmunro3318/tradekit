@@ -57,6 +57,9 @@ class AdvisoryTicket(FrozenModel):
     thesis_id: str
     verdict_id: str
     created_at: AwareDatetime
+    # SPEC-cadence T1-AC-2: additive, defaults to the "unclaimed/manual"
+    # sentinel so pre-batch fixtures (no strategy_key kwarg) still validate.
+    strategy_key: str = ""
 
 
 class HudState(FrozenModel):

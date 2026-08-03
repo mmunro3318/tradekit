@@ -265,3 +265,9 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] S2 pullback (round 18)
 - [x] S4 restricted reversion (round 19)
 - [ ] S3 breakout (deferred this sprint)
+
+### Cadence (SPEC-cadence.md)
+- [x] T1 strategy-aware chain (r21)
+- [x] T2 execute_exit + trigger (r21)
+- [x] T3 run_once + digest + script (r22)
+- [ ] Mike: register the scheduled task (command in scripts/run_cadence.py header)

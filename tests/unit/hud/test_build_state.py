@@ -463,3 +463,110 @@ class TestProviderErrorsInSetupAndSizingDegradeToWait:
         gate = next(g for g in entry.gates if g.name == "sizing")
         assert gate.passed is False
         assert "ValueError" in gate.observed
+
+
+# ---------------------------------------------------------------------------
+# T1-AC-1 (docs/specs/SPEC-cadence.md T1): the walk's claiming StrategyDef
+# drives the ticket's bracket + sizing. scan_setup doubles below carry a
+# real STRATEGY_BY_KEY key via `.strategy_key` (mirroring
+# test_hud_registry_walk.py's real-registry convention) so build_state must
+# resolve the actual s2_pullback/s4_reversion StrategyDef, not a synthetic
+# fake -- pinning the OBSERVABLE ticket outcome, not how build_state gets
+# from key to def (ASSUMPTIONS ESCAPE HATCH: the lookup mechanism itself --
+# e.g. `mae.STRATEGY_BY_KEY.get(strategy_key)` -- is not pinned by
+# SPEC-cadence.md's interface block, only the resulting r_mult/qty formula
+# is; CTO to ratify the plumbing at green).
+# ---------------------------------------------------------------------------
+
+
+class _S4ClaimedSetup:
+    signal_tags: ClassVar[list[str]] = ["at_support"]
+    strategy_key: ClassVar[str] = "s4_reversion"
+
+
+class _S2ClaimedSetup:
+    signal_tags: ClassVar[list[str]] = ["trend_up", "pullback"]
+    strategy_key: ClassVar[str] = "s2_pullback"
+
+
+class TestT1AC1StrategyAwareBracketAndSizing:
+    def test_s4_claimed_ticket_overrides_r_multiple_to_1r_and_halves_qty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1-AC-1: S4-claimed -> bracket TP at 1R (s4_reversion's real
+        `r_multiple_override=Decimal("1")`, ignoring sizing's own
+        r_multiple_target=2), qty scaled by s4's real `size_scale=Decimal
+        ("0.5")` (12 -> 6). Hand-derived from the same AC-11 golden inputs
+        this file already pins (limit 8.30000, stop_distance_usd 0.24900):
+        tp = 8.30000 + 1*0.24900 = 8.54900; sl unaffected by r_mult =
+        8.05100; qty = 12*0.5 = 6; est_total = 8.30000*6 = 49.80;
+        est_pnl_tp = 6*(8.54900-8.30000) - (fee_entry 0.02 + fee_tp_exit
+        0.02) = 1.49 - 0.04 = 1.45; est_pnl_sl = 6*(8.05100-8.30000) -
+        (0.02+0.02) = -1.49-0.04 = -1.53; tp_distance_pct = 3.00;
+        sl_distance_pct = -3.00 (unchanged from the unclaimed golden)."""
+        import tradekit.hud._build as hud_build
+
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+        _patch_setup_sufficient(monkeypatch)
+        monkeypatch.setattr(hud_build, "scan_setup", lambda symbol: _S4ClaimedSetup())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        assert len(state.tickets) == 1
+        ticket = state.tickets[0]
+        assert ticket.strategy_key == "s4_reversion"
+        assert ticket.quantity == Decimal("6")
+        assert ticket.tp_price == Decimal("8.54900")
+        assert ticket.sl_price == Decimal("8.05100")
+        assert ticket.est_total_usd == Decimal("49.80")
+        assert ticket.est_pnl_tp_usd == Decimal("1.45")
+        assert ticket.est_pnl_sl_usd == Decimal("-1.53")
+        assert ticket.tp_distance_pct == Decimal("3.00")
+        assert ticket.sl_distance_pct == Decimal("-3.00")
+
+    def test_s2_claimed_ticket_uses_sizings_own_r_multiple_and_unscaled_qty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1-AC-1: S2-claimed -> s2_pullback's real `r_multiple_override`
+        is None, so the bracket falls back to sizing's own
+        r_multiple_target (2, the AC-11 golden), and s2's real
+        `size_scale=Decimal("1")` leaves qty unscaled (12) -- the resulting
+        ticket is arithmetic-identical to the AC-11 golden ticket, only
+        `strategy_key` differs from the unclaimed case."""
+        import tradekit.hud._build as hud_build
+
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+        _patch_setup_sufficient(monkeypatch)
+        monkeypatch.setattr(hud_build, "scan_setup", lambda symbol: _S2ClaimedSetup())
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        assert len(state.tickets) == 1
+        ticket = state.tickets[0]
+        assert ticket.strategy_key == "s2_pullback"
+        assert ticket.quantity == Decimal("12")
+        assert ticket.tp_price == EXPECTED_TP_PRICE
+        assert ticket.sl_price == EXPECTED_SL_PRICE
+        assert ticket.est_total_usd == EXPECTED_EST_TOTAL_USD
+
+    def test_unclaimed_ticket_strategy_key_is_empty_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1-AC-1: unclaimed (scan_setup double with no `.strategy_key`
+        attribute, `_PassingSetup`, the pre-existing double every other
+        AC-11 test in this file already uses) -> byte-identical to today
+        (proven by the pre-existing AC-11 golden-arithmetic test above,
+        NOT duplicated here) PLUS the one new observable this batch adds:
+        `ticket.strategy_key == ""`."""
+        import tradekit.hud._build as hud_build
+
+        monkeypatch.setattr(hud_build, "evaluate_policy", lambda proposal: _AllowDecision())
+        monkeypatch.setattr(hud_build, "open_position_symbols", lambda: set())
+        _patch_setup_sufficient(monkeypatch)
+
+        state = build_state(["LINK/USD"], captured_at=CAPTURED_AT, equity_usd=EQUITY_USD)
+
+        assert len(state.tickets) == 1
+        assert state.tickets[0].strategy_key == ""

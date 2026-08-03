@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 import httpx
 import pytest
@@ -612,3 +612,299 @@ def test_cancel_order_on_a_filled_order_refuses_and_appends_nothing(
         if e.payload.get("order_id") == ack.order_id
     ]
     assert cancelled == []
+
+
+# ---------------------------------------------------------------------------
+# execute_exit — T2 (SPEC-cadence): the missing half of the round trip, same
+# gated pipeline shape as execute_order (require_state -> policy.evaluate ->
+# adapter.submit). RED this batch: `broker.execute_exit`/`_pipeline.
+# ExitNothingToClose` do not exist yet — every test below calls the PUBLIC
+# `broker.execute_exit` (mirrors how `execute_order` is exercised throughout
+# this file) so a missing attribute fails the individual test, never module
+# collection; `ExitNothingToClose` is imported LAZILY inside the one test
+# that needs it for the same reason.
+#
+# ASSUMPTIONS FLAGS (T2 dispatch escape hatch — flagged here, not
+# improvised; CTO adjudicates into tests/ASSUMPTIONS.md, next free entry
+# 177 as of this red pass):
+#   (a) the exit OrderRequest's limit_price/reference-price convention:
+#       SPEC-cadence.md's T2 pin says "limit_price = last close per
+#       _entry_price's snapshot convention" but does not say whether that
+#       snapshot is a FRESH MarketSnapshotTaken-style read or the same
+#       bar `PaperBroker.submit`'s own market-fill branch already reads
+#       off `mae._runtime.get_closed_bars` (which never consults
+#       `OrderRequest.limit_price` for a market order in the first place,
+#       per `_entry_price`'s own docstring). Tests below never assert on
+#       the exit order's `limit_price` VALUE for exactly this reason.
+#   (b) the exit's `ProposedAction` shape: `kind="submit_order"` (mirroring
+#       entry) vs. a new `kind="exit_order"` is unpinned by the spec text.
+#       Tests below assert only on `PipelineDenied`/`Verdict.allow`/
+#       `rule_hits`, never on `ProposedAction.kind` directly, for the same
+#       reason.
+#   (c) how a thesis reaches "active" in these fixtures: reused VERBATIM
+#       from this file's own `_build_approved_thesis` + a real
+#       `broker.execute_order(thesis_id)` call — the SAME
+#       `thesis._machine._activate_on_fill` producer already pinned above,
+#       never a fabricated `ThesisActivated` harness event (that pattern
+#       belongs to `tests/unit/thesis/test_grade_verb.py`, which needs
+#       activation-timestamp control this file's tests do not).
+# ---------------------------------------------------------------------------
+
+
+def _sell_events(thesis_id: str, event_type: str) -> list:
+    return [e for e in _events_of_type(thesis_id, event_type) if e.payload.get("side") == "sell"]
+
+
+def test_execute_exit_happy_path_sells_the_open_position_and_flattens_the_account(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """BEHAVIOR (T2-AC-1): a plain (non-in-kind, kraken) venue's exit sells
+    EXACTLY the open `positions()` qty; the account is flat after; an
+    `OrderAck` is returned; the exit `FillRecorded` carries `thesis_id`."""
+    thesis_id = _build_approved_thesis(thesis_kwargs, monkeypatch, make_event)
+    broker.execute_order(thesis_id)  # real entry fill -> thesis now 'active'
+    account_ref = thesis_kwargs["account_ref"]
+
+    entry_positions = broker.get(account_ref).positions()
+    assert len(entry_positions) == 1, "sanity: the entry fill must leave one open position"
+    entry_qty = entry_positions[0].qty
+
+    exit_ack = broker.execute_exit(thesis_id)
+
+    assert exit_ack.status == "accepted"
+    assert broker.get(account_ref).positions() == [], (
+        "T2-AC-1: the account must be FLAT after execute_exit"
+    )
+
+    exit_fills = _sell_events(thesis_id, "FillRecorded")
+    assert len(exit_fills) == 1
+    assert exit_fills[0].payload["thesis_id"] == thesis_id, (
+        "T2-AC-1: the exit fill payload must carry thesis_id"
+    )
+    assert Decimal(str(exit_fills[0].payload["qty"])) == entry_qty, (
+        "kraken (non-in-kind) venue: net qty == the entry's own filled qty, "
+        "no in-kind withhold to diverge them"
+    )
+
+
+def test_execute_exit_sells_the_inkind_net_qty_not_the_gross_entry_filled_qty(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """GOLDEN (T2-AC-1 in-kind case, ASSUMPTIONS 170.2 pin): an
+    alpaca/crypto/buy entry withholds its fee IN-KIND, so `positions()`'s
+    net qty is strictly LESS than the entry's `FillRecorded.qty`.
+    `execute_exit` must sell the NET number — never the gross entry
+    `filled_qty` — independently re-derived here from ASSUMPTIONS 170.1's
+    own formula (`fee_asset_qty = ceil9(0.0025 * qty)`), not read off
+    `PaperBroker.positions()`'s own implementation."""
+    thesis_id = _build_approved_thesis(
+        thesis_kwargs,
+        monkeypatch,
+        make_event,
+        asset={**thesis_kwargs["asset"], "venue": "alpaca"},
+    )
+    broker.execute_order(thesis_id)
+    account_ref = thesis_kwargs["account_ref"]
+
+    entry_fill = _events_of_type(thesis_id, "FillRecorded")[0]
+    filled_qty = Decimal(str(entry_fill.payload["qty"]))
+    fee_asset_qty = Decimal(str(entry_fill.payload["fee_asset_qty"]))
+    assert fee_asset_qty > 0, "sanity: alpaca/crypto/buy must withhold in-kind (170.1)"
+
+    # Independent GOLDEN derivation (170.1's own formula, hand-applied here —
+    # never read off PaperBroker.positions()'s own arithmetic):
+    expected_fee_asset_qty = (Decimal("0.0025") * filled_qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    assert fee_asset_qty == expected_fee_asset_qty, (
+        "sanity: the real entry fill's withhold matches this file's own hand-derivation"
+    )
+    expected_net_qty = filled_qty - expected_fee_asset_qty
+
+    positions_before = broker.get(account_ref).positions()
+    assert positions_before[0].qty == expected_net_qty, (
+        "sanity: PaperBroker.positions() already reports the net (170.2), independently "
+        "confirming this test's own derivation before execute_exit is even called"
+    )
+
+    broker.execute_exit(thesis_id)
+
+    exit_order = _sell_events(thesis_id, "OrderSubmitted")[0]
+    sold_qty = Decimal(str(exit_order.payload["qty"]))
+    assert sold_qty == expected_net_qty, (
+        "T2-AC-1 pin: exit sizing uses positions() net qty, NEVER entry filled_qty"
+    )
+    assert sold_qty < filled_qty, "the in-kind withhold must make net strictly less than gross"
+    assert broker.get(account_ref).positions() == []
+
+
+def test_execute_exit_refuses_a_thesis_not_in_active_state(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """CONTRACT (T2-AC-2, non-active branch): the SAME `require_state`
+    error taxonomy `execute_order` raises elsewhere — `IllegalTransition`
+    naming the real current state, never a bespoke exit-only error."""
+    thesis_id = _build_approved_thesis(thesis_kwargs, monkeypatch, make_event)
+    # Still 'approved' -- never activated (no execute_order call).
+
+    with pytest.raises(IllegalTransition) as excinfo:
+        broker.execute_exit(thesis_id)
+    assert excinfo.value.current_state == "approved"
+    assert excinfo.value.verb == "execute_exit"
+
+
+def test_execute_exit_on_an_active_but_flat_thesis_raises_exit_nothing_to_close(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """CONTRACT (T2-AC-2, active-but-flat branch): a NEW, loud
+    `ExitNothingToClose` — lazily imported here so a missing symbol fails
+    only this test, not module collection (see file-header note above)."""
+    from tradekit.broker._pipeline import ExitNothingToClose
+
+    thesis_id = _build_approved_thesis(thesis_kwargs, monkeypatch, make_event)
+    broker.execute_order(thesis_id)  # active, with one open position
+    account_ref = thesis_kwargs["account_ref"]
+
+    entry_fill = _events_of_type(thesis_id, "FillRecorded")[0]
+    qty = Decimal(str(entry_fill.payload["qty"]))
+    price = Decimal(str(entry_fill.payload["price"]))
+    symbol = thesis_kwargs["asset"]["symbol"]
+
+    # Zero the position via a harness-appended sell FillRecorded (mirrors
+    # _paper.py's own FillRecordedPayload shape exactly). A raw FillRecorded
+    # is NOT one of thesis._machine.THESIS_EVENT_TYPES, so derive_state is
+    # unaffected -- the thesis stays 'active' while positions() nets to
+    # zero, which IS the "active-but-flat" state T2-AC-2 pins (e.g. an
+    # advisory/manual close that hasn't been graded yet).
+    default_ledger().append(
+        make_event(
+            type="FillRecorded",
+            ts=_fake_submit_clock() + timedelta(minutes=1),
+            payload={
+                "order_id": "manual-close-1",
+                "thesis_id": thesis_id,
+                "account_ref": account_ref,
+                "ts_utc": (_fake_submit_clock() + timedelta(minutes=1)).isoformat(),
+                "price": str(price),
+                "qty": str(qty),
+                "fees_usd": "0",
+                "fee_asset_qty": "0",
+                "side": "sell",
+                "symbol": symbol,
+                "quote_snapshot": {},
+            },
+        )
+    )
+    assert broker.get(account_ref).positions() == [], "sanity: the harness fill must flatten it"
+    assert thesis._machine.derive_state(default_ledger(), thesis_id) == "active", (
+        "sanity: a raw FillRecorded must not itself advance thesis lifecycle state"
+    )
+
+    with pytest.raises(ExitNothingToClose):
+        broker.execute_exit(thesis_id)
+
+
+def test_execute_exit_deny_via_halt_raises_pipeline_denied_with_zero_broker_calls(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """CONTRACT (T2-AC-3): a real R-001 halt (via the REAL `policy.halt()`
+    verb, never a monkeypatched policy seam -- mirrors this file's own
+    deny-path convention of exercising the real rule catalog) denies the
+    exit exactly like an entry: `PipelineDenied`, ZERO broker submit calls.
+    ASSUMPTIONS (ratified, per the T2 spec text): a halt therefore freezes
+    open positions until `policy.resume()` -- deliberate, not a gap."""
+    from tradekit import policy
+
+    thesis_id = _build_approved_thesis(thesis_kwargs, monkeypatch, make_event)
+    broker.execute_order(thesis_id)
+    account_ref = thesis_kwargs["account_ref"]
+    positions_before = broker.get(account_ref).positions()
+
+    policy.halt("T2-AC-3 red-stage test: exit-time halt")
+
+    with pytest.raises(PipelineDenied) as excinfo:
+        broker.execute_exit(thesis_id)
+    assert excinfo.value.verdict.allow is False
+    assert any(hit.rule_id == "R-001" for hit in excinfo.value.verdict.rule_hits)
+
+    assert _sell_events(thesis_id, "OrderSubmitted") == [], (
+        "a deny verdict must never reach adapter.submit -- zero broker calls"
+    )
+    assert _sell_events(thesis_id, "FillRecorded") == []
+    assert broker.get(account_ref).positions() == positions_before, (
+        "a halt freezes the open position exactly as it was -- R-rules see everything, "
+        "including exits (ratified per the T2 spec text)"
+    )
+    assert thesis._machine.derive_state(default_ledger(), thesis_id) == "active", (
+        "a denied exit must never change the thesis's lifecycle state"
+    )
+
+
+def test_grade_after_execute_exit_computes_pnl_off_the_two_real_fills(
+    thesis_kwargs, monkeypatch: pytest.MonkeyPatch, make_event
+) -> None:
+    """GOLDEN (T2-AC-5): after a REAL entry fill (execute_order) and a REAL
+    exit fill (execute_exit), `thesis.grade()`'s `pnl_usd` matches the
+    net-qty golden's own two-fill formula (ASSUMPTIONS 170.3 / ratified in
+    `tests/golden/test_inkind_fee_pnl.py`'s docstring, non-in-kind kraken
+    branch here so BOTH fees terms apply, no in-kind drop):
+        pnl = (exit_qty * exit_price - exit_fees_usd)
+              - (entry_qty * entry_price + entry_fees_usd)
+    every qty/price/fee term below is read back from the REAL ledger events
+    `execute_order`/`execute_exit` produced -- never hand-invented, only
+    the FORMULA is independently applied (FIXTURE-FREEZE discipline, this
+    file's own header note)."""
+    thesis_id = _build_approved_thesis(thesis_kwargs, monkeypatch, make_event)
+    broker.execute_order(thesis_id)
+    activation = thesis._machine.latest_payload(default_ledger(), thesis_id, "ThesisActivated")
+    activation_ts = datetime.fromisoformat(str(activation["ts_utc"]))
+
+    # Re-monkeypatch bars/clock for the exit + grade phase (stacking -- the
+    # LATER setattr wins for subsequent calls, same convention as
+    # tests/unit/thesis/test_grade_verb.py's own header note): one bar
+    # whose close (70000) touches the default thesis_kwargs success
+    # criterion (price_touch gte 66000.00) so grade() reaches a real PASS
+    # outcome instead of PENDING. PaperBroker's OWN market-fill fetch
+    # (fixed "1d" timeframe, `_paper.py::_TIMEFRAME`) and `_grade_wiring.
+    # evaluate`'s fetch (the criteria's own "1h" timeframe) both hit this
+    # SAME fake, which ignores the requested timeframe/lookback and always
+    # returns this one bar -- exactly `_fake_grade_bars`'s own documented
+    # behavior in test_grade_verb.py.
+    bar_ts = activation_ts + timedelta(hours=1)
+    grade_bar = Bar(
+        ts_open=bar_ts,
+        open=Decimal("68000"),
+        high=Decimal("71000"),
+        low=Decimal("67000"),
+        close=Decimal("70000"),
+        volume=Decimal("10"),
+    )
+
+    def _fake_grade_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSeries:
+        return BarSeries(asset=_ASSET, timeframe=timeframe, bars=[grade_bar], source="fake-kraken")
+
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake_grade_bars)
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: bar_ts)
+
+    broker.execute_exit(thesis_id)
+
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: bar_ts + timedelta(hours=1))
+
+    result = thesis.grade(thesis_id)
+
+    entry_fill = _events_of_type(thesis_id, "FillRecorded")[0]
+    exit_fill = _sell_events(thesis_id, "FillRecorded")[0]
+    entry_qty = Decimal(str(entry_fill.payload["qty"]))
+    entry_price = Decimal(str(entry_fill.payload["price"]))
+    entry_fees = Decimal(str(entry_fill.payload["fees_usd"]))
+    exit_qty = Decimal(str(exit_fill.payload["qty"]))
+    exit_price = Decimal(str(exit_fill.payload["price"]))
+    exit_fees = Decimal(str(exit_fill.payload["fees_usd"]))
+
+    # Independent GOLDEN re-derivation of the two-fill formula (kraken =
+    # non-in-kind, so BOTH fee terms apply -- neither is dropped):
+    expected_pnl = (exit_qty * exit_price - exit_fees) - (entry_qty * entry_price + entry_fees)
+
+    assert Decimal(str(result["pnl_usd"])) == expected_pnl
+    graded_payload = _events_of_type(thesis_id, "ThesisGraded")[0].payload
+    assert Decimal(str(graded_payload["pnl_usd"])) == expected_pnl

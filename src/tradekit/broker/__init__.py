@@ -36,10 +36,12 @@ from tradekit.broker._manual import ManualBroker
 from tradekit.broker._manual import record_manual_fill as _manual_record_manual_fill
 from tradekit.broker._paper import PaperBroker
 from tradekit.broker._pipeline import (
+    ExitNothingToClose,
     OrderNotCancelable,
     PipelineDenied,
 )
 from tradekit.broker._pipeline import cancel_order as _pipeline_cancel_order
+from tradekit.broker._pipeline import execute_exit as _pipeline_execute_exit
 from tradekit.broker._pipeline import execute_order as _pipeline_execute_order
 from tradekit.broker._pipeline import reconcile as _pipeline_reconcile
 from tradekit.broker._port import AdvisoryOnly, BrokerPort, LiveTradingDisabled
@@ -142,6 +144,17 @@ def execute_order(thesis_id: str) -> OrderAck:
     return _pipeline_execute_order(thesis_id)
 
 
+def execute_exit(thesis_id: str) -> OrderAck:
+    """SPEC-cadence T2 — closes an `active` thesis's open position: the SAME
+    gated shape as `execute_order` (require_state -> policy.evaluate ->
+    (deny -> PipelineDenied) -> adapter.submit), selling the adapter's own
+    `positions()` net qty at a fresh last-closed-bar reference price.
+    `ExitNothingToClose` on an active-but-flat thesis. Thin delegation to
+    `_pipeline.execute_exit` (SPEC-cadence T2 dev pass lands the real
+    body)."""
+    return _pipeline_execute_exit(thesis_id)
+
+
 def reconcile(account_ref: str) -> None:
     """Broker records vs ledger; any mismatch -> ReconciliationRun(mismatch)
     + automatic HaltSet (§8.2 step 7, D4/§15). Thin delegation to
@@ -224,6 +237,7 @@ __all__ = [
     "AdvisoryOnly",
     "AlpacaBroker",
     "BrokerPort",
+    "ExitNothingToClose",
     "LiveTradingDisabled",
     "ManualBroker",
     "OrderNotCancelable",
@@ -231,6 +245,7 @@ __all__ = [
     "PipelineDenied",
     "cancel_order",
     "create_paper_account",
+    "execute_exit",
     "execute_order",
     "get",
     "reconcile",

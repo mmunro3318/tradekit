@@ -1,3 +1,25 @@
+## 2026-08-03i (Fable — paper-sprint batch G2: AUTONOMOUS CADENCE GREEN. Sprint machinery COMPLETE.)
+
+- SPEC-cadence T1+T2+T3 all landed (reviews rounds 21+22, ASSUMPTIONS
+  177+178, GATE green): strategy-aware confirm chain (def-driven bracket/
+  sizing/horizon; unknown-key 400 at the wire), execute_exit (net-qty
+  sells mirroring execute_order's gated shape; entry-price reference
+  ratified vs side-blind R-rules), exit_trigger (inclusive touches,
+  stop-first), and run_once (paper-only refusal, funnel-only entries,
+  two-phase policy w/ reject-on-deny at reviewed, crash-visible digest,
+  degrade-don't-die marking, grade-recovery for flat+active).
+  scripts/run_cadence.py ready; schtasks registration is MIKE'S step
+  (documented in the header, two-man pattern).
+- Round-22's defining finding: the failure envelope IS the product for an
+  unattended runner — happy path held all four guarantees on first
+  review; every defect lived in what happens when things break with
+  nobody watching. Also: fix agent proved a CTO pin unimplementable
+  (R-010/R-012 never pass vacuously) and redesigned correctly — grade A.
+- SPRINT COMPLETE: 8 batches, 9 review rounds (14-22), ASSUMPTIONS
+  170-178, 3 follow-up chips, ladder untouched throughout. The funnel now
+  scans S1/S2/S4, trades only policy-passed tickets on paper, flattens on
+  stop/target/horizon, grades itself, and writes the daily digest.
+
 ## 2026-08-03h (Fable — sprint checkpoint: MTF-SCAN complete, G2 seeded)
 
 - Live-market smoke of the finished walk: 11 symbols scanned, 0 tickets --

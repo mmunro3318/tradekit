@@ -79,6 +79,10 @@
 | net held qty | position quantity after in-kind withhold; the ONLY legal sell-sizing input | `positions()[i].qty` = Σ(buy qty − fee_asset_qty) − Σ(sell qty) | ~~filled qty~~ (that's the gross fill) |
 | strategy registry | the priority-ordered StrategyDef tuple the funnel walks (first match wins) | `mae.STRATEGIES` / `mae.STRATEGY_BY_KEY` / `mae.StrategyDef` (public via mae only) | ~~registry~~ bare (ambiguous vs tag-family registry) |
 | tag-family registry | the signal-tag -> strategy-family seed map | `tradekit.strategies.TAGS` / `FAMILIES` | ~~strategy registry~~ (that is mae._strategies) |
+| strategy_key | the StrategyDef key that claimed a symbol in the walk; "" = manual/unclaimed (falsy sentinel) | `_SetupResult.strategy_key`, `AdvisoryTicket.strategy_key`, thesis `strategy_tag` | ~~strategy id~~, ~~def key~~ |
+| execute_exit | the gated pipeline verb that flattens an active thesis (mirror of execute_order; NET-qty sell, policy-evaluated) | `broker.execute_exit(thesis_id)` | ~~close~~, ~~sell~~, ~~flatten~~ (bare) |
+| exit trigger | the pure WHEN-to-flatten decision (stop/target/horizon, inclusive touches, stop-first) | `cadence.exit_trigger(...)` -> `"stop"\|"target"\|"horizon"\|None` | ~~exit signal~~ |
+| active thesis w/ symbol | the symbol-keyed active-thesis enumeration (skip-sets + exit triggers) | `ledger.models.active_theses_with_symbol()` -> rows incl. `symbol` | ~~active list~~ |
 | wound scale | review-exchange severity enum, rank order minor<major<fatal (never lexicographic) — ASSUMPTIONS 171; legacy ints map 1-2/3/4-5 at the parse boundary only | `WOUND_SCALE = ("minor","major","fatal")`, `severity: "minor"\|"major"\|"fatal"` | ~~1..5~~, ~~severity level~~, ~~critical~~ |
 
 ## hud / ops context

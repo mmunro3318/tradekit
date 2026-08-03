@@ -223,6 +223,22 @@ class PipelineDenied(Exception):
         self.verdict = verdict
 
 
+class ExitNothingToClose(Exception):
+    """Raised by `execute_exit` when the thesis is `active` (require_state
+    passes) but its own `positions()` has no open row for its symbol
+    (SPEC-cadence T2-AC-2) — e.g. an advisory/manual close already
+    flattened the account out-of-band, before `execute_exit`/`grade` ran.
+    Loud, typed refusal — never a silent no-op."""
+
+    def __init__(self, thesis_id: str, symbol: str) -> None:
+        super().__init__(
+            f"execute_exit: thesis_id={thesis_id!r} has no open position for "
+            f"symbol={symbol!r} — nothing to close"
+        )
+        self.thesis_id = thesis_id
+        self.symbol = symbol
+
+
 class OrderNotCancelable(Exception):
     """Raised by `cancel_order` when the referenced order is not currently
     resting (`order_status(...).status != "open"`) — MVP cancel semantics
@@ -380,6 +396,98 @@ def execute_order(thesis_id: str) -> OrderAck:
     # (`policy._context`'s live-tier wiring) over the FillRecorded event the
     # adapter already appended above — nothing further to do here.
     return ack
+
+
+def _build_exit_order_request(thesis_id: str, ledger: Ledger) -> OrderRequest:
+    """Mirrors `_build_order_request`'s shape for the sell side (SPEC-
+    cadence T2): qty is the adapter's OWN `positions()` net qty for this
+    thesis's symbol — never the entry's gross `FillRecorded.qty` — so an
+    in-kind fee withhold (ASSUMPTIONS 170.2) is sold down to exactly zero,
+    not left with an unsellable dust remainder.
+
+    `limit_price` reuses `_entry_price` verbatim (test file's own
+    ASSUMPTIONS FLAG (a): the exit reference-price convention is
+    deliberately UNPINNED by the spec — no test asserts on this field's
+    VALUE). This is never the actual fill price for a market order
+    (`PaperBroker`'s own market-fill branch fetches its own fresh bar and
+    never reads `OrderRequest.limit_price`, `_entry_price`'s own docstring)
+    — it exists solely so R-003/R-005/R-006/R-008/R-012 have a real
+    `qty * limit_price` notional to price the sell against, and reusing the
+    thesis's OWN recorded entry economics (rather than a fresh, potentially
+    wildly-moved quote) keeps R-012's sizing-purity check meaningful for a
+    close of the SAME position it was computed for."""
+    from tradekit import broker as _broker
+
+    drafted = _thesis_machine.latest_payload(ledger, thesis_id, "ThesisDrafted")
+    if drafted is None:  # pragma: no cover — require_state already proved a real thesis
+        raise ValueError(f"no ThesisDrafted event found for thesis_id={thesis_id!r}")
+    contract = drafted["contract"]
+    account_ref = str(contract["account_ref"])
+    asset = AssetRef.model_validate(contract["asset"])
+
+    open_position = next(
+        (p for p in _broker.get(account_ref).positions() if p.symbol == asset.symbol), None
+    )
+    if open_position is None:
+        raise ExitNothingToClose(thesis_id, asset.symbol)
+
+    return OrderRequest(
+        thesis_id=thesis_id,
+        account_ref=account_ref,
+        asset=asset,
+        side="sell",
+        order_type="market",
+        qty=open_position.qty,
+        limit_price=_entry_price(contract, ledger, thesis_id),
+    )
+
+
+def execute_exit(thesis_id: str) -> OrderAck:
+    """SPEC-cadence T2 — the missing half of the round trip, the SAME gated
+    shape as `execute_order` (require_state -> build order -> policy.
+    evaluate -> deny/PipelineDenied -> mint token -> adapter.submit): the
+    only differences are the required state (`active`, not `approved`),
+    the order's build rule (`_build_exit_order_request`, sell side/net
+    qty/live reference price), and that a filled exit does not itself
+    advance the thesis's lifecycle state (grading is a separate verb)."""
+    from tradekit import broker as _broker
+    from tradekit import policy as _policy
+
+    ledger = default_ledger()
+
+    # Step 1 — thesis-state guard (SAME require_state error taxonomy as
+    # execute_order) + build the sell OrderRequest off the account's own
+    # live positions (raises ExitNothingToClose before policy.evaluate ever
+    # runs if there is nothing open).
+    _thesis_machine.require_state(ledger, thesis_id, frozenset({"active"}), "execute_exit")
+    order = _build_exit_order_request(thesis_id, ledger)
+
+    # Steps 2-3 — identical to execute_order: policy.evaluate() appends
+    # ActionProposed then VerdictIssued; a deny verdict never reaches the
+    # broker (R-001's halt applies to exits exactly as it does to entries).
+    verdict: Verdict = _policy.evaluate(
+        ProposedAction(
+            kind="submit_order",
+            account_ref=order.account_ref,
+            requested_by="system:broker-pipeline",
+            thesis_id=thesis_id,
+            order=order,
+        )
+    )
+    if not verdict.allow:
+        raise PipelineDenied(verdict)
+
+    # Step 4 — mint the token from the just-ledgered allow Verdict and
+    # submit. The adapter appends OrderSubmitted/OrderAck/FillRecorded
+    # itself (§8.3) — this pipeline does not re-append them, and (unlike
+    # execute_order) does not poll/activate: the thesis is already
+    # `active`, and `thesis.grade()` is the separate verb that consumes
+    # the exit fill this appended.
+    token = VerdictToken(
+        verdict_id=verdict.verdict_id, policy_version_hash=verdict.policy_version_hash
+    )
+    adapter = _broker.get(order.account_ref)
+    return adapter.submit(order, token)
 
 
 def reconcile(account_ref: str) -> None:
