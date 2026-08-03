@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-03 — reviewer git-restore wiped uncommitted review target `git,review,subagent`
+- **Symptom:** review round 20: reviewer probed a defect by editing the uncommitted implementation, then reverted with 'git restore' -- which restored HEAD and destroyed the green-stage work; had to reconstruct from a captured full-file read (verified byte-faithful via diff-stat + gate)
+- **Cause:** git restore on a file whose only current version was uncommitted working-tree state; no stash/backup taken before the destructive probe
+- **Solution:** reviewers must 'git stash push -- <file>' (or copy to scratchpad) before any mutate-and-revert probe on uncommitted code; restore via 'git stash pop', never 'git restore'
+
 ## 2026-07-25 — gitnexus FTS write fails read-only db even after reanalyze `gitnexus,hooks,mcp`
 - **Symptom:** every Bash call hook-spams 'FTS index ensure failed ... Cannot execute write operations in a read-only database' for 5 tables
 - **Cause:** MCP server holds the kuzu db read-only while hook/query path tries to create FTS indexes post-reanalyze

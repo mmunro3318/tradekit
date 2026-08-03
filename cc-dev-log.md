@@ -1,3 +1,21 @@
+## 2026-08-03g (Fable — paper-sprint batch G1: T-MTF-4 registry walk GREEN)
+
+- hud's setup stage is now the REGISTRY WALK: per symbol, STRATEGIES in
+  priority order, ANY-intersection regime pre-filter, scan_confluence per
+  def, first match with non-empty tags on every leg claims (strategy_key
+  on _SetupResult + named in the setup gate). Red babcd49, review round 20
+  FIX-FIRST with 2 HIGH both caught by adversarial review: a broad
+  except-Exception that would have SILENTLY killed any future
+  misconfigured strategy (narrowed to ProviderError; loud escape restored)
+  and an attrition-stages regression vs 163b (walk now synthesizes stages
+  naming real killers). ASSUMPTIONS 176. GATE green. Chips filed: regime
+  pass-through (HMM economy), scan_confluence audit-awareness (T-AUDIT-3).
+- MTF-SCAN COMPLETE (T-MTF-1..4 all merged). Funnel = S1 momentum, S2
+  pullback, S4 reversion, walked first-match-wins. Remaining: batch G2
+  autonomous paper cadence (spec drafted in scratchpad: thesis-from-
+  StrategyDef + exit management + scheduler + daily digest; money-path
+  review; funnel-only red line structural).
+
 ## 2026-08-03f (Fable — paper-sprint batch F: S4 reversion GREEN, verdict ACCEPT)
 
 - S4 restricted reversion registered (STRATEGIES = S1, S2, S4): single 1h

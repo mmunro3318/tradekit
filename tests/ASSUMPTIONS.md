@@ -3318,3 +3318,32 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    content pins are prefix/superset/relative-order, never exact-equality —
    the S4 tuple test's exact pin is designated for relative rewrite in the
    S3 batch (S3 lands between S2 and S4 per doc order).
+
+### 176 — T-MTF-4 hud registry walk (review round 20)
+1. regime_families "matches" = ANY-semantics: a def arms iff its families
+   tuple intersects the regime's recommended families non-empty. (ALL
+   would wrongly demand S2's two families simultaneously; leg-level
+   regime pruning still applies downstream — double-conservative
+   accepted.)
+2. strategy_key no-match sentinel = "" (falsy; doc types the field str).
+3. Walk data source = module-attribute read of mae.STRATEGIES (the
+   monkeypatch seam the tests use — ratifying the escape hatch; same
+   module-attr discipline as _regime.compute_regime).
+4. Report naming = substring presence of the claiming key in the setup
+   gate rationale ("setup confirmed (<key>)") — no exact-format pin
+   (175.4 doctrine).
+5. Walk-level exception containment is NARROW (ProviderError only —
+   what escapes scan_confluence's own per-symbol containment, notably
+   the regime-side fetch). Config/programming errors (typo'd def
+   vocabulary ValueError) escape LOUD to build_state's visible failed
+   setup gate — a broken def must be SEEN, never silently skipped
+   (the S1-"bullish"/TICKET-001 wound stays closed).
+6. Walk attrition stages (163b upheld): the walk synthesizes stage dicts
+   ({name, outcome, observed} — scanner P3 shape) naming each def's real
+   killer (regime_prefilter / confluence warning / empty_tag_guard) —
+   never a collapsed "setup" kill.
+7. Audit mode runs only S1 through the audited scan_markets until
+   scan_confluence is audit-aware (ticketed T-AUDIT-3); audit-mode and
+   normal-mode scans can diverge until then — documented, not silent.
+8. HMM economy residual: walk regime pre-filter + per-def confluence
+   regime = 2+ fits/symbol/scan (ticketed: regime pass-through param).
