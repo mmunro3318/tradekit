@@ -365,3 +365,24 @@ rewritten (ASSUMPTIONS 170.2); 3+-fill fee semantics pinned out-of-domain
 routes missing-side crypto fills to in-kind branch; ManualBroker legacy
 physics would double-count if it ever shared an account_ref with alpaca
 in-kind fills (no such ref exists).
+
+## Round 15 — 2026-08-03 — SPEC-wound-scale batch (red d1f50ff, green this commit)
+
+Reviewer: tk-reviewer (top model). Verification: reviewer self-ran full gate;
+CTO re-gated post-fix. Verdict FIX-FIRST — MED cluster, no fatal: bool-trap
+untested (JSON true would have silently clamped to "minor" if the guard ever
+regressed), false loudness docstring + first-stray-value silent tally in
+score_exchanges, AC-9 docs absent at review time.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-wound | 5 test files, AC-1..8 | 0 | 2 | 0 | B+ | Discriminating lexicographic-trap test, boundary-via-public-verb, honest ASSUMPTION-FLAG + U1 probe; missed the bool trap, dangled the ASSUMPTIONS reference. |
+| green-wound | review/_rubric.py, review/__init__.py, prompts schema block | 0 | 1 | 2 | A− | Minimal rank-based implementation, proactive bool guard, clean shared-taxonomy routing; docked for false loudness docstring and undeclared (justified) prompts-header edit. |
+
+CTO fix round: True/False added to AC-6 parametrize; score_exchanges now
+rank-validates EVERY exchange (first-per-category included) and the
+docstring states it honestly; ASSUMPTIONS 171 (incl. ratifying the
+malformed_output-taxonomy reading), GLOSSARY wound-scale entry. Blocking
+invariance verified byte-identical; historical persisted int-severity events
+have zero readers through the new code (policy/_context reads kind/artifact_id
+only).

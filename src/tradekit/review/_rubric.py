@@ -18,10 +18,18 @@ below): one dict per attack/defense round --
     {
       "attack": str,               # the reviewer's structured criticism
       "category": str,              # one of RUBRIC_CATEGORIES below
-      "severity": int,               # 1 (minor) .. 5 (fatal)
+      "severity": "minor" | "major" | "fatal",  # closed enum, WOUND_SCALE
       "defense": str,                # proposer's structured rebuttal
       "resolved": bool,              # reviewer's OWN verdict on the rebuttal
     }
+
+WOUND-SCALE MIGRATION (docs/specs/SPEC-wound-scale.md, ratified
+prompts/rubric-thesis-v1.md Adjudication §2, 2026-07-25): severity was int
+1..5, now the closed enum above. `WOUND_SCALE` pins the rank order (never
+lexicographic); `wound_from_legacy` is the ONE int->enum mapping site, used
+at the parse boundary (`review/__init__.py::_call_reviewer_and_score`) --
+by the time an exchange list reaches `score_exchanges` it is guaranteed to
+carry enum strings only.
 """
 
 from __future__ import annotations
@@ -40,6 +48,25 @@ RUBRIC_CATEGORIES: tuple[str, ...] = (
     "correlation_awareness",
 )
 
+# Wound-scale rank order (SPEC-wound-scale.md): minor < major < fatal.
+# `max_severity` is computed by rank via this tuple's index, never by
+# str.__lt__ -- "fatal" < "minor" lexicographically but must outrank it.
+WOUND_SCALE: tuple[str, ...] = ("minor", "major", "fatal")
+
+
+def wound_from_legacy(severity: int) -> str:
+    """The ONE legacy int->enum mapping site (ratified table,
+    prompts/rubric-thesis-v1.md Adjudication §2): 1|2->"minor", 3->"major",
+    4|5->"fatal". Any other value raises ValueError naming it -- never a
+    clamp (AC-4)."""
+    if severity in (1, 2):
+        return "minor"
+    if severity == 3:
+        return "major"
+    if severity in (4, 5):
+        return "fatal"
+    raise ValueError(f"legacy severity out of range 1..5: {severity}")
+
 
 def score_exchanges(exchanges: list[dict[str, Any]]) -> dict[str, Any]:
     """Pinned target algorithm (dev pass lands this; STUB this batch):
@@ -57,9 +84,15 @@ def score_exchanges(exchanges: list[dict[str, Any]]) -> dict[str, Any]:
     MUST be a pure function of `exchanges` alone: no `datetime.now()`, no
     `random`, no set/dict ordering that isn't insertion-stable -- three
     calls with the identical input list must return byte-identical dicts
-    (`test_rubric.py`'s determinism pin, 3 runs)."""
+    (`test_rubric.py`'s determinism pin, 3 runs).
+
+    `exchanges` is assumed to already carry enum-string severities only --
+    the parse boundary (`review/__init__.py`) guarantees this. A stray
+    non-enum value fails loudly (ValueError from the WOUND_SCALE rank
+    lookup, checked on EVERY exchange -- including a category's first, so
+    a single-exchange category can never tally a non-enum silently)."""
     rubric_scores: dict[str, Any] = {
-        category: {"count": 0, "max_severity": 0} for category in RUBRIC_CATEGORIES
+        category: {"count": 0, "max_severity": None} for category in RUBRIC_CATEGORIES
     }
     unresolved_attack_count = 0
     for exchange in exchanges:
@@ -68,7 +101,13 @@ def score_exchanges(exchanges: list[dict[str, Any]]) -> dict[str, Any]:
         if category in rubric_scores:
             entry = rubric_scores[category]
             entry["count"] += 1
-            entry["max_severity"] = max(entry["max_severity"], severity)
+            current = entry["max_severity"]
+            # .index() on every exchange (not just rank comparisons) so a
+            # category's FIRST stray non-enum value dies loudly too --
+            # never assigned into the tally unvalidated.
+            rank = WOUND_SCALE.index(severity)
+            if current is None or rank > WOUND_SCALE.index(current):
+                entry["max_severity"] = severity
         if exchange["resolved"] is False:
             unresolved_attack_count += 1
     return {
@@ -77,4 +116,4 @@ def score_exchanges(exchanges: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-__all__ = ["RUBRIC_CATEGORIES", "score_exchanges"]
+__all__ = ["RUBRIC_CATEGORIES", "WOUND_SCALE", "score_exchanges", "wound_from_legacy"]

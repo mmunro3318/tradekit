@@ -96,7 +96,7 @@ _ALL_RESOLVED_EXCHANGE = [
     {
         "attack": "p_win=0.55 with no base-rate citation.",
         "category": "ev_arithmetic",
-        "severity": 2,
+        "severity": "minor",  # AC-8 (SPEC-wound-scale): was 2
         "defense": "Base rate drawn from the strategy_tag's last 40 trades (wiki-cited).",
         "resolved": True,
     }

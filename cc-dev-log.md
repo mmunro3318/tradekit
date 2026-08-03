@@ -1,3 +1,15 @@
+## 2026-08-03b (Fable — paper-sprint batch B: wound-scale GREEN)
+
+- SPEC-wound-scale: severity int 1..5 -> enum minor/major/fatal (ratified
+  07-25). Red d1f50ff, green, GATE green, review round 15 (FIX-FIRST, MED
+  cluster fixed same-session: bool-trap pinned True/False, score_exchanges
+  rank-validates every exchange, ASSUMPTIONS 171 + GLOSSARY wound-scale).
+  Key simplification discovered at spec time: blocking was ALWAYS count-based
+  (unresolved_attack_threshold); severity's only live site is the reporting
+  tally -- representation migration, zero gate-semantics change. Parse
+  boundary (_call_reviewer_and_score) maps legacy ints, rejects everything
+  else through the existing malformed_output taxonomy.
+
 ## 2026-08-03 (Fable — paper-sprint batch A: in-kind fee fix GREEN)
 
 - SPEC-inkind-fees spec'd, red (004a097+5bcfd53), green, GATE green, money-path

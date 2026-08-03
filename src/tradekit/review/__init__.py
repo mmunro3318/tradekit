@@ -96,7 +96,12 @@ from tradekit.review._port import (
     ReviewOutputTooLarge,
     ReviewTimeout,
 )
-from tradekit.review._rubric import RUBRIC_CATEGORIES, score_exchanges
+from tradekit.review._rubric import (
+    RUBRIC_CATEGORIES,
+    WOUND_SCALE,
+    score_exchanges,
+    wound_from_legacy,
+)
 
 __all__ = [
     "RUBRIC_CATEGORIES",
@@ -176,6 +181,33 @@ def _build_void_signoff_prompt(
     )
 
 
+def _normalize_exchange_severity(exchange: dict[str, Any]) -> dict[str, Any]:
+    """Parse-boundary severity validation (SPEC-wound-scale.md AC-5/AC-6):
+    the enum string passes through; a legacy int 1..5 is mapped via
+    `wound_from_legacy` so `score_exchanges` only ever sees enum strings;
+    anything else (an unknown string, a float, `None`, an out-of-range int)
+    routes through the SAME `ReviewMalformedOutput` -> `failure_mode=
+    "malformed_output"` taxonomy the whole-payload JSON-parse failure uses
+    -- never a silent clamp, never an uncaught error escaping to
+    `score_exchanges`' rank lookup."""
+    severity = exchange["severity"]
+    if severity in WOUND_SCALE:
+        return exchange
+    if isinstance(severity, int) and not isinstance(severity, bool):
+        try:
+            mapped = wound_from_legacy(severity)
+        except ValueError as exc:
+            raise ReviewMalformedOutput(
+                f"review pipeline: exchange severity {severity!r} is not a valid enum or "
+                f"legacy int: {exc}"
+            ) from exc
+        return {**exchange, "severity": mapped}
+    raise ReviewMalformedOutput(
+        f"review pipeline: exchange severity {severity!r} is neither the enum "
+        "'minor'|'major'|'fatal' nor a legacy int 1..5"
+    )
+
+
 def _call_reviewer_and_score(
     prompt: str, dials: PolicyDials
 ) -> tuple[list[dict[str, Any]], dict[str, Any], int, str | None]:
@@ -200,6 +232,7 @@ def _call_reviewer_and_score(
             raise ReviewMalformedOutput(
                 f"review pipeline: reviewer stdout did not strictly JSON-parse: {exc}"
             ) from exc
+        exchanges = [_normalize_exchange_severity(exchange) for exchange in exchanges]
     except ReviewTimeout:
         failure_mode = "timeout"
     except ReviewOutputTooLarge:
