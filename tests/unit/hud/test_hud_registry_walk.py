@@ -490,25 +490,63 @@ class TestS1RegressionThroughRealRegistry:
     def test_nothing_fires_produces_empty_tags_and_no_strategy_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """BEHAVIOR: real registry, flat 4h bars that satisfy no def's
-        leg(s) at all -- "empty STRATEGIES / no def arms -> scan_setup
+        """BEHAVIOR: real registry, flat 4h AND 1h bars that satisfy no
+        def's leg(s) at all -- "empty STRATEGIES / no def arms -> scan_setup
         returns empty tags -> wait (existing path)" (MTF-SCAN.md error
-        map). `strategy_key` is falsy. This fixture only supplies 4h bars;
-        if the walk ever reached S4 (1h-only) or S2's second leg (1h) it
-        would KeyError here rather than silently reporting a spurious
-        match."""
+        map). `strategy_key` is falsy. Both S1's and S2's 4h leg fail
+        outright on flat bars (AND-composition short-circuits before S2's
+        1h leg is ever fetched), so the walk genuinely reaches S4
+        (1h-only) as the last candidate -- reaching S4 here is CORRECT walk
+        behavior, not a bug: this fixture supplies flat 1h bars too (RSI
+        settles near 50, comfortably above S4's `rsi_max=25`, and no close
+        sits below the lower Bollinger band) so S4's leg is genuinely
+        evaluated and genuinely declines, proving every registry def is
+        really evaluated and really declines rather than the walk silently
+        skipping S4 via a swallowed exception."""
         import tradekit.hud._build as hud_build
         import tradekit.mae._regime as _regime_mod
 
-        flat = _series([100.0] * 60, [100.0] * 60, symbol="FLAT/USD", timeframe="4h")
+        flat_4h = _series([100.0] * 60, [100.0] * 60, symbol="FLAT/USD", timeframe="4h")
+        flat_1h = _series([100.0] * 60, [100.0] * 60, symbol="FLAT/USD", timeframe="1h")
         monkeypatch.setattr(_regime_mod, "compute_regime", _PERMISSIVE_REGIME)
         _install_fixed_clock(monkeypatch, datetime(2026, 7, 30, tzinfo=UTC))
-        _install_bars_by_key(monkeypatch, {("FLAT/USD", "4h"): flat})
+        _install_bars_by_key(
+            monkeypatch, {("FLAT/USD", "4h"): flat_4h, ("FLAT/USD", "1h"): flat_1h}
+        )
 
         result = hud_build._default_scan_setup("FLAT/USD")
 
         assert result.signal_tags == []
         assert not result.strategy_key
+
+    def test_no_arm_walk_names_the_real_killers_in_attrition_stages(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F2/ASSUMPTIONS 163b regression: a no-arm walk over the real
+        registry must not collapse every setup kill into the uninformative
+        "setup" gate -- `attrition_stages` must be non-empty and its
+        entries must name the actual defs that declined (S1, S2, S4), not
+        just an opaque pass/fail. Substring assertions per the
+        fragile-exact-pin doctrine (ASSUMPTIONS 175.4) -- the exact stage
+        count/order is an implementation detail, not a pinned contract."""
+        import tradekit.hud._build as hud_build
+        import tradekit.mae._regime as _regime_mod
+
+        flat_4h = _series([100.0] * 60, [100.0] * 60, symbol="FLAT/USD", timeframe="4h")
+        flat_1h = _series([100.0] * 60, [100.0] * 60, symbol="FLAT/USD", timeframe="1h")
+        monkeypatch.setattr(_regime_mod, "compute_regime", _PERMISSIVE_REGIME)
+        _install_fixed_clock(monkeypatch, datetime(2026, 7, 30, tzinfo=UTC))
+        _install_bars_by_key(
+            monkeypatch, {("FLAT/USD", "4h"): flat_4h, ("FLAT/USD", "1h"): flat_1h}
+        )
+
+        result = hud_build._default_scan_setup("FLAT/USD")
+
+        assert result.attrition_stages != []
+        stage_names = " | ".join(stage["name"] for stage in result.attrition_stages)
+        assert "s1_momentum" in stage_names
+        assert "s4_reversion" in stage_names
+        assert all(stage["outcome"] == "fail" for stage in result.attrition_stages)
 
 
 # ---------------------------------------------------------------------------

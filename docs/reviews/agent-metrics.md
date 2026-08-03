@@ -461,3 +461,23 @@ rather than improvising — exactly the flag-don't-improvise discipline.
 |---|---|---|---|---|---|---|
 | red-s4 | 2 test files, 17 tests | 0 | 1 | 2 | B− | Outstanding S4-1 flag (argued from the scanner's own tag table) + oracle-verified fixtures; shipped a warning expectation contradicting a 3-rounds-old pinned assumption, stale residue, one wrong band number. |
 | green-s4 | _strategies.py + _thesis.py | 0 | 0 | 0 | A | Minimal faithful diff, exact money-param Decimals, load-bearing why-comments, stopped-and-flagged on both test defects instead of improvising. |
+
+## Round 20 — 2026-08-03 — T-MTF-4 hud registry walk (red babcd49, green+fix this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate twice + narrow-and-rerun
+empirical probe. Verdict FIX-FIRST: 2 HIGH — (F1) broad except Exception
+per def would have silently killed any future misconfigured strategy
+forever (the repo's own S1-"bullish" wound class, re-opened); (F2)
+attrition stages collapsed to [] on the walk path, regressing A-FIX-1/163b
+explainability. Both fixed same-session (narrow ProviderError catch +
+fixture fix; walk-synthesized stage dicts naming real killers). F3 (HMM
+double-compute) + F5 (S2/S4 audit-invisible) ticketed as chips. Reviewer
+incident: destructive git restore on the uncommitted review target,
+reconstructed byte-faithful (CTO diff-verified) — friction logged
+("stash before destructive probes").
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-mtf4 | test_hud_registry_walk.py (12) | 1 (shared) | 0 | 1 | B+ | Doc-pinned, five escape hatches flagged, fetch-count short-circuit pins exemplary; nothing-fires fixture missing 1h bars + wrong KeyError-tripwire rationale invited the broad except. |
+| green-mtf4 | hud/_build.py | 2 | 0 | 1 | C | Conforming scope-disciplined walk, but silenced a fixture with except-Exception (silent-death class) and silently regressed attrition stages — both the anti-silent doctrine's core. |
+| fix-mtf4 | 4-item fix round | 0 | 0 | 0 | A | All landed; stage-dict shape correctly matched to the existing consumer; mypy shadowing caught and resolved cleanly. |

@@ -24,18 +24,17 @@ from typing import Any
 import tradekit.mae._runtime as mae_runtime
 from tradekit.contracts import AdvisoryTicket, GateResult, HudState, ScanReportEntry
 from tradekit.contracts._marketdata import BarSeries
+from tradekit.mae._data.errors import ProviderError
 from tradekit.mae._scan_trace import ScanAuditMode
 
 _TIMEFRAME = "1h"
 _LOOKBACK_DAYS = 30
 _MIN_BARS = 20
 _FEE_RATE = Decimal("0.0004")  # 4 bps/side (ASSUMPTIONS 144)
-_SETUP_FILTERS = {"macd_signal": "bullish_cross", "volume_spike": 1.5}
-# Setup scan runs at 4h: the scanner's 90-day lookback at 1h implies 2160
-# bars > Kraken's 720-bar OHLC call cap (ProviderRangeError, smoke-tested
-# 2026-07-19); 4h -> 540 bars fits, and matches the doctrine's 4h/1h
-# structure (STRATEGY-PROCEDURE stage 2).
-_SETUP_TIMEFRAME = "4h"
+# T-MTF-4 (docs/design/MTF-SCAN.md "Strategy registry" section): the old
+# hardcoded S1 battery (`_SETUP_FILTERS`/`_SETUP_TIMEFRAME`, macd_signal +
+# volume_spike @ 4h) is now `mae.STRATEGIES[0]` (`s1_momentum`) — see
+# `_default_scan_setup` below, which walks the registry instead.
 
 
 @dataclass(frozen=True)
@@ -61,11 +60,15 @@ class _SetupResult:
     signal_tags: list[str]
     attrition_stages: list[dict[str, str]] = field(default_factory=list)
     """A-FIX-1: the scanner's own P3 `stages` trail for this (symbol,
-    _SETUP_TIMEFRAME) — defaulted so pre-existing monkeypatched test
+    setup timeframe) — defaulted so pre-existing monkeypatched test
     doubles (plain `signal_tags`-only objects) keep working. Empty means
     "the scanner reported none" (attrition_stages absent from the seam
     caller), in which case `_attrition_entry` falls back to the collapsed
     hud-level "setup" gate name."""
+    strategy_key: str = ""
+    """T-MTF-4: the `StrategyDef.key` that claimed this symbol in the
+    `mae.STRATEGIES` walk (empty string when none armed — falsy sentinel,
+    ASSUMPTIONS escape hatch 2)."""
 
 
 def _round2(value: Decimal) -> Decimal:
@@ -131,34 +134,134 @@ def _default_sizing_info(symbol: str, limit_price: Decimal, equity_usd: Decimal)
 
 
 def _default_scan_setup(symbol: str, *, audit: ScanAuditMode = "off") -> _SetupResult:
-    """Real setup scan (ASSUMPTIONS 159b): momentum + volume confirmation,
-    post-regime-gate. Empty `signal_tags` when no match survives for the
-    symbol. `attrition_stages` (A-FIX-1/ASSUMPTIONS 163b) carries the
-    scanner's own P3 `stages` for this symbol, read off the scan result's
-    `"attrition"` key — the real per-filter killer, not a collapsed gate.
+    """Real setup scan (T-MTF-4, docs/design/MTF-SCAN.md "Strategy
+    registry" section): walks `mae.STRATEGIES` in priority order, arming
+    the first def whose `regime_families` has a non-empty intersection
+    with the symbol's regime-recommended families (ANY-semantics — CTO
+    adjudication, this dispatch) AND whose `mae.scan_confluence` legs all
+    pass with non-empty surviving tags on every leg (ASSUMPTIONS 173.4
+    empty-tag guard — a `min_tags=0` leg's empty-tag "match" must not arm).
+    First match wins; later defs (and their bar fetches) are never
+    evaluated once a def claims the symbol. Empty `signal_tags` and a
+    falsy `strategy_key` when nothing arms — the existing "wait" path.
 
-    `audit` (T-AUDIT-2): passed through untouched to `mae.scan_markets`."""
+    `audit` (T-AUDIT-2): `mae.scan_confluence` has no audit mode yet
+    (T-AUDIT-2 predates T-MTF-4's registry walk) — an explicit audit
+    request runs only the first (S1) def through the audited
+    `mae.scan_markets` verb, same battery/behavior as before this batch,
+    rather than silently dropping the request."""
     from tradekit import mae
+    from tradekit.mae import _regime, _scanner
 
-    result = mae.scan_markets(
-        "crypto",
-        [_SETUP_TIMEFRAME],
-        filters=_SETUP_FILTERS,
-        symbols=[symbol],
-        regime_gate=True,
-        audit=audit,
+    if audit != "off":
+        if not mae.STRATEGIES:
+            # F4: an empty registry has no S1 to audit — the same
+            # wait-shaped empty result the "nothing armed" error map
+            # already returns below, not an IndexError on STRATEGIES[0].
+            return _SetupResult(signal_tags=[], strategy_key="")
+        s1 = mae.STRATEGIES[0]
+        s1_leg = s1.legs[0]
+        result = mae.scan_markets(
+            "crypto",
+            [s1_leg["timeframe"]],
+            filters=s1_leg["filters"],
+            symbols=[symbol],
+            regime_gate=True,
+            audit=audit,
+        )
+        stages: list[dict[str, str]] = []
+        for entry in result.get("attrition", []):
+            if entry.get("symbol") == symbol:
+                stages = list(entry.get("stages", []))
+                break
+        for match in result["matches"]:
+            if match.get("symbol") == symbol:
+                return _SetupResult(
+                    signal_tags=list(match.get("signal_tags", [])),
+                    attrition_stages=stages,
+                    strategy_key=s1.key,
+                )
+        return _SetupResult(signal_tags=[], attrition_stages=stages, strategy_key="")
+
+    regime = _regime.compute_regime(
+        symbol=symbol,
+        lookback_days=_scanner._SCAN_REGIME_LOOKBACK_DAYS,
+        n_states=_scanner._SCAN_REGIME_N_STATES,
     )
-    stages: list[dict[str, str]] = []
-    for entry in result.get("attrition", []):
-        if entry.get("symbol") == symbol:
-            stages = list(entry.get("stages", []))
-            break
-    for match in result["matches"]:
-        if match.get("symbol") == symbol:
-            return _SetupResult(
-                signal_tags=list(match.get("signal_tags", [])), attrition_stages=stages
+    recommended = set(regime.get("recommended_strategies") or [])
+
+    # F2/ASSUMPTIONS 163b: per-def attrition trail for the whole walk, in
+    # walk order, so `_attrition_entry` can name the real killer instead of
+    # collapsing every setup kill into the uninformative "setup" gate.
+    walk_stages: list[dict[str, str]] = []
+
+    for strategy_def in mae.STRATEGIES:
+        if not set(strategy_def.regime_families) & recommended:
+            walk_stages.append(
+                {
+                    "name": f"{strategy_def.key} regime_prefilter",
+                    "outcome": "fail",
+                    "observed": (
+                        f"regime_families={list(strategy_def.regime_families)} "
+                        f"not in recommended={sorted(recommended)}"
+                    ),
+                }
             )
-    return _SetupResult(signal_tags=[], attrition_stages=stages)
+            continue
+        # F1: this def's legs are contained to ProviderError only — that's
+        # `compute_regime`'s OWN bar fetch inside `scan_confluence` (called
+        # again there, per-leg, once a leg matches) escaping uncaught; the
+        # fetch-site `ProviderError` `scan_confluence` catches for its own
+        # leg bars does NOT cover that second, regime-side fetch. A
+        # programming/config error (e.g. a typo'd def's vocabulary
+        # `ValueError`) must escape LOUD instead of being silently skipped
+        # here — `build_state`'s own `except Exception` at the caller
+        # already degrades it to a visible failed setup gate naming the
+        # exception (the anti-silent doctrine: a broken def must be seen,
+        # not skipped).
+        try:
+            result = mae.scan_confluence(
+                "crypto", list(strategy_def.legs), [symbol], regime_gate=True
+            )
+        except ProviderError:
+            continue
+        for warning in result["warnings"]:
+            # The confluence warning strings already name the symbol/leg/
+            # counts (leg failure or provider error caught inside
+            # `scan_confluence` itself) — just tag them with the def key.
+            walk_stages.append(
+                {"name": f"{strategy_def.key} confluence", "outcome": "fail", "observed": warning}
+            )
+        for match in result["matches"]:
+            if match.get("symbol") != symbol:
+                continue
+            legs_out = match["legs"]
+            tags_per_leg = [leg["signal_tags"] for leg in legs_out.values()]
+            if not tags_per_leg or any(not tags for tags in tags_per_leg):
+                # empty-tag guard (ASSUMPTIONS 173.4): does not arm
+                walk_stages.append(
+                    {
+                        "name": f"{strategy_def.key} empty_tag_guard",
+                        "outcome": "fail",
+                        "observed": "confluence matched with an empty-tag leg",
+                    }
+                )
+                break
+            signal_tags = [tag for tags in tags_per_leg for tag in tags]
+            walk_stages.append(
+                {
+                    "name": f"{strategy_def.key} confluence",
+                    "outcome": "pass",
+                    "observed": f"signal_tags={signal_tags}",
+                }
+            )
+            return _SetupResult(
+                signal_tags=signal_tags,
+                attrition_stages=walk_stages,
+                strategy_key=strategy_def.key,
+            )
+
+    return _SetupResult(signal_tags=[], attrition_stages=walk_stages, strategy_key="")
 
 
 # Test seams (ASSUMPTIONS 157a/158/159). Tests monkeypatch these module
@@ -457,12 +560,17 @@ def build_state(
             attrition_entries.append(_attrition_entry(symbol, _TIMEFRAME, gates, setup_stages))
             continue
 
+        # T-MTF-4: name the claiming strategy_key (registry walk) in the
+        # gate text when present; `getattr` mirrors A-FIX-1's convention
+        # so pre-existing plain `signal_tags`-only test doubles (no
+        # `.strategy_key` attribute) keep working unchanged.
+        strategy_key = getattr(setup, "strategy_key", "") or ""
         setup_gate = GateResult(
             name="setup",
             passed=True,
             observed=f"signal_tags={setup.signal_tags}",
             threshold=">= 1 surviving signal_tag",
-            rationale="setup confirmed",
+            rationale=f"setup confirmed ({strategy_key})" if strategy_key else "setup confirmed",
         )
 
         try:
