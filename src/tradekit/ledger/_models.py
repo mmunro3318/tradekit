@@ -71,6 +71,23 @@ class ActiveThesis:
 
 
 @dataclass(frozen=True)
+class ActiveThesisWithSymbol:
+    """`active_theses_with_symbol()`'s per-row return shape (SPEC-cadence
+    T3, CTO adjudication) — `ActiveThesis` plus the symbol recovered from
+    the thesis's own `ThesisDrafted` contract. The `theses` projection
+    carries no symbol column (same gap `hud._build._default_open_position_
+    symbols` used to re-walk on its own); this is the one shared verb both
+    callers now consume. `symbol` is `None` on the pathological case of an
+    active thesis with no matching `ThesisDrafted` event (should not occur
+    in a well-formed log, but never fabricated)."""
+
+    thesis_id: str
+    account_ref: str | None
+    strategy_tag: str | None
+    symbol: str | None
+
+
+@dataclass(frozen=True)
 class GradeRecord:
     """`latest_grades()`'s per-row return shape."""
 
@@ -99,6 +116,35 @@ class LedgerModels:
         return [
             ActiveThesis(thesis_id=row[0], account_ref=row[1], strategy_tag=row[2])
             for row in rows
+        ]
+
+    def active_theses_with_symbol(self) -> list[ActiveThesisWithSymbol]:
+        """`active_theses()` plus each row's symbol, recovered from its own
+        `ThesisDrafted` contract (one walk of the event log, shared by
+        `hud._build`'s open-position query and `cadence.run_once`'s entry
+        skip-set / exit enumeration — SPEC-cadence T3 CTO adjudication)."""
+        active = self.active_theses()
+        if not active:
+            return []
+        active_ids = {row.thesis_id for row in active}
+        symbols: dict[str, str] = {}
+        for event in self._ledger.query(EventFilter(types=["ThesisDrafted"])):
+            thesis_id = event.payload.get("thesis_id")
+            if thesis_id not in active_ids or thesis_id in symbols:
+                continue
+            contract = event.payload.get("contract") or {}
+            asset = contract.get("asset") or {}
+            symbol = asset.get("symbol")
+            if symbol:
+                symbols[thesis_id] = symbol
+        return [
+            ActiveThesisWithSymbol(
+                thesis_id=row.thesis_id,
+                account_ref=row.account_ref,
+                strategy_tag=row.strategy_tag,
+                symbol=symbols.get(row.thesis_id),
+            )
+            for row in active
         ]
 
     def account_refs(self) -> list[str]:
@@ -150,4 +196,4 @@ class LedgerModels:
         ]
 
 
-__all__ = ["ActiveThesis", "GradeRecord", "LedgerModels"]
+__all__ = ["ActiveThesis", "ActiveThesisWithSymbol", "GradeRecord", "LedgerModels"]

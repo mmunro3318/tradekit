@@ -3380,3 +3380,39 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    the wire is one, our own walk is not). Asymmetry ratified.
 6. exit ProposedAction.kind = "submit_order" (no new kind; R-catalog
    awareness unchanged).
+
+### 178 — cadence T3: the autonomous runner (SPEC-cadence, review round 22)
+1. run_once(*, digest_dir: Path = docs/digest); CadenceAccountRefused
+   (pre-digest, propagates) for any default_account_ref not starting
+   "paper:". `alpaca-paper:*` is DELIBERATELY refused — the cadence runs
+   the local paper sim only; driving Alpaca's paper API unattended is a
+   scope expansion needing its own ratification. Belt-and-braces: each
+   built contract's account_ref re-checked post-build (TOCTOU guard).
+2. TWO-PHASE POLICY, REDESIGNED UNDER CONSTRAINT (supersedes the literal
+   "evaluate before draft" fix-round instruction): R-010/R-012 resolve
+   review/sizing context off the REAL ledger by thesis_id and never pass
+   vacuously — a pre-draft evaluate denies ALL entries. The binding
+   evaluate therefore runs at state `reviewed` (first state with real
+   context), and a deny → thesis.reject (terminal; never `approved`).
+   Consequences ratified: a denied entry DOES leave ThesisDrafted/
+   Submitted/ReviewCompleted/ThesisRejected events (honest audit trail,
+   no approved orphans, no unbounded accumulation — rejected theses are
+   terminal); execute_order's evaluate remains the second phase.
+3. FAILURE ENVELOPE: any unexpected exception post-guard appends
+   "### Run FAILED <ts>: <exc>" to the digest then re-raises (an
+   unattended run must never die traceless); per-symbol equity-marking
+   failures degrade (symbol skipped from the Σ, digest warning — equity
+   understated is conservative); per-thesis exit-phase parsing contained;
+   grade decoupled from exit ("grade failed after successful exit"
+   warning) with a flat+active recovery branch that grades directly — a
+   grade hiccup must not orphan a trade out of the promotion record.
+4. Fixture-reality pin: production ticket quantities derive from the SAME
+   mae.size_position call SizingComputed re-invokes (agreement within
+   R-012's 1% is structural, not luck); hand-built test tickets must
+   match the sizing derivation or R-012 legitimately denies them.
+5. Red flags reconciled: digest drought marker = case-insensitive
+   "drought" substring; active_theses_with_symbol() accessor added
+   (ledger/_models.py) and hud's inline walk refactored onto it.
+6. Scheduler: schtasks hourly via the cd /d working-directory-safe form
+   (documented in scripts/run_cadence.py header); registration is MIKE'S
+   step, never auto-executed. Script exits: 2 refusal, 1 unexpected.

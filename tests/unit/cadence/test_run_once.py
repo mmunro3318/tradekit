@@ -83,6 +83,7 @@ from tradekit.contracts import (
     HudState,
 )
 from tradekit.ledger import default_ledger
+from tradekit.mae._data.errors import ProviderError
 from tradekit.policy._dials import PolicyDials
 
 _ASSET = AssetRef(symbol="ETH/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01"))
@@ -156,6 +157,13 @@ class _BarsClockHolder:
 def _install_seams(monkeypatch: pytest.MonkeyPatch, holder: _BarsClockHolder) -> None:
     monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", holder.get_closed_bars)
     monkeypatch.setattr("tradekit.mae._runtime._clock", holder.clock)
+    # CTO harness fix (round 22): promotion_status()'s series math runs off
+    # policy's OWN clock seam (ASSUMPTIONS ~2384, dotted-string sanctioned,
+    # used by the replay suite). Leaving it on wall-clock while the mae
+    # clock simulates January put this run's ThesisGraded in series 0 while
+    # current_series read index 7 -- AC-4's graded-count assertion could
+    # never see its own grade. Both clocks must tell the same simulated time.
+    monkeypatch.setattr("tradekit.policy._context._clock", holder.clock)
 
 
 def _fake_dials(**overrides: Any) -> PolicyDials:
@@ -170,7 +178,7 @@ def _ticket(
     pair: str = "ETH/USD",
     *,
     limit_price: str = "100",
-    quantity: str = "1",
+    quantity: str = "0.25",
     tp_price: str = "110",
     sl_price: str = "90",
     strategy_key: str = "",
@@ -178,7 +186,30 @@ def _ticket(
 ) -> AdvisoryTicket:
     """A self-consistent `AdvisoryTicket` a real confirm chain can consume.
     Field values mirror `tests/unit/hud/test_serve.py::TICKET_BODY`'s shape
-    (proven to build a valid `ThesisContract` through `_serve._build_contract`)."""
+    (proven to build a valid `ThesisContract` through `_serve._build_contract`).
+
+    F3+F5 (review round 22, fixture fix -- cited): `quantity` default
+    changed from `"1"` (a round, arbitrary number never exercised against
+    ANY policy rule before this fix round -- `execute_order`'s own evaluate
+    reads its order from the thesis's REAL recorded `SizingComputed`
+    sizing, never the raw ticket) to `"0.25"`, matching this file's own
+    documented derivation (module docstring: flat $100 bars, ATR(14)=10,
+    $500 paper equity -> `recommended_size_usd=25.00`, empirically
+    confirmed this fix round: `SizingComputed.sizing.recommended_units ==
+    0.25`). `_run_entries`'s NEW binding evaluate (F3+F5) now runs
+    `_serve._make_binding_proposal` against THIS ticket's own raw
+    quantity/limit_price BEFORE the thesis's real sizing is even computed
+    (mirroring `hud._serve`'s own /ack flow) -- R-012 (sizing purity,
+    tolerance 1%) compares that raw notional against the SAME real
+    recorded sizing once `submit()` runs, so the fixture's ticket notional
+    must actually agree with what ATR-Kelly recommends for these bars, or
+    R-012 denies every entry regardless of any other condition (reproduced
+    with the old `quantity="1"`: $100 notional vs $25 recorded -> R-012
+    fails outright). In production this is a non-issue: `hud._build.py`
+    generates every real `AdvisoryTicket`'s own quantity FROM the same
+    `mae.size_position` call SizingComputed re-invokes, so the two always
+    agree within tolerance -- only this file's own hand-picked fixture
+    values needed reconciling."""
     return AdvisoryTicket(
         pair=pair,
         side="buy",
@@ -380,6 +411,15 @@ class TestT3AC3SkipOpenOrActiveSymbols:
         kw = dict(thesis_kwargs)
         kw["asset"] = {**thesis_kwargs["asset"], "symbol": "ETH/USD", "venue": "kraken"}
         kw["entry"] = {"order_type": "market", "valid_until": "2026-02-01T00:00:00Z"}
+        # CTO harness fix (round 22): the generic fixture's BTC-scale
+        # bracket (stop 57000/target 66000) against this file's $100 ETH
+        # bars made run_once's EXIT phase legitimately fire "stop"
+        # (100 <= 57000) and flatten the seeded position -- the AC-3
+        # skip assertion needs a thesis whose bracket does NOT trigger at
+        # $100: stop below, target above, wide enough that no run in this
+        # file crosses either.
+        kw["stop_price"] = "80"
+        kw["target_price"] = "130"
         thesis_id = thesis.draft(kw)
         thesis.submit(thesis_id)
         default_ledger().append(
@@ -598,3 +638,206 @@ class TestT3AC5DigestMechanics:
         assert content_after_second.startswith(content_after_first) or content_after_first in (
             content_after_second
         ), "T3-AC-5: the first run's content must survive verbatim inside the appended file"
+
+
+# ---------------------------------------------------------------------------
+# Review round 22 fixes -- F1 (crash-visible runs), F3+F5 (two-phase
+# binding policy denies before a thesis is minted), F2a (equity mark
+# degrades per symbol)
+# ---------------------------------------------------------------------------
+
+
+class TestF1CrashVisibleRuns:
+    def test_unexpected_exception_after_the_guard_logs_run_failed_and_reraises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F1 (review round 22): an unexpected exception raised anywhere
+        past the paper-only guard must (a) still propagate to the caller
+        (the scheduler's own exit-code contract, F8, depends on seeing it)
+        and (b) leave a `Run FAILED` trail in the digest naming the
+        exception -- an autonomous hourly job dying silently into a bare
+        traceback is invisible until Mike happens to look."""
+        _patch_dials(monkeypatch, default_account_ref="paper:alpha")
+        from tradekit import cadence
+
+        def _boom(*args: Any, **kwargs: Any) -> HudState:
+            raise RuntimeError("build_state exploded")
+
+        monkeypatch.setattr(cadence, "build_state", _boom)
+
+        with pytest.raises(RuntimeError, match="build_state exploded"):
+            run_once(digest_dir=tmp_path)
+
+        digest_files = list(tmp_path.glob("DIGEST-*.md"))
+        assert len(digest_files) == 1, "F1: the digest must still be written on a crash"
+        content = digest_files[0].read_text(encoding="utf-8")
+        assert "Run FAILED" in content
+        assert "RuntimeError" in content, "F1: the exception's own class name must be named"
+        assert "build_state exploded" in content
+
+
+class TestF3F5TwoPhasePolicyDeniesBeforeMinting:
+    def test_halted_account_rejects_the_entry_and_never_reaches_approved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F3+F5 (review round 22, kills orphan theses): a REAL R-001 halt
+        (via `policy.halt()`, mirroring `test_pipeline.py`'s own deny-path
+        convention -- never a monkeypatched policy seam) must deny the
+        binding evaluate and the entry must never reach `approved` -- zero
+        open positions, zero `ThesisApproved`/`ThesisActivated` events for
+        the ticketed symbol, and the denial's rationale must reach the
+        digest as a warning.
+
+        ASSUMPTIONS-FLAG (fix round 22, CTO to reconcile): the dispatch's
+        literal wording pinned the binding evaluate BEFORE `thesis.draft`
+        (a deny minting zero `ThesisDrafted` events at all). Verified
+        unimplementable as literally pinned: `policy._context.py` resolves
+        R-010 (`thesis_review_artifact_id`/`thesis_market_snapshot_id`/
+        `thesis_ev_ok`) and R-012 (`recorded_sizing_usd`) off the REAL
+        ledger by `action.thesis_id`, and `evaluate_pure` denies on ANY
+        `insufficient_context` hit (`_rules.py`'s own module docstring --
+        never passes vacuously). A pre-`draft` placeholder id therefore
+        denied 100% of entries during this fix round's own dev pass --
+        reproduced against every existing T3-AC-2/3/4 entry test, halted or
+        not. The dev pass instead evaluates at `reviewed` (`_confirm_entry`'s
+        own docstring) -- the first state carrying real review/EV/sizing
+        context, and the LAST state `thesis.reject()` accepts (illegal from
+        `approved`, ASSUMPTIONS 64) -- so a deny still lands on a terminal,
+        non-`active` state (`ThesisRejected`) rather than either a 100%-deny
+        regression or an "approved orphan" stuck in limbo. `ThesisDrafted`
+        DOES still fire (draft/submit/review always run to build the real
+        context the binding evaluate needs); what review round 22 actually
+        objected to -- an unexecuted thesis stuck `approved`, silently
+        accumulating -- cannot happen: this thesis is `rejected`, terminal."""
+        _patch_dials(monkeypatch, default_account_ref="paper:alpha")
+        holder = _BarsClockHolder(_flat_bars(_ASSET), _ENTRY_NOW)
+        _install_seams(monkeypatch, holder)
+
+        from tradekit import cadence, policy
+
+        policy.halt("F3+F5 fix-round test: entry-time halt")
+
+        state = _hud_state((_ticket("ETH/USD"),))
+        monkeypatch.setattr(cadence, "build_state", lambda *a, **kw: state)
+
+        run_once(digest_dir=tmp_path)
+
+        assert broker.get("paper:alpha").positions() == [], (
+            "F3+F5: a halted account must never open a position"
+        )
+        approved_events = [
+            e
+            for e in default_ledger().query(EventFilter(types=["ThesisApproved"]))
+        ]
+        assert approved_events == [], (
+            "F3+F5: a denied entry must never reach `approved` -- that state IS the "
+            "'approved orphan' review round 22 found"
+        )
+        rejected_events = default_ledger().query(EventFilter(types=["ThesisRejected"]))
+        assert len(rejected_events) == 1, (
+            "F3+F5: the denied entry must land on a TERMINAL, non-active state "
+            "(ThesisRejected), not silently vanish or hang in an intermediate one"
+        )
+
+        digest_files = list(tmp_path.glob("DIGEST-*.md"))
+        content = digest_files[0].read_text(encoding="utf-8")
+        assert "### Warnings" in content
+        assert "ETH/USD" in content and "denied" in content.lower(), (
+            "F3+F5: the policy denial's own rationale must reach the digest"
+        )
+
+
+class TestF2EquityDegradesPerSymbol:
+    def test_one_symbols_provider_error_skips_only_that_symbols_mark(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        make_event,
+        thesis_kwargs: dict,
+    ) -> None:
+        """F2a (review round 22): `_paper_equity_usd`'s per-symbol bar fetch
+        must be contained -- one symbol's `ProviderError` (data provider
+        down) skips only that symbol's mark (equity understated is the
+        conservative direction) while the run still completes and the
+        healthy symbol's mark is still counted; a digest warning names the
+        skipped symbol."""
+        _patch_dials(monkeypatch, default_account_ref="paper:alpha")
+
+        class _MixedBarsClock:
+            """Same seam shape as `_BarsClockHolder`, but SOL/USD's own bar
+            fetch raises `ProviderError` while every other symbol gets the
+            normal flat $100 bars -- isolates F2a's per-symbol containment
+            from every other symbol's own healthy mark. `fail` starts
+            `False` so BOTH positions can be seeded (draft/submit/execute
+            each re-fetch bars for their own symbol) before the run under
+            test flips it on -- otherwise seeding SOL/USD's OWN position
+            would itself hit the fake outage before `run_once` is even
+            called."""
+
+            def __init__(self, now: datetime) -> None:
+                self.now = now
+                self.fail = False
+
+            def get_closed_bars(self, symbol: str, timeframe: str, lookback_days: int):
+                if self.fail and symbol == "SOL/USD":
+                    raise ProviderError("SOL/USD: fake provider outage")
+                return _flat_bars(_ASSET)
+
+            def clock(self) -> datetime:
+                return self.now
+
+        holder = _MixedBarsClock(_ENTRY_NOW)
+        monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", holder.get_closed_bars)
+        monkeypatch.setattr("tradekit.mae._runtime._clock", holder.clock)
+        monkeypatch.setattr("tradekit.policy._context._clock", holder.clock)
+
+        def _seed_position(symbol: str) -> None:
+            kw = dict(thesis_kwargs)
+            kw["asset"] = {**thesis_kwargs["asset"], "symbol": symbol, "venue": "kraken"}
+            kw["entry"] = {"order_type": "market", "valid_until": "2026-02-01T00:00:00Z"}
+            kw["stop_price"] = "80"
+            kw["target_price"] = "130"
+            thesis_id = thesis.draft(kw)
+            thesis.submit(thesis_id)
+            default_ledger().append(
+                make_event(
+                    type="ReviewCompleted",
+                    payload={
+                        "thesis_id": thesis_id,
+                        "review_artifact_id": "rev-1",
+                        "passed": True,
+                    },
+                )
+            )
+            thesis.approve(thesis_id)
+            broker.execute_order(thesis_id)
+
+        _seed_position("ETH/USD")
+        _seed_position("SOL/USD")
+        holder.fail = True  # the outage only applies to the run under test
+
+        cash = broker.get("paper:alpha").account().settled_cash_usd
+        positions = {p.symbol: p.qty for p in broker.get("paper:alpha").positions()}
+        expected_equity = cash + positions["ETH/USD"] * Decimal("100")
+
+        from tradekit import cadence
+
+        captured: dict[str, Any] = {}
+
+        def _fake_build_state(*args: Any, **kwargs: Any) -> HudState:
+            captured["equity_usd"] = kwargs["equity_usd"]
+            return _hud_state()
+
+        monkeypatch.setattr(cadence, "build_state", _fake_build_state)
+
+        run_once(digest_dir=tmp_path)  # must complete, not raise
+
+        assert captured["equity_usd"] == expected_equity, (
+            "F2a: equity must be cash + only the HEALTHY symbol's mark -- SOL/USD's "
+            "ProviderError must not take the whole equity calc down"
+        )
+
+        digest_files = list(tmp_path.glob("DIGEST-*.md"))
+        content = digest_files[0].read_text(encoding="utf-8")
+        assert "SOL/USD" in content, "F2a: the skipped symbol's warning must reach the digest"
+

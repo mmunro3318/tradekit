@@ -503,3 +503,25 @@ correct design (ASSUMPTIONS 177.3).
 | green-cadence-t1 | contracts/_hud, _strategies, hud/_build, hud/_serve | 0 | 0 | 1 | A− | Spec-exact wiring, falsy trap avoided; docked for the silent build_state unknown-key fallback (asymmetry since ratified 177.5). |
 | red-cadence-t2 | test_pipeline + test_exit_trigger (11) | 0 | 1 | 0 | B+ | Real-fixture discipline (real execute_order seeding, real R-001 halt); equality-only trigger table let an ==-mutant survive. |
 | green-cadence-t2 | broker/_pipeline, broker/__init__, cadence/__init__ | 0 | 0 | 0 | A | execute_exit mirrors the gated shape faithfully; the fresh-price STOP-and-flag was exactly the money-path discipline the house wants. |
+
+## Round 22 — 2026-08-03 — SPEC-cadence T3 runner (red 80c3af8, green+fix this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate + guard/funnel bypass
+probes + mutant analysis. Verdict FIX-FIRST: 1 HIGH (crash-silent
+unattended runs — no digest trace of a failed run) + MED cluster (one
+symbol's bar failure killed whole runs; grade coupled into exit's try
+could orphan trades out of the promotion record; approved-orphan
+accumulation under policy deny; unratified binding-evaluate deviation).
+All four core guarantees (paper-only, funnel-only, drought-honest,
+policy-gated) held in the happy path. Fix round landed all 8 items; the
+binding-evaluate pin proved UNIMPLEMENTABLE literally (R-010/R-012 never
+pass vacuously pre-draft) — fixer's evaluate-at-reviewed + reject-on-deny
+redesign ratified (ASSUMPTIONS 178.2). CTO harness fixes: policy clock
+seam alignment + bracket scale-consistency (both fixture defects the
+implementer diagnosed precisely and refused to code around).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-cadence-t3 | test_run_once.py (8) | 0 | 2 | 0 | B+ | Real-verb end-to-end incl. the sprint-defining AC-4 round trip; missed the failure envelope entirely + two harness defects (clock desync, scale-blind bracket). |
+| green-cadence-t3 | cadence, ledger accessor, hud refactor, script | 1 | 3 | 3 | B− | Clean happy-path composition + two exemplary STOP-and-flag diagnoses; shipped crash-silent unattended failure mode. |
+| fix-cadence-t3 | 8-item fix round | 0 | 0 | 0 | A | Hit an unimplementable pin, proved WHY empirically (R-010/R-012 vacuous-deny), designed the correct alternative, flagged rather than forced — the round's best work. |

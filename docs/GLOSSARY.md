@@ -82,6 +82,7 @@
 | strategy_key | the StrategyDef key that claimed a symbol in the walk; "" = manual/unclaimed (falsy sentinel) | `_SetupResult.strategy_key`, `AdvisoryTicket.strategy_key`, thesis `strategy_tag` | ~~strategy id~~, ~~def key~~ |
 | execute_exit | the gated pipeline verb that flattens an active thesis (mirror of execute_order; NET-qty sell, policy-evaluated) | `broker.execute_exit(thesis_id)` | ~~close~~, ~~sell~~, ~~flatten~~ (bare) |
 | exit trigger | the pure WHEN-to-flatten decision (stop/target/horizon, inclusive touches, stop-first) | `cadence.exit_trigger(...)` -> `"stop"\|"target"\|"horizon"\|None` | ~~exit signal~~ |
+| active thesis w/ symbol | the symbol-keyed active-thesis enumeration (skip-sets + exit triggers) | `ledger.models.active_theses_with_symbol()` -> rows incl. `symbol` | ~~active list~~ |
 | wound scale | review-exchange severity enum, rank order minor<major<fatal (never lexicographic) — ASSUMPTIONS 171; legacy ints map 1-2/3/4-5 at the parse boundary only | `WOUND_SCALE = ("minor","major","fatal")`, `severity: "minor"\|"major"\|"fatal"` | ~~1..5~~, ~~severity level~~, ~~critical~~ |
 
 ## hud / ops context
