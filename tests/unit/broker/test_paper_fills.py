@@ -779,7 +779,7 @@ def test_limit_buy_alpaca_crypto_withholds_fee_in_kind_and_cash_delta_is_exact_n
     )
     assert expected_fee_asset_qty == Decimal("0.0000025")
     expected_fees_usd = expected_fee_asset_qty * limit_price
-    assert expected_fees_usd == Decimal("0.000005"), "0.0000025 * 2000.00 = 0.005"
+    assert expected_fees_usd == Decimal("0.005"), "0.0000025 * 2000.00 = 0.005"
 
     payload = _last_fill_payload(_ACCOUNT_REF)
     assert Decimal(str(payload["fee_asset_qty"])) == expected_fee_asset_qty

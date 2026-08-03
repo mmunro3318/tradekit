@@ -91,6 +91,16 @@ def compute_pnl(ledger: Ledger, thesis_id: str, direction: str) -> Decimal | Non
     carries no `side` field): entry = earliest `payload.ts_utc`, exit =
     latest. Multi-fill partial exits are out of scope this batch — a
     single-fill thesis has entry == exit (zero gross, fees still deducted).
+
+    In-kind entry fee (SPEC-inkind-fees, AC-7/8/9): when the entry fill's
+    `fee_asset_qty > 0` (an Alpaca-crypto buy), its `fees_usd` valuation is
+    DROPPED from the long-round-trip formula — that fee is already realized
+    as the reduced exit qty (`positions()`'s net-held convention), so
+    subtracting its USD value again would double-count. A USD-side entry
+    fee (equities, every legacy fixture — `fee_asset_qty` absent or 0)
+    still subtracts, preserving every existing pinned value. Missing the
+    key entirely (pre-batch payloads) reads as 0, same as the field's own
+    contract default.
     """
     fills = [
         event
@@ -105,13 +115,27 @@ def compute_pnl(ledger: Ledger, thesis_id: str, direction: str) -> Decimal | Non
 
     fills.sort(key=_fill_ts)
     entry, exit_ = fills[0], fills[-1]
+    if entry is exit_:
+        # Single-fill thesis (legacy pin, AC-8): entry == exit, zero gross,
+        # fees still deducted exactly once regardless of fee representation.
+        return -Decimal(str(entry.payload["fees_usd"]))
+
     entry_price = Decimal(str(entry.payload["price"]))
     exit_price = Decimal(str(exit_.payload["price"]))
     qty = Decimal(str(entry.payload["qty"]))
     fees = sum((Decimal(str(f.payload["fees_usd"])) for f in fills), start=Decimal("0"))
 
     if direction == "short":
+        # Short branch: UNTOUCHED (spec's own out-of-scope note — crypto
+        # spot is long-only, this path never sees fee_asset_qty).
         gross = (entry_price - exit_price) * qty
-    else:  # "long" — the only pinned/tested case (ASSUMPTIONS 69)
-        gross = (exit_price - entry_price) * qty
-    return gross - fees
+        return gross - fees
+
+    # "long" — the only pinned/tested round-trip case (ASSUMPTIONS 69).
+    exit_qty = Decimal(str(exit_.payload["qty"]))
+    exit_fees = Decimal(str(exit_.payload["fees_usd"]))
+    entry_fee_asset_qty = Decimal(str(entry.payload.get("fee_asset_qty", "0")))
+    entry_fees = (
+        Decimal("0") if entry_fee_asset_qty != 0 else Decimal(str(entry.payload["fees_usd"]))
+    )
+    return (exit_qty * exit_price - exit_fees) - (qty * entry_price) - entry_fees

@@ -494,6 +494,12 @@ class FillRecordedPayload(StrictFrozenModel):
     # fills); every producer, harness fixtures included, must name the
     # symbol explicitly.
     symbol: str
+    # `fee_asset_qty` (SPEC-inkind-fees, AC-1): units withheld IN-KIND from
+    # the RECEIVED asset on this fill. Alpaca crypto buys withhold fee in
+    # the crypto asset itself (measured live, ASSUMPTIONS 142/146 update);
+    # sells, equities, and every historical event/P2 fixture have none, so
+    # the default 0 preserves every existing serialized event unchanged.
+    fee_asset_qty: Decimal = Decimal("0")
 
 
 class ReconciliationRunPayload(StrictFrozenModel):

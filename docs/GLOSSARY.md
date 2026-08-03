@@ -73,6 +73,8 @@
 | account ref | the namespaced account identity | `"paper:alpha"`, `"advisory:kraken"`, `"live:..."` | ~~account id~~ |
 | thesis | the falsifiable, reviewed, machine-gradable trade contract | `ThesisContract` | ~~idea~~, ~~setup~~ (a setup is pre-thesis, scan context) |
 | graded | terminal thesis judgment vs its own predicates | `ThesisGraded` | ~~done~~, ~~completed~~, ~~closed~~, ~~finished~~ |
+| in-kind fee | fee withheld from the RECEIVED asset of a fill (Alpaca crypto buys: in the crypto; sells: in the USD proceeds) — ASSUMPTIONS 170 | `fee_asset_qty` on `FillRecorded` (asset units; 0 = USD-fee physics) | ~~crypto fee~~, ~~asset fee~~ |
+| net held qty | position quantity after in-kind withhold; the ONLY legal sell-sizing input | `positions()[i].qty` = Σ(buy qty − fee_asset_qty) − Σ(sell qty) | ~~filled qty~~ (that's the gross fill) |
 
 ## hud / ops context
 

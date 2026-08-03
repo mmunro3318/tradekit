@@ -81,7 +81,7 @@ reimplemented ad hoc elsewhere.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 from ulid import ULID
@@ -122,6 +122,20 @@ _TIMEFRAME = "1d"
 _LOOKBACK_DAYS = 30
 
 
+def _inkind_fee_asset_qty(venue: str, asset_class: str, side: str, qty: Decimal) -> Decimal:
+    """In-kind withhold (SPEC-inkind-fees, AC-2..4): Alpaca crypto BUYS only
+    — the fee is withheld from the received asset itself, never a separate
+    cash deduction. Sells, equities, and every other venue keep the legacy
+    USD-side `price_friction` fee (return 0 here; the caller charges
+    `friction.fee_usd` as before). ROUND_CEILING at 1e-9 matches the single
+    live-measured observation (SPEC Unknowns U1, PROVISIONAL)."""
+    if venue == "alpaca" and asset_class == "crypto" and side == "buy":
+        return (costs.fee_rate(venue, asset_class) * qty).quantize(
+            Decimal("1e-9"), rounding=ROUND_CEILING
+        )
+    return Decimal("0")
+
+
 class PaperBroker:
     """One named paper account (`"paper:alpha"`, `"paper:conformance-
     suite"`, ...), a ledger projection — see module docstring for the "no
@@ -144,7 +158,10 @@ class PaperBroker:
         for fill in self._fill_events():
             notional = fill["price"] * fill["qty"]
             if fill["side"] == "buy":
-                cash -= notional + fill["fees_usd"]
+                # In-kind withhold (SPEC-inkind-fees, AC-2): the fee is
+                # already embodied in the reduced RECEIVED qty, never a
+                # second cash deduction — cash delta is exact notional.
+                cash -= notional if fill["fee_asset_qty"] > 0 else notional + fill["fees_usd"]
             else:
                 cash += notional - fill["fees_usd"]
         # No margin modeled in MVP (ASSUMPTIONS round-17 entry 108,
@@ -167,7 +184,16 @@ class PaperBroker:
             symbol = fill["symbol"]
             qty, avg_price = by_symbol.get(symbol, (Decimal("0"), Decimal("0")))
             if fill["side"] == "buy":
-                new_qty = qty + fill["qty"]
+                # AC-5: held qty nets the in-kind withhold (fee_asset_qty)
+                # out of the received amount. avg_price convention
+                # (ASSUMPTIONS 170): venue-style fill price — a single buy
+                # reports avg_price == fill price (matching Alpaca's own
+                # avg_entry_price on an in-kind buy), NOT cash-paid/net-qty
+                # cost basis; position notional therefore understates cash
+                # paid by the withhold's value. Exit sizing must use qty,
+                # never notional/avg_price.
+                received_qty = fill["qty"] - fill["fee_asset_qty"]
+                new_qty = qty + received_qty
                 avg_price = (
                     fill["price"]
                     if qty == 0
@@ -382,6 +408,11 @@ class PaperBroker:
         else:
             fill_price = mid - half_spread_per_unit
 
+        fee_asset_qty = _inkind_fee_asset_qty(
+            order.asset.venue, order.asset.asset_class, order.side, order.qty
+        )
+        fees_usd = fee_asset_qty * fill_price if fee_asset_qty > 0 else friction.fee_usd
+
         self._append_fill(
             order_id=order_id,
             thesis_id=order.thesis_id,
@@ -389,7 +420,8 @@ class PaperBroker:
             side=order.side,
             price=fill_price,
             qty=order.qty,
-            fees_usd=friction.fee_usd,
+            fees_usd=fees_usd,
+            fee_asset_qty=fee_asset_qty,
             quote_snapshot={
                 "ts_open": bar.ts_open.isoformat(),
                 "close": str(bar.close),
@@ -413,6 +445,8 @@ class PaperBroker:
         notional_usd = limit_price * qty
         friction = costs.price_friction(asset.venue, asset.asset_class, notional_usd, side)  # type: ignore[arg-type]
         now = _mae_runtime.clock()
+        fee_asset_qty = _inkind_fee_asset_qty(asset.venue, asset.asset_class, side, qty)
+        fees_usd = fee_asset_qty * limit_price if fee_asset_qty > 0 else friction.fee_usd
         self._append_fill(
             order_id=order_id,
             thesis_id=thesis_id,
@@ -420,7 +454,8 @@ class PaperBroker:
             side=side,
             price=limit_price,
             qty=qty,
-            fees_usd=friction.fee_usd,
+            fees_usd=fees_usd,
+            fee_asset_qty=fee_asset_qty,
             quote_snapshot={
                 "ts_open": bar.ts_open.isoformat(),
                 "close": str(bar.close),
@@ -441,6 +476,7 @@ class PaperBroker:
         fees_usd: Decimal,
         quote_snapshot: dict[str, Any],
         ts: datetime,
+        fee_asset_qty: Decimal = Decimal("0"),
     ) -> None:
         payload = FillRecordedPayload(
             order_id=order_id,
@@ -450,6 +486,7 @@ class PaperBroker:
             price=price,
             qty=qty,
             fees_usd=fees_usd,
+            fee_asset_qty=fee_asset_qty,
             side=side,  # type: ignore[arg-type]
             quote_snapshot=quote_snapshot,
             symbol=symbol,
@@ -485,6 +522,7 @@ class PaperBroker:
                     "price": Decimal(str(payload["price"])),
                     "qty": Decimal(str(payload["qty"])),
                     "fees_usd": Decimal(str(payload["fees_usd"])),
+                    "fee_asset_qty": Decimal(str(payload.get("fee_asset_qty", "0"))),
                     "side": payload["side"],
                     "symbol": payload["symbol"],
                 }

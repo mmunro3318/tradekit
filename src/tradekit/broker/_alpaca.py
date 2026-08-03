@@ -165,7 +165,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, Literal
 
 import httpx
@@ -721,7 +721,18 @@ class AlpacaBroker:
         price = Decimal(str(filled_avg_price_raw))
         side = str(data.get("side", "buy"))
         symbol = str(data.get("symbol", ""))
-        fees_usd = self._fees_for(symbol=symbol, side=side, price=price, qty=qty)
+        asset_class = self._asset_class_for_symbol(symbol)
+        if asset_class == "crypto" and side == "buy":
+            # AC-6 (SPEC-inkind-fees): Alpaca's own fill response carries NO
+            # fee field (ASSUMPTIONS 142) -- the withhold is modeled off the
+            # SAME in-kind formula PaperBroker uses, never a separate copy.
+            fee_asset_qty = (costs.fee_rate("alpaca", "crypto") * qty).quantize(
+                Decimal("1e-9"), rounding=ROUND_CEILING
+            )
+            fees_usd = fee_asset_qty * price
+        else:
+            fee_asset_qty = Decimal("0")
+            fees_usd = self._fees_for(symbol=symbol, side=side, price=price, qty=qty)
 
         ts_raw = data.get("filled_at")
         ts = _parse_alpaca_ts(ts_raw) if ts_raw else _mae_runtime.clock()
@@ -735,6 +746,7 @@ class AlpacaBroker:
             price=price,
             qty=qty,
             fees_usd=fees_usd,
+            fee_asset_qty=fee_asset_qty,
             side=side,  # type: ignore[arg-type]
             quote_snapshot={},
             symbol=symbol,

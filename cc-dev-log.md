@@ -1,3 +1,24 @@
+## 2026-08-03 (Fable — paper-sprint batch A: in-kind fee fix GREEN)
+
+- SPEC-inkind-fees spec'd, red (004a097+5bcfd53), green, GATE green, money-path
+  review round 14 (FIX-FIRST: zero code defects, hygiene only; both agents A−).
+  Alpaca in-kind crypto fee physics now modeled end-to-end: FillRecorded gains
+  fee_asset_qty (default 0, historical events replay under recorded physics);
+  paper+alpaca buys withhold ceil9(0.0025×qty) in-asset, cash delta exact
+  notional; positions() nets the withhold; compute_pnl drops the entry-fee
+  term iff in-kind (double-count guard); GOLDEN pins the 2026-07-26 live ETH
+  round trip to the venue's own $50.00→$49.97 to the cent. ASSUMPTIONS 170
+  (ceiling rounding PROVISIONAL — re-measure on the 3 probationary trades),
+  GLOSSARY in-kind-fee/net-held-qty entries, agent-metrics round 14.
+- Carried-forward pin for the cadence batch: sells sized from positions() net
+  qty, NEVER entry filled_qty (live smoke run proved full-qty sells reject).
+- Sprint plan tasked (TASKS-inkind-fees + task graph): next wound-scale
+  migration (spec drafted, three-layer finding: exchange schema + persisted
+  rubric_scores tally + dials blocking predicate), then T-MTF-2→3, S2, S4,
+  T-MTF-4+cadence. Recon: STRATEGY-PACK requires MTF-SCAN first (S2/S4 are
+  ScanLeg lists over scan_confluence); strategies.py TAGS registry already
+  exists; S2/S4 vocab (ema_above, rsi_band) collides with nothing.
+
 # cc-dev-log
 
 Chronological dev log. Newest entry first. One entry per working session; keep entries terse — decisions and deltas, not narration.
