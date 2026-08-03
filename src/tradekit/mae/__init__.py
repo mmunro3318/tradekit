@@ -20,6 +20,7 @@ from tradekit.mae import _confluence, _correlation, _metrics, _regime, _runtime,
 from tradekit.mae._confluence import ScanLeg
 from tradekit.mae._indicators import volatility
 from tradekit.mae._scan_trace import ScanAuditMode
+from tradekit.mae._strategies import STRATEGIES, STRATEGY_BY_KEY, StrategyDef, build_registry
 from tradekit.mae._vocab import BBPosition, MacdSignal
 
 
@@ -248,9 +249,13 @@ def get_correlation_matrix(
 
 
 __all__ = [
+    "STRATEGIES",
+    "STRATEGY_BY_KEY",
     "BBPosition",
     "MacdSignal",
     "ScanLeg",
+    "StrategyDef",
+    "build_registry",
     "compute_strategy_metrics",
     "get_correlation_matrix",
     "get_derivatives_context",

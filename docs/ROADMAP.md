@@ -258,5 +258,5 @@ See ASSUMPTIONS 161 (supersedes 33) and
 
 ### MTF-SCAN (docs/design/MTF-SCAN.md)
 - [x] T-MTF-2: scan_confluence verb (round 16)
-- [ ] T-MTF-3: strategy registry + S1 migration
+- [x] T-MTF-3: strategy registry + S1 migration (round 17)
 - [ ] T-MTF-4: hud registry walk

@@ -406,3 +406,26 @@ prescriptions verbatim).
 
 Follow-up chip filed: extract shared filter-vocabulary validation helper
 (logic forked between scan()/confluence — drift risk).
+
+## Round 17 — 2026-08-03 — T-MTF-3 strategy registry (red 55b8c10, green+fix this commit)
+
+Reviewer: tk-reviewer (top model), self-ran full gate (1133 collected =
+main+10). Verdict FIX-FIRST: MED cluster — mae export pin missed (design's
+own page), side not Literal, and the batch's defining catch: min_tags=0
+made S1 UNCONDITIONAL under confluence semantics, which under T-MTF-4
+first-match-wins would permanently shadow S2; reviewer proved min_tags=1 is
+decision-identical to today's hud arm gate. CTO RE-ADJUDICATED S1 to
+min_tags=1 (overriding the earlier 0 ruling). Also: one vacuous test
+deleted, divergence differential test added, tests/ package plumbing
+ACCEPTED (basename-collision fix), two-registries naming hazard resolved via
+GLOSSARY (no rename — Surgical Changes).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-mtf3 | test_strategies_registry.py (10) | 0 | 2 | 1 | B | Exemplary ASSUMPTION-FLAG discipline + seam reuse; vacuous iteration test, missed the divergence probe its own min_tags flag begged for, re-introduced the kwargs-only fake round 16 condemned (CTO-widened). |
+| green-mtf3 | mae/_strategies.py + tests/ __init__ plumbing | 0 | 2 | 1 | B− | Faithful minimal module, correctly refused to fix the broken differential test (right red-line instinct); missed two explicit pins on the design page it cites (mae export, Literal side). |
+| fix-mtf3 | 5-item fix round | 0 | 0 | 0 | A− | All five landed cleanly; one wrong parting claim (strategies.py "does not exist" — it does) with zero consequence. |
+
+ASSUMPTIONS 173 pins the re-adjudication + the T-MTF-4 non-empty-tags
+prerequisite. Hygiene backlog: --import-mode=importlib (retire basename
+collisions suite-wide).

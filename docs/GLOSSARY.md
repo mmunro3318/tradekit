@@ -75,6 +75,8 @@
 | graded | terminal thesis judgment vs its own predicates | `ThesisGraded` | ~~done~~, ~~completed~~, ~~closed~~, ~~finished~~ |
 | in-kind fee | fee withheld from the RECEIVED asset of a fill (Alpaca crypto buys: in the crypto; sells: in the USD proceeds) — ASSUMPTIONS 170 | `fee_asset_qty` on `FillRecorded` (asset units; 0 = USD-fee physics) | ~~crypto fee~~, ~~asset fee~~ |
 | net held qty | position quantity after in-kind withhold; the ONLY legal sell-sizing input | `positions()[i].qty` = Σ(buy qty − fee_asset_qty) − Σ(sell qty) | ~~filled qty~~ (that's the gross fill) |
+| strategy registry | the priority-ordered StrategyDef tuple the funnel walks (first match wins) | `mae.STRATEGIES` / `mae.STRATEGY_BY_KEY` / `mae.StrategyDef` (public via mae only) | ~~registry~~ bare (ambiguous vs tag-family registry) |
+| tag-family registry | the signal-tag -> strategy-family seed map | `tradekit.strategies.TAGS` / `FAMILIES` | ~~strategy registry~~ (that is mae._strategies) |
 | wound scale | review-exchange severity enum, rank order minor<major<fatal (never lexicographic) — ASSUMPTIONS 171; legacy ints map 1-2/3/4-5 at the parse boundary only | `WOUND_SCALE = ("minor","major","fatal")`, `severity: "minor"\|"major"\|"fatal"` | ~~1..5~~, ~~severity level~~, ~~critical~~ |
 
 ## hud / ops context

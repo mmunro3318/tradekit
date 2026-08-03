@@ -1,3 +1,19 @@
+## 2026-08-03d (Fable — paper-sprint batch D: T-MTF-3 registry GREEN)
+
+- Strategy registry landed (mae/_strategies.py: frozen 7-field StrategyDef,
+  STRATEGIES priority tuple, build_registry/STRATEGY_BY_KEY, all public via
+  mae). S1 migrated. Red 55b8c10, green, review round 17 FIX-FIRST -- the
+  catch that mattered: min_tags=0 made S1 unconditional under confluence
+  semantics and would have SHADOWED S2 forever under T-MTF-4 first-match-
+  wins; re-adjudicated to min_tags=1 (decision-identical to hud's arm gate).
+  ASSUMPTIONS 173 (incl. the T-MTF-4 non-empty-tags pin), GLOSSARY now
+  disambiguates strategy registry vs tag-family registry. GATE green.
+- tests/ gained __init__.py package plumbing (basename-collision fix,
+  reviewer-accepted); backlog: pytest --import-mode=importlib for the
+  class-wide cure.
+- Next: S2 pullback (needs ema_above + rsi_band vocab), then S4 reversion
+  (+ horizon_hours thesis field), then T-MTF-4 walk + cadence.
+
 ## 2026-08-03c (Fable — paper-sprint batch C: T-MTF-2 scan_confluence GREEN)
 
 - scan_confluence verb landed (mae/_confluence.py behind the __init__ verb;

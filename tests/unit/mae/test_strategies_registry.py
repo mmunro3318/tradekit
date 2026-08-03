@@ -30,6 +30,18 @@ from typing import Any
 
 import pytest
 
+from tradekit.contracts import AssetRef, Bar, BarSeries
+from tradekit.mae import (
+    STRATEGIES,
+    STRATEGY_BY_KEY,
+    StrategyDef,
+    _regime,
+    build_registry,
+    scan_confluence,
+    scan_markets,
+)
+from tradekit.mae._data.limits import TIMEFRAME_MAX_LOOKBACK_DAYS
+
 # ASSUMPTION-FLAG 3: module home + "lookup by key" API. MTF-SCAN.md pins only
 # `STRATEGIES: tuple[StrategyDef, ...]` and the module path
 # `src/tradekit/mae/_strategies.py`. The mission's "Registry lookup by key;
@@ -39,16 +51,6 @@ import pytest
 # with synthetic defs, so this doesn't touch the real STRATEGIES data) plus
 # a pre-built `STRATEGY_BY_KEY` module constant for the real STRATEGIES
 # tuple. CTO may rename/reshape either before green.
-from tradekit.mae._strategies import (
-    STRATEGIES,
-    STRATEGY_BY_KEY,
-    StrategyDef,
-    build_registry,
-)
-
-from tradekit.contracts import AssetRef, Bar, BarSeries
-from tradekit.mae import _regime, scan_confluence, scan_markets
-from tradekit.mae._data.limits import TIMEFRAME_MAX_LOOKBACK_DAYS
 
 
 def _bar(ts_open: datetime, close: float, volume: float = 100.0) -> Bar:
@@ -81,10 +83,12 @@ def _install_fixed_clock(monkeypatch, now: datetime) -> None:
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: now)
 
 
-def _permissive_regime(**_: Any) -> dict[str, Any]:
+def _permissive_regime(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
     """Recommends every family the scanner's `_TAG_STRATEGY` mapping uses
-    (momentum, breakout, mean_reversion) -- nothing gets pruned. Same
-    fixture as `test_scan_confluence_verb.py`'s `_permissive_regime`."""
+    (momentum, breakout, mean_reversion) -- nothing gets pruned. Accepts
+    ANY call convention (round-16 adjudication): scan_markets calls
+    compute_regime positionally, scan_confluence by keyword -- a fake that
+    pins one convention fails behavior-identical refactors."""
     return {
         "current_state": "low_vol_trend",
         "confidence": 0.9,
@@ -154,14 +158,6 @@ def test_strategies_is_a_tuple_of_strategy_def() -> None:
     assert all(isinstance(item, StrategyDef) for item in STRATEGIES)
 
 
-def test_strategies_iteration_order_is_deterministic() -> None:
-    first_pass = [item.key for item in STRATEGIES]
-    second_pass = [item.key for item in STRATEGIES]
-    assert first_pass == second_pass
-    # identity-stable too -- STRATEGIES is a fixed tuple, not regenerated.
-    assert list(STRATEGIES) == list(STRATEGIES)
-
-
 def test_registry_lookup_by_key_returns_matching_def() -> None:
     registry = build_registry(STRATEGIES)
     assert registry["s1_momentum"] is STRATEGY_BY_KEY["s1_momentum"]
@@ -189,10 +185,11 @@ def test_duplicate_key_registration_raises_loud_error() -> None:
 
 # ---------------------------------------------------------------------------
 # 3. S1 migration: the registry's S1 def encodes today's hud setup battery
-#    verbatim. ASSUMPTION-FLAG 1/2 (see below) on the fields MTF-SCAN.md
+#    verbatim. ASSUMPTION-FLAG 1 (see below) on the field MTF-SCAN.md
 #    doesn't pin verbatim -- derived from `hud/_build.py`'s
 #    `_SETUP_FILTERS`/`_SETUP_TIMEFRAME` and the behavior-identity
-#    requirement itself (see test 4 below for why min_tags=0 is forced).
+#    requirement itself (see test 4 below for min_tags=1's behavior-identity
+#    proof).
 # ---------------------------------------------------------------------------
 
 
@@ -203,16 +200,13 @@ def test_s1_strategy_def_encodes_todays_hud_setup_battery() -> None:
     leg = s1.legs[0]
     assert leg["timeframe"] == "4h"  # hud/_build.py:38 _SETUP_TIMEFRAME
     assert leg["filters"] == {"macd_signal": "bullish_cross", "volume_spike": 1.5}
-    # ASSUMPTION-FLAG 2: min_tags=0 (unconditional leg, ASSUMPTIONS 172.4
-    # "min_tags=0 makes a leg unconditional"). Today's `_default_scan_setup`
-    # (hud/_build.py:133-161) returns whatever tags survive regime pruning
-    # -- including zero -- as long as the underlying macd_signal+volume_spike
-    # match exists; it never gates on a minimum surviving-tag count. Any
-    # min_tags >= 1 here would newly DROP symbols that today's hud still
-    # reports (with fewer tags), breaking behavior-identity. CTO must
-    # confirm 0 is intended over pinning min_tags=2 (both tags required)
-    # as a deliberate S1 tightening.
-    assert leg["min_tags"] == 0
+    # min_tags=1: decision-identical to today's hud, whose arm gate already
+    # requires >= 1 surviving tag (hud/_build.py:~434) before a setup ever
+    # arms -- an empty-tag scan match maps to "wait" either way, so this is
+    # not a behavior change. min_tags=1 also prevents an unconditional S1
+    # leg from shadowing S2 under T-MTF-4's first-match-wins walk.
+    # CTO re-adjudication, round 17 (ASSUMPTIONS 173).
+    assert leg["min_tags"] == 1
     assert s1.size_scale == Decimal("1")
     assert s1.r_multiple_override is None
     assert s1.tag == "s1_momentum"
@@ -281,6 +275,47 @@ def test_s1_registry_def_through_scan_confluence_matches_direct_scan_markets(
 
     assert direct_tags  # sanity: the fixture actually produces a match
     assert set(confluence_tags) == set(direct_tags)
+
+
+def test_s1_min_tags_one_matches_the_divergence_min_tags_zero_would_have_opened(
+    monkeypatch,
+) -> None:
+    """A symbol whose bars produce NO raw filter match (flat closes, flat
+    volume -- neither macd_signal bullish_cross nor volume_spike fires) must
+    be absent from BOTH `scan_markets` matches AND the S1-def-through-
+    `scan_confluence` matches now that `min_tags=1`. This is the exact
+    divergence surface `min_tags=0` would have opened (round 17 F3/F4): with
+    0, `_confluence.confluence` never checks `len(pruned_tags) < min_tags`
+    against a floor above zero, so a no-signal symbol with an empty
+    `signal_tags` list would still satisfy the leg and confluence would
+    emit a match `scan_markets` never would (`scan_markets` requires
+    `signal_tags` to be non-empty to report a match at all)."""
+    flat_closes = [100.0] * 60
+    flat_volumes = [100.0] * 60
+    series = _series(flat_closes, flat_volumes, symbol="ETH/USD", timeframe="4h")
+    monkeypatch.setattr(_regime, "compute_regime", _permissive_regime)
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    _install_bars_by_key(monkeypatch, {("ETH/USD", "4h"): series})
+    direct_result = scan_markets(
+        "crypto",
+        ["4h"],
+        filters={"macd_signal": "bullish_cross", "volume_spike": 1.5},
+        symbols=["ETH/USD"],
+        regime_gate=True,
+    )
+
+    s1 = STRATEGY_BY_KEY["s1_momentum"]
+    _install_bars_by_key(monkeypatch, {("ETH/USD", "4h"): series})
+    confluence_result = scan_confluence(
+        asset_class="crypto",
+        legs=list(s1.legs),
+        symbols=["ETH/USD"],
+        regime_gate=True,
+    )
+
+    assert not any(m["symbol"] == "ETH/USD" for m in direct_result["matches"])
+    assert not any(m["symbol"] == "ETH/USD" for m in confluence_result["matches"])
 
 
 def test_s1_leg_unknown_timeframe_rejected_loudly_via_scan_confluence(monkeypatch) -> None:
