@@ -3347,3 +3347,36 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    normal-mode scans can diverge until then — documented, not silent.
 8. HMM economy residual: walk regime pre-filter + per-def confluence
    regime = 2+ fits/symbol/scan (ticketed: regime pass-through param).
+
+### 177 — cadence T1+T2: strategy-aware chain + exit verb (SPEC-cadence, review round 21)
+1. StrategyDef gains `horizon_hours: int = 168` (8th field; S4 sets 48) —
+   SUPERSEDES 173.1's batch-scoped 7-field ruling, per STRATEGY-PACK
+   "make it strategy-aware via StrategyDef".
+2. `exit_trigger(close, stop_price, target_price, now, horizon_end)` —
+   pure, Decimal prices, aware datetimes, returns
+   "stop"|"target"|"horizon"|None. ALL touches inclusive (<=, >=, gap-
+   through pinned); stop wins a same-evaluation stop+target (conservative
+   stop-first, mirrors grading's ambiguous-bar doctrine).
+3. Exit reference price (RATIFIED DEVIATION): `execute_exit`'s
+   OrderRequest.limit_price reuses `_entry_price` (the thesis's approved
+   entry economics), NOT a fresh bar close — the R-rule notional checks
+   are side-blind, and a fresh price on an appreciated position would
+   spuriously DENY the exit (R-012's 1% sizing tolerance vs the 0.25%
+   in-kind qty shrink is the quantitative margin this depends on).
+   WATCH-ITEM: revisit iff R-rules become side-aware.
+4. EXIT-FREEZE SURFACE (extends T2-AC-3's halt ruling): policy sees exits
+   as submit_order, so exits are frozen not only by R-001 halts but by
+   R-009 (30d drawdown >= 10% denies all mutating actions — positions
+   cannot be flattened exactly when losing; deliberate, ledger-visible,
+   resume/dial changes are the release valve) and R-007 (daily action cap
+   counts exits; cap-hit defers exits to UTC midnight). Ratified
+   deliberate for the paper record; MUST be re-examined before any live
+   probation trade.
+5. Ticket→def plumbing: the wire ticket carries strategy_key; the /ack
+   handler resolves via mae.STRATEGY_BY_KEY — "" → manual path
+   (hud-ack-manual, 168h), unknown NON-EMPTY key → 400, nothing ledgered.
+   build_state does NOT re-validate its own walk's key (it comes from
+   STRATEGY_BY_KEY by construction; validate at TRUST BOUNDARIES —
+   the wire is one, our own walk is not). Asymmetry ratified.
+6. exit ProposedAction.kind = "submit_order" (no new kind; R-catalog
+   awareness unchanged).

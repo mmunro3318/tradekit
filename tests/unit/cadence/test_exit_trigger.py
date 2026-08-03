@@ -115,3 +115,51 @@ def test_no_trigger_condition_met_returns_none() -> None:
         horizon_end=_HORIZON_END,
     )
     assert reason is None
+
+
+# --- Round-21 CTO additions (review finding 1): the boundary table above
+# tests only EQUALITY touches -- an ==-mutant of the <=/>= comparisons
+# survived it. These three pin the gap-through cases (the common
+# real-world stop: a bar CLOSING strictly beyond the level).
+
+
+def test_close_strictly_below_stop_gap_through_triggers_stop() -> None:
+    """CONTRACT (T2-AC-4, round-21): a close that gaps THROUGH the stop
+    (strictly below) must trigger -- an ==-only implementation would
+    return None and the autonomous runner would never flatten."""
+    reason = exit_trigger(
+        close=_STOP - Decimal("500"),
+        stop_price=_STOP,
+        target_price=_TARGET,
+        now=_BEFORE_HORIZON,
+        horizon_end=_HORIZON_END,
+    )
+    assert reason == "stop"
+
+
+def test_close_strictly_above_target_gap_through_triggers_target() -> None:
+    """CONTRACT (T2-AC-4, round-21): mirror gap-through on the target side."""
+    reason = exit_trigger(
+        close=_TARGET + Decimal("500"),
+        stop_price=_STOP,
+        target_price=_TARGET,
+        now=_BEFORE_HORIZON,
+        horizon_end=_HORIZON_END,
+    )
+    assert reason == "target"
+
+
+def test_now_strictly_past_horizon_end_triggers_horizon() -> None:
+    """CONTRACT (T2-AC-4, round-21): a clock already PAST horizon_end (the
+    normal case for an hourly runner waking up late) triggers, not just
+    the exact-equality instant."""
+    from datetime import timedelta
+
+    reason = exit_trigger(
+        close=_MID,
+        stop_price=_STOP,
+        target_price=_TARGET,
+        now=_HORIZON_END + timedelta(hours=3),
+        horizon_end=_HORIZON_END,
+    )
+    assert reason == "horizon"

@@ -341,6 +341,36 @@ class TestAC5MalformedRequestReturns400AndLeavesLedgerUnchanged:
         after = len(_query_events())
         assert after == before
 
+    def test_unknown_nonempty_strategy_key_returns_400_and_ledger_unchanged(
+        self, running_server: tuple[str, int]
+    ) -> None:
+        """SPEC-cadence T1 (CTO addition, round-20 anti-silent doctrine): a
+        wire ticket carrying a NON-EMPTY strategy_key not in
+        mae.STRATEGY_BY_KEY must be rejected loudly (400, ledger
+        unchanged) — silently degrading a garbage key to the manual
+        defaults (168h, hud-ack-manual) would be the silent-death class."""
+        before = len(_query_events())
+
+        host, port = running_server
+        body = json.dumps(
+            {
+                "verdict_preview_id": "verdict-preview-t1",
+                "action": "confirmed",
+                "ticket": {**TICKET_BODY, "strategy_key": "s9_nonexistent"},
+            }
+        )
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("POST", "/ack", body=body, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+        finally:
+            conn.close()
+
+        assert resp.status == 400
+        after = len(_query_events())
+        assert after == before
+
     def test_missing_required_field_returns_400_and_ledger_event_count_unchanged(
         self, running_server: tuple[str, int]
     ) -> None:

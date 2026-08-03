@@ -481,3 +481,25 @@ reconstructed byte-faithful (CTO diff-verified) — friction logged
 | red-mtf4 | test_hud_registry_walk.py (12) | 1 (shared) | 0 | 1 | B+ | Doc-pinned, five escape hatches flagged, fetch-count short-circuit pins exemplary; nothing-fires fixture missing 1h bars + wrong KeyError-tripwire rationale invited the broad except. |
 | green-mtf4 | hud/_build.py | 2 | 0 | 1 | C | Conforming scope-disciplined walk, but silenced a fixture with except-Exception (silent-death class) and silently regressed attrition stages — both the anti-silent doctrine's core. |
 | fix-mtf4 | 4-item fix round | 0 | 0 | 0 | A | All landed; stage-dict shape correctly matched to the existing consumer; mypy shadowing caught and resolved cleanly. |
+
+## Round 21 — 2026-08-03 — SPEC-cadence T1+T2 joint money-path (reds a872e74+cb4c02e, green this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate + full R-rule consumer walk
+under the ratified _entry_price deviation + mutant analysis of the trigger
+table. Verdict FIX-FIRST (narrow): 2 MED — trigger tests pinned only
+equality touches (gap-through-stop ==-mutant survived; three CTO test
+additions land with this commit) and the exit-freeze surface was
+under-documented (R-009 freezes exits exactly when losing, R-007's daily
+cap counts exits — both now ratified deliberate in ASSUMPTIONS 177.4 with
+a MUST-re-examine-before-live flag). Notable green-stage judgment: the
+implementer STOPPED on the CTO's fresh-price exit-reference adjudication
+when it collided with side-blind R-rules (a fresh price would deny
+profitable exits) and proposed _entry_price reuse — ratified as the
+correct design (ASSUMPTIONS 177.3).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-cadence-t1 | 6 test files, 14 assertions | 0 | 0 | 0 | A | Hand-derived S4 bracket golden, disciplined flags, manual-path regression pinned. |
+| green-cadence-t1 | contracts/_hud, _strategies, hud/_build, hud/_serve | 0 | 0 | 1 | A− | Spec-exact wiring, falsy trap avoided; docked for the silent build_state unknown-key fallback (asymmetry since ratified 177.5). |
+| red-cadence-t2 | test_pipeline + test_exit_trigger (11) | 0 | 1 | 0 | B+ | Real-fixture discipline (real execute_order seeding, real R-001 halt); equality-only trigger table let an ==-mutant survive. |
+| green-cadence-t2 | broker/_pipeline, broker/__init__, cadence/__init__ | 0 | 0 | 0 | A | execute_exit mirrors the gated shape faithfully; the fresh-price STOP-and-flag was exactly the money-path discipline the house wants. |

@@ -140,13 +140,19 @@ def _parse_ack_body(body: Any) -> tuple[str, str, dict[str, Any]]:
     return verdict_preview_id, action, ticket
 
 
-def _build_minimal_contract(ticket: dict[str, Any]) -> dict[str, Any]:
+def _build_contract(ticket: dict[str, Any], strategy_def: Any | None) -> dict[str, Any]:
     """The smallest honest `ThesisContract` kwargs derivable from a ticket
     snapshot (SPEC-hud-ack.md "Unknowns"): every price/EV field is derived
     from the ticket itself (no invented numbers), `p_win=0.5` is the one
     free choice (a genuine market view is not knowable from a bracket
     alone), which makes `ev_usd` exactly reproduce `submit()`'s own EV
-    recompute (SME F5 tolerance trivially satisfied)."""
+    recompute (SME F5 tolerance trivially satisfied).
+
+    SPEC-cadence T1-AC-3: `strategy_def` (the claiming `StrategyDef`, or
+    `None` for a manual confirm) drives `strategy_tag`/`horizon_hours`; the
+    manual path (`None`) stays byte-identical to pre-batch behavior
+    ("hud-ack-manual", 168h/+7d). T1-AC-4: a non-positive `horizon_hours`
+    is a config error and must be loud, not silently clamped."""
     pair = ticket["pair"]
     side = ticket["side"]
     limit_price = Decimal(str(ticket["limit_price"]))
@@ -155,7 +161,11 @@ def _build_minimal_contract(ticket: dict[str, Any]) -> dict[str, Any]:
     sl_price = Decimal(str(ticket["sl_price"]))
     is_crypto = "/" in pair
     now = _mae_runtime.clock()
-    horizon_end = now + timedelta(days=7)
+    strategy_tag = strategy_def.key if strategy_def is not None else "hud-ack-manual"
+    horizon_hours = strategy_def.horizon_hours if strategy_def is not None else 168
+    if horizon_hours <= 0:
+        raise ValueError(f"horizon_hours must be positive, got {horizon_hours}")
+    horizon_end = now + timedelta(hours=horizon_hours)
 
     from tradekit.policy._dials import PolicyDials
 
@@ -180,13 +190,14 @@ def _build_minimal_contract(ticket: dict[str, Any]) -> dict[str, Any]:
             "tick_size": "0.00001" if is_crypto else "0.01",
         },
         "direction": "long" if side == "buy" else "short",
-        "strategy_tag": "hud-ack-manual",
+        "strategy_tag": strategy_tag,
         "rationale": "Mike confirmed this advisory ticket via the hud-ack panel.",
         "entry": {
             "order_type": "limit",
             "limit_price": str(limit_price),
             "valid_until": (now + timedelta(hours=1)).isoformat(),
         },
+        "horizon_hours": horizon_hours,
         "horizon_end": horizon_end.isoformat(),
         "target_price": str(tp_price),
         "stop_price": str(sl_price),
@@ -225,12 +236,12 @@ def _build_minimal_contract(ticket: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _confirm_chain(ledger: Ledger, ticket: dict[str, Any]) -> str:
+def _confirm_chain(ledger: Ledger, ticket: dict[str, Any], strategy_def: Any | None) -> str:
     """draft -> submit -> [human confirm IS the review] -> approve, all
     through `tradekit.thesis`'s public verbs. Returns the real thesis_id."""
     from tradekit import thesis as thesis_mod
 
-    contract = _build_minimal_contract(ticket)
+    contract = _build_contract(ticket, strategy_def)
     thesis_id: str = thesis_mod.draft(contract)
     thesis_mod.submit(thesis_id)
 
@@ -311,6 +322,21 @@ def _make_handler_class(equity_usd: Decimal) -> type[http.server.BaseHTTPRequest
             try:
                 parsed = json.loads(raw)
                 verdict_preview_id, action, ticket = _parse_ack_body(parsed)
+                # SPEC-cadence T1: the wire ticket's strategy_key resolves
+                # to the claiming StrategyDef via the real registry -- ""
+                # (or absent) is the manual path (None); an unknown
+                # non-empty key is a garbage key and must be LOUD (anti-
+                # silent doctrine, round-20 lesson), same 400 path as any
+                # other malformed ack body.
+                strategy_key = ticket.get("strategy_key") or ""
+                if strategy_key:
+                    from tradekit import mae
+
+                    strategy_def = mae.STRATEGY_BY_KEY.get(strategy_key)
+                    if strategy_def is None:
+                        raise ValueError(f"unknown strategy_key: {strategy_key!r}")
+                else:
+                    strategy_def = None
             except (
                 json.JSONDecodeError,
                 KeyError,
@@ -334,7 +360,7 @@ def _make_handler_class(equity_usd: Decimal) -> type[http.server.BaseHTTPRequest
                 self._respond(204, b"")
                 return
 
-            thesis_id = _confirm_chain(ledger, ticket)
+            thesis_id = _confirm_chain(ledger, ticket, strategy_def)
             proposal = _make_binding_proposal(thesis_id, ticket)
             decision = evaluate_policy_binding(proposal)
             if not decision.allowed:

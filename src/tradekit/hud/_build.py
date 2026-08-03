@@ -617,12 +617,25 @@ def build_state(
             rationale="sizing produced a tradeable quantity",
         )
 
+        # SPEC-cadence T1-AC-1: the claiming def (if any) drives the
+        # bracket's r_multiple and the sized qty; no def (strategy_key ""
+        # or an unknown key) falls back to sizing's own r_multiple_target
+        # and unscaled qty -- byte-identical to pre-batch behavior.
+        from tradekit import mae
+
+        strategy_def = mae.STRATEGY_BY_KEY.get(strategy_key) if strategy_key else None
+        if strategy_def is not None and strategy_def.r_multiple_override is not None:
+            r_multiple_target = strategy_def.r_multiple_override
+        else:
+            r_multiple_target = sizing.r_multiple_target
+        qty = sizing.qty * strategy_def.size_scale if strategy_def is not None else sizing.qty
+
         fields = _build_ticket_fields(
             symbol,
             limit_price,
-            sizing.qty,
+            qty,
             sizing.stop_distance_usd,
-            sizing.r_multiple_target,
+            r_multiple_target,
         )
         # Interim provenance (review round: not a ledgered thesis): honest
         # prefix + a rendered warning until real thesis wiring lands (T5).
@@ -682,6 +695,7 @@ def build_state(
             thesis_id=thesis_id,
             verdict_id=decision.verdict_id,
             created_at=captured_at,
+            strategy_key=strategy_key,
         )
         tickets.append(ticket)
         gates = (
