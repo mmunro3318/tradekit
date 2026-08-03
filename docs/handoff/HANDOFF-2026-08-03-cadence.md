@@ -41,9 +41,25 @@ funnel says wait, report the drought and wait.
 - Drought is a first-class outcome: a cadence run with zero setups writes
   the digest line and exits 0.
 
+## SPEC REFINEMENT (2026-08-03 CTO read of STRATEGY-PACK.md:33-35,128-130)
+Do NOT invent a thesis builder — the confirm-time chain (hud advisory
+ticket → confirm → thesis draft → submit → approve → execute_order)
+ALREADY exists with an ATR bracket from sizing_info. G2 makes that chain
+STRATEGY-AWARE and automates the confirm on paper:
+- bracket: r_multiple_override (S4=1R) replaces sizing_info.r_multiple_target
+  when set (doc pin, line 33-35);
+- sizing: size_scale (S4=0.5) scales the recommended size;
+- horizon: "make it strategy-aware via StrategyDef" (doc line 129-130) —
+  G2 adds horizon_hours: int = 168 to StrategyDef (8th field; S4 sets 48;
+  the 175 "stays 7 fields" ruling was S4-batch-scoped, not forever) and the
+  confirm chain writes it into ThesisContract.horizon_hours (VALIDATE
+  nonpositive per 175.3);
+- the walk's strategy_key (176) tells the chain WHICH def claimed the
+  symbol — thread it from _SetupResult into the ticket/thesis.
+
 ## The pieces
-1. **Thesis-from-StrategyDef builder**: replaces hud/_serve's minimal
-   contract for cadence use. Wires: strategy tag, horizon_hours (S4=48,
+1. **Strategy-aware confirm chain** (see refinement above): replaces
+   hud/_serve's minimal contract assumptions for cadence use. Wires: strategy tag, horizon_hours (S4=48,
    default 168) with VALIDATION (175.3: nonpositive → loud error —
    mandatory this batch since horizon_end = captured_at + horizon_hours
    lands here), size_scale/r_multiple_override into the sizing input,
