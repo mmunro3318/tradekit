@@ -406,6 +406,9 @@ def test_s2_strategy_def_field_for_field_pin() -> None:
     assert s2.size_scale == Decimal("1")
     assert s2.r_multiple_override is None
     assert s2.tag == "s2_pullback"
+    # SPEC-cadence T1-AC-5 (supersedes 173.1's batch-scoped 7-field ruling):
+    # S2 default horizon_hours 168 (7d) -- S2 has no time-stop restriction.
+    assert s2.horizon_hours == 168
 
 
 def test_s2_registered_after_s1_in_strategies_tuple() -> None:

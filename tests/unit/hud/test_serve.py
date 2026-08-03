@@ -405,3 +405,123 @@ class TestAC7KeyboardInterruptExitsCleanly:
 
         # Should not raise.
         hud_serve.serve(equity_usd=EQUITY_USD, host="127.0.0.1", port=7333)
+
+
+# ---------------------------------------------------------------------------
+# T1-AC-3/T1-AC-4 (docs/specs/SPEC-cadence.md T1): `_build_minimal_contract
+# (ticket)` becomes `_build_contract(ticket, strategy_def)`. Tests call the
+# new pinned function directly (imported lazily inside each test body, same
+# convention as every other test in this file, so a rename-in-progress
+# fails only these tests, not collection of the whole module) with the
+# REAL `mae.STRATEGY_BY_KEY["s4_reversion"]` def -- a real typed object,
+# not a fake -- so no assumption is needed about StrategyDef's shape.
+# ---------------------------------------------------------------------------
+
+
+class TestT1AC3StrategyAwareContractBuilder:
+    def test_s4_def_sets_strategy_tag_horizon_hours_and_horizon_end(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1-AC-3: an S4 def -> strategy_tag == "s4_reversion",
+        horizon_hours == 48, horizon_end == clock() + 48h."""
+        import tradekit.mae._runtime as mae_runtime
+        from tradekit.hud import _serve
+        from tradekit.mae import STRATEGY_BY_KEY
+
+        now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+        monkeypatch.setattr(mae_runtime, "clock", lambda: now)
+
+        s4 = STRATEGY_BY_KEY["s4_reversion"]
+        contract = _serve._build_contract(TICKET_BODY, s4)
+
+        assert contract["strategy_tag"] == "s4_reversion"
+        assert contract["horizon_hours"] == 48
+        assert contract["horizon_end"] == (now + timedelta(hours=48)).isoformat()
+
+    def test_no_def_manual_confirm_stays_hud_ack_manual_168_plus_7d(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1-AC-3 regression pin: manual confirm (no def, `strategy_def=
+        None`) -> unchanged from pre-batch behavior: strategy_tag
+        "hud-ack-manual", horizon_hours 168, horizon_end +7d. (May already
+        be implied by `test_confirmed_action_with_policy_allow_appends_
+        thesis_chain_and_matching_ack` above via the full HTTP chain, which
+        doesn't inspect the contract's strategy_tag/horizon_hours; re-cited
+        directly here per the dispatch's explicit "re-cite" instruction.)"""
+        import tradekit.mae._runtime as mae_runtime
+        from tradekit.hud import _serve
+
+        now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+        monkeypatch.setattr(mae_runtime, "clock", lambda: now)
+
+        contract = _serve._build_contract(TICKET_BODY, None)
+
+        assert contract["strategy_tag"] == "hud-ack-manual"
+        assert contract["horizon_hours"] == 168
+        assert contract["horizon_end"] == (now + timedelta(days=7)).isoformat()
+
+
+class TestT1AC4NonPositiveHorizonHoursRejected:
+    @pytest.mark.parametrize("bad_horizon_hours", [0, -5])
+    def test_build_contract_rejects_non_positive_horizon_hours_naming_the_value(
+        self, bad_horizon_hours: int
+    ) -> None:
+        """T1-AC-4: horizon_hours <= 0 at contract build time -> ValueError
+        naming the value (0 and -5). A duck-typed def double is used here
+        (not a real STRATEGY_BY_KEY entry, since no real def carries a
+        nonpositive horizon_hours) -- same input-data-double convention as
+        this file's `_FakeSizingInfo`/`_PassingSetup`, not a mock of a
+        project internal."""
+        from tradekit.hud import _serve
+
+        @dataclass(frozen=True)
+        class _BadHorizonDef:
+            key: str
+            horizon_hours: int
+
+        bad_def = _BadHorizonDef(key="bad_def", horizon_hours=bad_horizon_hours)
+        with pytest.raises(ValueError, match=str(bad_horizon_hours)):
+            _serve._build_contract(TICKET_BODY, bad_def)
+
+
+class TestT1TicketToDefLinkageThroughConfirmChain:
+    def test_ticket_carrying_strategy_key_resolves_to_that_defs_contract(
+        self, running_server: tuple[str, int], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ASSUMPTION-FLAG (see dispatch report): SPEC-cadence.md T1 pins
+        that "the walk's claiming StrategyDef drives ... the thesis tag"
+        end-to-end, but does NOT pin HOW the POST /ack handler recovers the
+        strategy_def from the wire ticket -- best reading adopted here
+        (CTO to ratify at green): the client-rendered ticket JSON carries
+        the claiming `AdvisoryTicket.strategy_key` verbatim (T1-AC-2), and
+        the handler resolves it via `mae.STRATEGY_BY_KEY.get(strategy_key)`
+        before calling `_build_contract`. This test pins the OBSERVABLE
+        outcome only (the ledgered contract's strategy_tag/horizon_hours),
+        not the resolution call site/shape."""
+        from tradekit.hud import _serve
+
+        monkeypatch.setattr(_serve, "evaluate_policy_binding", lambda action: _AllowDecision())
+
+        host, port = running_server
+        ticket_with_strategy = dict(TICKET_BODY, strategy_key="s4_reversion")
+        body = json.dumps(
+            {
+                "verdict_preview_id": "verdict-preview-s4",
+                "action": "confirmed",
+                "ticket": ticket_with_strategy,
+            }
+        )
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("POST", "/ack", body=body, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+        finally:
+            conn.close()
+
+        assert resp.status == 204
+        drafted = _query_events(types=["ThesisDrafted"])
+        assert len(drafted) == 1
+        contract = drafted[0].payload["contract"]
+        assert contract["strategy_tag"] == "s4_reversion"
+        assert contract["horizon_hours"] == 48
