@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from ulid import ULID
 
@@ -53,12 +54,18 @@ def _append_fill(
     fees_usd: str,
     side: str,
     symbol: str = "BTC/USD",
+    fee_asset_qty: str | None = None,
 ) -> None:
     # `symbol` is REQUIRED on FillRecordedPayload (CTO adjudication
     # 2026-07-17: a defaulted symbol on a money payload is silent
     # fabrication) — the harness names it explicitly; the keyword default
     # here is a fixture convenience only, local to this file.
-    payload = FillRecordedPayload(
+    #
+    # `fee_asset_qty` (SPEC-inkind-fees, AC-2/AC-5): only passed through to
+    # the payload model when a caller supplies it explicitly (kwarg not
+    # None) — every PRE-EXISTING call site above omits it, so those fixed
+    # regression pins stay unaffected by this batch's new field.
+    kwargs: dict[str, Any] = dict(
         order_id=order_id,
         thesis_id=thesis_id,
         account_ref=_ACCOUNT_REF,
@@ -70,6 +77,9 @@ def _append_fill(
         quote_snapshot={"ts_open": ts.isoformat(), "close": price, "source": "fixture"},
         symbol=symbol,
     )
+    if fee_asset_qty is not None:
+        kwargs["fee_asset_qty"] = Decimal(fee_asset_qty)
+    payload = FillRecordedPayload(**kwargs)
     ledger.append(
         Event(
             event_id=str(ULID()),
@@ -210,3 +220,116 @@ def test_account_state_with_zero_fills_is_just_the_principal(ledger: Ledger) -> 
     assert account.equity_usd == Decimal("500.00")
     assert account.buying_power_usd == Decimal("500.00")
     assert PaperBroker(account_ref=_ACCOUNT_REF, ledger=ledger).positions() == []
+
+
+# ---------------------------------------------------------------------------
+# In-kind crypto fee physics, READ side (SPEC-inkind-fees, AC-2/AC-5) — a
+# `fee_asset_qty`-bearing fill seeded DIRECTLY (bypassing PaperBroker.submit,
+# same "ledger-projection arithmetic" isolation as every test above) pins
+# how `account()`/`positions()` must consume the new field once it exists.
+# `FillRecordedPayload` has no `fee_asset_qty` field yet, so `_append_fill`
+# passing it raises `pydantic.ValidationError` (extra_forbidden) — the
+# RIGHT reason for red here, until the dev pass adds the field.
+# ---------------------------------------------------------------------------
+
+# 2026-07-26 live-receipt buy leg (dev-log 07-26b): fee withheld IN-KIND,
+# never a separate cash deduction (AC-2).
+_INKIND_PRICE = Decimal("1885.45357")  # post-spread fill price, mid=1883.57 * 1.0010
+_INKIND_QTY = Decimal("0.002602483")
+_INKIND_FEE_ASSET_QTY = Decimal("0.000006507")  # ceil9(0.0025 * 0.002602483), spec's own example
+_INKIND_FEES_USD = _INKIND_FEE_ASSET_QTY * _INKIND_PRICE  # USD valuation only, not a cash charge
+
+
+def test_account_state_after_alpaca_crypto_buy_has_no_separate_fee_deduction(
+    ledger: Ledger,
+) -> None:
+    """AC-2 (SPEC-inkind-fees), read side: once `fee_asset_qty > 0` on a
+    buy fill, `account()` must NOT ALSO subtract `fees_usd` from cash — the
+    fee is already embodied in the withheld qty, unlike the legacy
+    kraken/equity buy physics pinned by `test_account_state_after_a_single_
+    buy_fill` above (unchanged, still deducts notional + fees_usd).
+        expected settled_cash = 500.00 - (qty * price), fees_usd ignored
+    """
+    _seed_account(ledger)
+    _append_fill(
+        ledger,
+        order_id="ord-1",
+        thesis_id="TH-1",
+        ts=_T0,
+        price=str(_INKIND_PRICE),
+        qty=str(_INKIND_QTY),
+        fees_usd=str(_INKIND_FEES_USD),
+        side="buy",
+        symbol="ETH/USD",
+        fee_asset_qty=str(_INKIND_FEE_ASSET_QTY),
+    )
+
+    account = PaperBroker(account_ref=_ACCOUNT_REF, ledger=ledger).account()
+    expected = Decimal("500.00") - (_INKIND_QTY * _INKIND_PRICE)
+    assert account.settled_cash_usd == expected
+    assert account.equity_usd == expected
+    assert account.buying_power_usd == expected
+
+
+def test_positions_after_alpaca_crypto_buy_subtracts_the_in_kind_withhold(
+    ledger: Ledger,
+) -> None:
+    """AC-5 (SPEC-inkind-fees): `positions()` qty = sum(buy.qty -
+    buy.fee_asset_qty) - sum(sell.qty) — held qty = 0.002602483 -
+    0.000006507 = 0.002595976, matching the live-receipt held ETH amount."""
+    _seed_account(ledger)
+    _append_fill(
+        ledger,
+        order_id="ord-1",
+        thesis_id="TH-1",
+        ts=_T0,
+        price=str(_INKIND_PRICE),
+        qty=str(_INKIND_QTY),
+        fees_usd=str(_INKIND_FEES_USD),
+        side="buy",
+        symbol="ETH/USD",
+        fee_asset_qty=str(_INKIND_FEE_ASSET_QTY),
+    )
+
+    positions = PaperBroker(account_ref=_ACCOUNT_REF, ledger=ledger).positions()
+    assert len(positions) == 1
+    expected_qty = _INKIND_QTY - _INKIND_FEE_ASSET_QTY
+    assert expected_qty == Decimal("0.002595976")
+    assert positions[0].qty == expected_qty
+
+
+def test_positions_flat_after_selling_exactly_the_net_in_kind_held_qty(
+    ledger: Ledger,
+) -> None:
+    """AC-5 round trip, read side: selling EXACTLY the net held qty (Q - W,
+    never the gross filled qty Q) must leave the account flat — same
+    zero-qty-row-omitted representation as `test_positions_omits_a_fully_
+    closed_symbol_after_round_trip` above (unchanged)."""
+    _seed_account(ledger)
+    held_qty = _INKIND_QTY - _INKIND_FEE_ASSET_QTY
+    _append_fill(
+        ledger,
+        order_id="ord-1",
+        thesis_id="TH-1",
+        ts=_T0,
+        price=str(_INKIND_PRICE),
+        qty=str(_INKIND_QTY),
+        fees_usd=str(_INKIND_FEES_USD),
+        side="buy",
+        symbol="ETH/USD",
+        fee_asset_qty=str(_INKIND_FEE_ASSET_QTY),
+    )
+    _append_fill(
+        ledger,
+        order_id="ord-2",
+        thesis_id="TH-1",
+        ts=_T0 + timedelta(days=1),
+        price="1882.03",
+        qty=str(held_qty),
+        fees_usd="0.0122",  # irrelevant to positions() qty
+        side="sell",
+        symbol="ETH/USD",
+    )
+
+    positions = PaperBroker(account_ref=_ACCOUNT_REF, ledger=ledger).positions()
+    assert positions == []

@@ -497,6 +497,14 @@ def test_measurable_invalidation_triggers_void_via_grade(
 def test_pnl_computed_from_fill_events_net_of_fees_long_round_trip(
     thesis_kwargs, monkeypatch, make_event
 ) -> None:
+    """AC-9 (SPEC-inkind-fees) regression pin, unmodified: this fixture's
+    FillRecorded payloads carry NO `fee_asset_qty` key at all (the exact
+    pre-batch shape) — the SPEC's two-term `compute_pnl` formula must
+    resolve the missing field to `Decimal("0")` on both legs and reproduce
+    this EXACT already-pinned value (5.874), never a changed number. No
+    assertion below changes for this batch — verified still red-for-the-
+    same-old-reason only if `compute_pnl` itself regresses; this test is
+    presently GREEN (a legacy-shape regression guard, not new behavior)."""
     thesis_id = _build_active_thesis(thesis_kwargs, monkeypatch, make_event)
 
     entry_ts = ACTIVATION_TS
@@ -599,6 +607,61 @@ def test_pnl_with_no_fills_is_none_never_a_fabricated_zero(
     assert payload["pnl_usd"] is None, (
         "no FillRecorded events -> pnl_usd is None (anti-fabrication, CTO adjudication): "
         "Decimal('0') here would inject a fake break-even trade into series expectancy"
+    )
+
+
+def test_pnl_single_fill_thesis_equals_negative_fees_usd_legacy_pin(
+    thesis_kwargs, monkeypatch, make_event
+) -> None:
+    """AC-8 (SPEC-inkind-fees) regression pin: a single-fill thesis (one
+    FillRecorded event only — entry and exit are the SAME fill by the
+    earliest/latest-`ts_utc` convention) must grade `pnl_usd ==
+    -fill.fees_usd`. This is presently PASSING (analogous to the AC-3/AC-4
+    sell/equity assertions the dispatch prompt calls out as unchanged) —
+    `compute_pnl`'s existing implementation already special-cases this
+    (gross = 0 since entry.price/qty == exit.price/qty identically; fees
+    are summed once over the actual fill list, never doubled). The test
+    exists to CATCH a future implementation that applies the SPEC's
+    two-term formula (`exit.fees_usd` MINUS `entry.fees_usd` as two
+    separate subtractions) literally without this entry==exit special
+    case, which would silently double the fee deduction to -0.12."""
+    thesis_id = _build_active_thesis(thesis_kwargs, monkeypatch, make_event)
+
+    fill_ts = ACTIVATION_TS
+    default_ledger().append(
+        make_event(
+            type="FillRecorded",
+            ts=fill_ts,
+            payload={
+                "order_id": "ord-entry",
+                "thesis_id": thesis_id,
+                "ts_utc": fill_ts.isoformat(),
+                "price": "60000.00",
+                "qty": "0.001",
+                "fees_usd": "0.06",
+            },
+        )
+    )
+
+    bars = [
+        Bar(
+            ts_open=ACTIVATION_TS,
+            open=Decimal("58000"),
+            high=Decimal("58500"),
+            low=Decimal("56500"),
+            close=Decimal("57000"),
+            volume=Decimal("10"),
+        ),
+    ]
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake_grade_bars(bars))
+    monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: ACTIVATION_TS + timedelta(days=1))
+
+    thesis.grade(thesis_id)
+
+    payload = _thesis_events("ThesisGraded", thesis_id)[0].payload
+    assert Decimal(payload["pnl_usd"]) == Decimal("-0.06"), (
+        "AC-8: single-fill thesis pnl == -fill.fees_usd (legacy pin), regardless of any "
+        "fee representation — entry and exit are literally the same fill"
     )
 
 

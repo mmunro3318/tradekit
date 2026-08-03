@@ -29,7 +29,7 @@ adjudication 2026-07-17, same class of call as P2 batch C's R-010).
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 import httpx
 import pytest
@@ -309,6 +309,56 @@ def test_order_status_maps_filled_and_records_a_fill_with_decimal_str_prices(
 
     assert status.status == "filled"
     assert status.filled_qty == Decimal("0.000153355")
+
+
+# ---------------------------------------------------------------------------
+# AC-6 (SPEC-inkind-fees) — `_record_fill_from_order` in-kind withhold.
+# `ORDER_GET_FILLED_FIXTURE` (captured, verbatim, module docstring) carries
+# NO fee field for a crypto buy — that absence IS the point (ASSUMPTIONS
+# 142): `fees_usd` at fill-recording time is ALWAYS modeled, never read off
+# a venue field that doesn't exist. `FillRecordedPayload` has no
+# `fee_asset_qty` field yet, so reading it off the raw ledger payload
+# (subscript) fails with a KeyError until the dev pass adds it.
+# ---------------------------------------------------------------------------
+
+
+def test_order_status_records_in_kind_fee_asset_qty_for_an_alpaca_crypto_buy(
+    respx_mock: object,
+) -> None:
+    """AC-6: `filled_qty=0.000153355` @ `filled_avg_price=63930.5` (captured
+    fixture, BTC/USD, side=buy) ->
+        fee_asset_qty = ceil9(0.0025 * 0.000153355) = ceil9(0.0000003833875)
+                       = 0.000000384   (rounds UP at the 9th decimal, .3875
+                       fractional remainder)
+        fees_usd = fee_asset_qty * filled_avg_price
+    Same in-kind formula `PaperBroker` uses for alpaca-crypto buys — one
+    fee model, shared by every producer (TD-8's "cost model singularity")."""
+    order_id = ORDER_GET_FILLED_FIXTURE["id"]
+    respx_mock.get(f"{ALPACA_PAPER_BASE_URL}/orders/{order_id}").mock(
+        return_value=httpx.Response(200, json=ORDER_GET_FILLED_FIXTURE)
+    )
+
+    adapter = _paper_broker()
+    adapter.order_status(order_id)
+
+    fill_events = [
+        e
+        for e in default_ledger().query(EventFilter(types=["FillRecorded"]))
+        if e.payload.get("order_id") == order_id
+    ]
+    assert len(fill_events) == 1
+    payload = fill_events[0].payload
+
+    filled_qty = Decimal("0.000153355")
+    filled_avg_price = Decimal("63930.5")
+    expected_fee_asset_qty = (Decimal("0.0025") * filled_qty).quantize(
+        Decimal("1e-9"), rounding=ROUND_CEILING
+    )
+    assert expected_fee_asset_qty == Decimal("0.000000384")
+    expected_fees_usd = expected_fee_asset_qty * filled_avg_price
+
+    assert Decimal(str(payload["fee_asset_qty"])) == expected_fee_asset_qty
+    assert Decimal(str(payload["fees_usd"])) == expected_fees_usd
 
 
 # ---------------------------------------------------------------------------
