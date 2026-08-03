@@ -107,6 +107,12 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-THREE-THREAD FORK (2026-07-27, Mike): each thread reads its own seed —
-docs/handoff/HANDOFF-2026-07-27-paper-sprint.md (CRITICAL PATH: in-kind fee fix → S2/S4 strategies → MTF-2 → autonomous paper cadence, funnel-only, no gambling), -indicator-lab.md (Mike co-piloted experiments, experiments/ only), -stratchpad.md (charting SPA, starts at tk-brainstorm, read-only vs markets). Background: LIVE PATH VERIFIED (2026-07-26, Mike-run $5 ETH round-trip, flat, net -$0.02) — P4 "done" ratified as Option A: build ~30-trade paper record w/ positive edge → T2 grant → Mike confirms → 3 probationary live trades through the GATED pipeline (live_sequence_remaining=3). Ladder unweakened. PINNED FINDING: Alpaca deducts crypto fees IN-KIND (ETH, not USD) — CostModel/reconcile fix needed before probation (see dev-log 07-26b). Next: (a) paper-record sprint: make funnel emit gradeable trades at pace; (b) in-kind fee batch; (c) MTF-SCAN T-MTF-2..4; (d) wound-scale migration; (e) multi-venue book harvesters (free public APIs). Money-path discipline binding.
+PAPER SPRINT: batches A-G1 SHIPPED 2026-08-03 (fee physics, wound-scale,
+scan_confluence, registry, S2, S4, hud walk — MTF-SCAN complete; ASSUMPTIONS
+170-176, review rounds 14-20). NEXT: batch G2 autonomous paper cadence —
+seed: docs/handoff/HANDOFF-2026-08-03-cadence.md (thesis-from-StrategyDef,
+exit verb w/ NET-qty sells, scheduler, daily digest; funnel-only, no
+gambling; money-path review). THREE-THREAD FORK (2026-07-27, Mike) still
+stands for the other threads:
+docs/handoff/HANDOFF-2026-07-27-paper-sprint.md (superseded by the above), -indicator-lab.md (Mike co-piloted experiments, experiments/ only), -stratchpad.md (charting SPA, starts at tk-brainstorm, read-only vs markets). Background: LIVE PATH VERIFIED (2026-07-26, Mike-run $5 ETH round-trip, flat, net -$0.02) — P4 "done" ratified as Option A: build ~30-trade paper record w/ positive edge → T2 grant → Mike confirms → 3 probationary live trades through the GATED pipeline (live_sequence_remaining=3). Ladder unweakened. PINNED FINDING: Alpaca deducts crypto fees IN-KIND (ETH, not USD) — CostModel/reconcile fix needed before probation (see dev-log 07-26b). Next: (a) paper-record sprint: make funnel emit gradeable trades at pace; (b) in-kind fee batch; (c) MTF-SCAN T-MTF-2..4; (d) wound-scale migration; (e) multi-venue book harvesters (free public APIs). Money-path discipline binding.
 

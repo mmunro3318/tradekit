@@ -1,3 +1,17 @@
+## 2026-08-03h (Fable — sprint checkpoint: MTF-SCAN complete, G2 seeded)
+
+- Live-market smoke of the finished walk: 11 symbols scanned, 0 tickets --
+  an HONEST wait with named killers per strategy per symbol (S1/S2 die at
+  confluence, S4 at regime prefilter: regime not recommending
+  mean_reversion today). Watch-item -> digest: per-strategy prefilter-kill
+  counts (an S4 that never arms is a data finding).
+- G2 cadence seed written: docs/handoff/HANDOFF-2026-08-03-cadence.md
+  (thesis-from-StrategyDef builder w/ horizon validation, THE EXIT VERB
+  (net-qty sells, carried pin), scheduler per watchdog pattern, daily
+  Mike digest, structural paper-only + funnel-only guards). CLAUDE.md
+  focus updated. Day's tally: 7 batches, 7 review rounds (14-20), 3
+  follow-up chips, ASSUMPTIONS 170-176, gate green throughout.
+
 ## 2026-08-03g (Fable — paper-sprint batch G1: T-MTF-4 registry walk GREEN)
 
 - hud's setup stage is now the REGISTRY WALK: per symbol, STRATEGIES in
