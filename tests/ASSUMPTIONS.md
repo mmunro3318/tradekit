@@ -3268,3 +3268,31 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
 6. Hygiene backlog: pytest --import-mode=importlib would retire the
    test-basename-collision class suite-wide (three tests/ __init__.py
    files added this batch are the partial fix).
+
+### 174 — S2 pullback vocabulary + boundary semantics (STRATEGY-PACK S2, review round 18)
+1. `ema_above: n` is STRICT `>` — a close exactly equal to EMA(n) does NOT
+   tag trend_up (float-verified real on constant series, not a rounding
+   accident). Fewer than n closed bars → standard insufficient-bars drop.
+2. `rsi_band: [lo, hi]` is inclusive BOTH ends (lo <= RSI(14) <= hi);
+   shares the one RSI(14) computation with rsi_max/rsi_min (no recompute).
+   Structural validation (arity 2, numeric non-bool, lo <= hi) is loud
+   pre-fetch in BOTH scan() and scan_confluence via the shared
+   _validate_rsi_band.
+3. S2-1 RATIFIED WITH RESIDUAL: fire-side boundaries pinned by exact
+   hand-derived goldens (RSI 35.0 via RS=7/13, 50.0 via RS=1); fail-side
+   pinned only far-outside (0/100) — a whole-point band-widening mutant
+   survives the suite. Residual gap accepted this batch; a near-boundary
+   exclusive-side fixture (e.g. RSI=34 exact via clean RS ratio) is the
+   designated hardening if rsi_band semantics are ever touched again.
+4. STRATEGY-PACK.md's S2 sample "macd_signal": "bullish" is a RATIFIED
+   TYPO for "bullish_cross" (same class as the S1 precedent documented in
+   _scanner.py's docstring).
+5. Tag families: trend_up → momentum, pullback → momentum. Consequence
+   (latent, conservative): ALL S2 tags are momentum-family, so a
+   breakout-only regime kills S2 despite regime_families claiming
+   ("momentum","breakout") — regime_families is unconsumed metadata until
+   T-MTF-4; adjudicate there when the walk consumes it. Missed-fire only,
+   never a wrong fire.
+6. ema_above's numeric param is unvalidated (loud-but-late on garbage,
+   same convention as volume_spike) — candidate for a uniform
+   numeric-param validation batch, not a defect.

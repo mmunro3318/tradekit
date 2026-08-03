@@ -260,3 +260,8 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] T-MTF-2: scan_confluence verb (round 16)
 - [x] T-MTF-3: strategy registry + S1 migration (round 17)
 - [ ] T-MTF-4: hud registry walk
+
+### STRATEGY-PACK (docs/design/STRATEGY-PACK.md)
+- [x] S2 pullback (round 18)
+- [ ] S4 restricted reversion
+- [ ] S3 breakout (deferred this sprint)
