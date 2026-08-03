@@ -386,3 +386,23 @@ malformed_output-taxonomy reading), GLOSSARY wound-scale entry. Blocking
 invariance verified byte-identical; historical persisted int-severity events
 have zero readers through the new code (policy/_context reads kind/artifact_id
 only).
+
+## Round 16 — 2026-08-03 — T-MTF-2 scan_confluence batch (red 7ce069b, green+fix this commit)
+
+Reviewer: tk-reviewer (top model), self-ran full gate. Verdict FIX-FIRST:
+1 HIGH (provider error escaped the verb — pinned error-map row unimplemented
+AND untested; at cadence time a single 5xx would have killed whole funnel
+runs), 3 MED (silent duplicate-timeframe overwrite, needless HMM loads on
+zero-tag legs, kwargs-only test fake over-constraining call style). Fix
+round landed all four + 2 new tests (13 total); CTO diff-checked and
+re-gated green (full re-review waived — fixes implement the reviewer's own
+prescriptions verbatim).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-mtf2 | test_scan_confluence_verb.py (11) | 1 (shared) | 1 | 0 | B | Behavior-first, real derived fixtures, exact warning pins, honest ASSUMPTION-FLAG; missed error-map row 2 entirely, kwargs-only fake violated refactor-survival. |
+| green-mtf2 | _confluence.py + mae/__init__.py | 1 (shared) | 2 | 2 | B− | Genuine reuse (zero forks of evaluation logic), clean deep-module surface; skipped pinned provider containment, burned HMM loads against the module's own cited discipline, silent duplicate-tf collision. |
+| fix-mtf2 | fix round (4 items) | 0 | 0 | 0 | A | All four landed cleanly, surfaced that scan() itself has NO provider containment (caller-contained at hud only) — a finding, not just a fix. |
+
+Follow-up chip filed: extract shared filter-vocabulary validation helper
+(logic forked between scan()/confluence — drift risk).

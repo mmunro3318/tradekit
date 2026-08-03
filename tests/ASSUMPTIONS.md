@@ -3224,3 +3224,22 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
 5. Pre-existing, out of scope: an exchange MISSING the severity key
    crashes (KeyError) rather than soft-failing — value-domain validation
    only was ratified here.
+
+### 172 — scan_confluence semantics (T-MTF-2, MTF-SCAN.md; CTO adjudications from review round 16)
+1. One warning shape for leg failure: `"<symbol>: leg <tf> failed (<n>/<min>
+   tags)"` with n = POST-PRUNE surviving count — 0 for an outright filter
+   failure; no distinct wording for outright-fail vs pruned-below-min.
+2. Short-circuit: only the FIRST failing leg per symbol warns (later legs'
+   conditions, including insufficient bars, go unevaluated/unreported once
+   the symbol has failed — AND composition makes them moot).
+3. Duplicate leg timeframes rejected loudly (ValueError, before any fetch):
+   the matches breakdown keys legs by timeframe, duplicates are
+   unrepresentable — never a silent overwrite.
+4. min_tags=0 makes a leg unconditional (literal ">= min_tags survive"
+   reading) — a T-MTF-3 registry def using 0 gets no gate from that leg.
+5. Provider error on any leg drops that SYMBOL with warning
+   `"<symbol>: provider error on leg <tf> (<ExceptionName>)"` — never an
+   exception out of the verb. NOTE: this wording has no sibling in scan()
+   (scan() has NO internal provider containment; hud contains at its call
+   site with different wording, hud/_build.py) — reconcile wordings if
+   containment is ever added to scan().
