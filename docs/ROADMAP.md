@@ -255,3 +255,8 @@ See ASSUMPTIONS 161 (supersedes 33) and
 
 ### Wound-scale migration (SPEC-wound-scale.md, feature/wound-scale)
 - [x] severity enum minor/major/fatal + parse-boundary mapping + tally (round 15)
+
+### MTF-SCAN (docs/design/MTF-SCAN.md)
+- [x] T-MTF-2: scan_confluence verb (round 16)
+- [ ] T-MTF-3: strategy registry + S1 migration
+- [ ] T-MTF-4: hud registry walk

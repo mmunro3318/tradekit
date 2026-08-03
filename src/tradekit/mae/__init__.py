@@ -16,7 +16,8 @@ from decimal import Decimal
 from typing import Any
 
 from tradekit.contracts import StrategyMetrics, TradeRecord
-from tradekit.mae import _correlation, _metrics, _regime, _runtime, _scanner, _sizing
+from tradekit.mae import _confluence, _correlation, _metrics, _regime, _runtime, _scanner, _sizing
+from tradekit.mae._confluence import ScanLeg
 from tradekit.mae._indicators import volatility
 from tradekit.mae._scan_trace import ScanAuditMode
 from tradekit.mae._vocab import BBPosition, MacdSignal
@@ -41,6 +42,22 @@ def scan_markets(
     `audit` (T-AUDIT-2): passed through untouched to `_scanner.scan` — see
     that function's docstring for the "off"/"on"/"exhaustive" contract."""
     return _scanner.scan(asset_class, timeframes, filters, symbols, regime_gate, audit=audit)
+
+
+def scan_confluence(
+    asset_class: str,
+    legs: list[ScanLeg],
+    symbols: list[str],
+    regime_gate: bool = True,
+) -> dict[str, Any]:
+    """Multi-timeframe AND-across-legs confluence scan (T-MTF-2,
+    docs/design/MTF-SCAN.md "New verb" section).
+
+    Thin delegate to `_confluence.confluence` — see that function's
+    docstring for the per-leg lookback/regime-cache/warning-taxonomy pins
+    (internals never re-exported here per DESIGN §1, same shape as
+    `scan_markets`'s own `_scanner.scan` delegate)."""
+    return _confluence.confluence(asset_class, legs, symbols, regime_gate)
 
 
 def get_regime(symbol: str, lookback_days: int = 90, n_states: int = 3) -> dict[str, Any]:
@@ -233,10 +250,12 @@ def get_correlation_matrix(
 __all__ = [
     "BBPosition",
     "MacdSignal",
+    "ScanLeg",
     "compute_strategy_metrics",
     "get_correlation_matrix",
     "get_derivatives_context",
     "get_regime",
+    "scan_confluence",
     "scan_markets",
     "size_position",
 ]

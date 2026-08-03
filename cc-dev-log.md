@@ -1,3 +1,19 @@
+## 2026-08-03c (Fable — paper-sprint batch C: T-MTF-2 scan_confluence GREEN)
+
+- scan_confluence verb landed (mae/_confluence.py behind the __init__ verb;
+  ScanLeg TypedDict exported). Red 7ce069b (11 tests), green, review round
+  16 FIX-FIRST: 1 HIGH caught (provider error escaped the verb -- at
+  autonomous-cadence time one 5xx would have killed whole funnel runs) + 3
+  MED, all fixed same-session (13 tests final), GATE green. ASSUMPTIONS 172
+  pins the five adjudicated semantics (one warning shape, short-circuit,
+  duplicate-tf loud reject, min_tags=0 unconditional, provider containment).
+- Notable: scan() itself has NO internal provider containment (hud contains
+  at call site) -- confluence is now the more robust verb; wordings to be
+  reconciled if scan() ever gains containment. Follow-up chip: extract
+  shared filter-vocab validation (logic forked, drift risk).
+- Next: T-MTF-3 strategy registry (S1 migrated behavior-identical), then
+  S2/S4, then T-MTF-4 + funnel-only cadence.
+
 ## 2026-08-03b (Fable — paper-sprint batch B: wound-scale GREEN)
 
 - SPEC-wound-scale: severity int 1..5 -> enum minor/major/fatal (ratified

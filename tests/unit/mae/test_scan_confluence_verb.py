@@ -37,6 +37,7 @@ import pytest
 
 from tradekit.contracts import AssetRef, Bar, BarSeries
 from tradekit.mae import _regime, scan_confluence
+from tradekit.mae._data.errors import ProviderRequestError
 from tradekit.mae._data.limits import TIMEFRAME_MAX_LOOKBACK_DAYS
 
 
@@ -70,7 +71,7 @@ def _install_fixed_clock(monkeypatch, now: datetime) -> None:
     monkeypatch.setattr("tradekit.mae._runtime._clock", lambda: now)
 
 
-def _neutral_regime(**_: Any) -> dict[str, Any]:
+def _neutral_regime(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
     """A no-op regime: empty `recommended_strategies` families never match,
     so `_apply_regime_gate` (per `_scanner.py`) drops every family-mapped
     tag. Used wherever a test wants regime pruning to have zero effect on
@@ -455,3 +456,71 @@ def test_per_leg_lookback_matches_pinned_retention_table(monkeypatch) -> None:
     lookback_by_tf = {tf: lookback for (_symbol, tf, lookback) in calls}
     assert lookback_by_tf["1h"] == TIMEFRAME_MAX_LOOKBACK_DAYS["1h"]
     assert lookback_by_tf["4h"] == TIMEFRAME_MAX_LOOKBACK_DAYS["4h"]
+
+
+# ---------------------------------------------------------------------------
+# 12. Provider error on one symbol's leg -> that symbol dropped with a
+#     warning, never an exception out of the verb; another symbol passing
+#     every leg is unaffected. BEHAVIOR (MTF-SCAN.md error map: "provider
+#     error on any leg -> symbol dropped + warning (never an exception out
+#     of the verb)").
+# ---------------------------------------------------------------------------
+
+
+def test_provider_error_on_one_leg_drops_only_that_symbol(monkeypatch) -> None:
+    good_1h_a = _series(_RSI_OVERSOLD_CLOSES, symbol="BTC/USD", timeframe="1h")
+    good_4h_a = _series(_RSI_OVERSOLD_CLOSES, symbol="BTC/USD", timeframe="4h")
+    good_1h_b = _series(_RSI_OVERSOLD_CLOSES, symbol="ETH/USD", timeframe="1h")
+    series_by_key = {
+        ("BTC/USD", "1h"): good_1h_a,
+        ("BTC/USD", "4h"): good_4h_a,
+        ("ETH/USD", "1h"): good_1h_b,
+    }
+
+    def _fake_get_closed_bars(symbol: str, timeframe: str, lookback_days: int) -> BarSeries:
+        if symbol == "ETH/USD" and timeframe == "4h":
+            raise ProviderRequestError("boom")
+        return series_by_key[(symbol, timeframe)]
+
+    monkeypatch.setattr("tradekit.mae._runtime.get_closed_bars", _fake_get_closed_bars)
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    result = scan_confluence(
+        asset_class="crypto",
+        legs=[
+            {"timeframe": "1h", "filters": {"rsi_max": 35}, "min_tags": 1},
+            {"timeframe": "4h", "filters": {"rsi_max": 35}, "min_tags": 1},
+        ],
+        symbols=["BTC/USD", "ETH/USD"],
+        regime_gate=False,
+    )
+
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert matches[0]["symbol"] == "BTC/USD"
+    assert "ETH/USD: provider error on leg 4h (ProviderRequestError)" in result["warnings"]
+
+
+# ---------------------------------------------------------------------------
+# 13. Two legs sharing a timeframe -> loud ValueError naming the duplicated
+#     timeframe, before any fetch (the return shape keys legs by timeframe,
+#     duplicates are unrepresentable). CONTRACT.
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_leg_timeframes_raises_value_error_before_fetch(monkeypatch) -> None:
+    calls = _install_bars_by_key(monkeypatch, {})
+    _install_fixed_clock(monkeypatch, datetime(2026, 7, 16, tzinfo=UTC))
+
+    with pytest.raises(ValueError, match="1h"):
+        scan_confluence(
+            asset_class="crypto",
+            legs=[
+                {"timeframe": "1h", "filters": {"rsi_max": 35}, "min_tags": 1},
+                {"timeframe": "1h", "filters": {"volume_spike": 2.0}, "min_tags": 1},
+            ],
+            symbols=["BTC/USD"],
+            regime_gate=False,
+        )
+
+    assert calls == [], "duplicate leg timeframe must be validated before any bar fetch"
