@@ -3199,3 +3199,28 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    are NOT part of the formula — multi-fill/partial exits remain out of
    scope (pre-existing compute_pnl docstring pin) and need their own
    spec'd batch before any producer emits them.
+
+### 171 — wound-scale severity migration (SPEC-wound-scale; ratified prompts/rubric-thesis-v1.md §2, 2026-07-25)
+1. Review-exchange severity is the closed enum `"minor" | "major" | "fatal"`
+   (rank order = `WOUND_SCALE` in review/_rubric.py, never lexicographic).
+   Legacy int mapping (the ONE int→enum site, `wound_from_legacy`):
+   1|2→minor, 3→major, 4|5→fatal; anything else ValueError naming the value.
+2. Tally shape: per-category `{"count", "max_severity"}` with
+   max_severity = enum-or-None, None iff count == 0 (was int 0).
+3. Parse boundary (`review/__init__.py::_call_reviewer_and_score`, the only
+   raw-stdout→exchanges site; run_review AND verify_claim route through it):
+   enum passes, legacy int 1..5 maps, ANY other value — including bools,
+   which are int subclasses — routes through the EXISTING
+   `ReviewMalformedOutput → failure_mode="malformed_output"` taxonomy.
+   This ratifies the red-stage flag: no per-field rejection path existed
+   before this batch; the whole-payload malformed_output taxonomy is the
+   adjudicated home, not a new exception shape.
+4. Blocking is UNCHANGED: `unresolved_attack_count` vs
+   `unresolved_attack_threshold` (count semantics, dial default 1;
+   threshold→2 ABORT stands). Severity's only computational site is the
+   reporting tally. The adjudication's "fatal replaces severity>=4" clause
+   had exactly one live site (the tally) — no blocking predicate ever read
+   severity.
+5. Pre-existing, out of scope: an exchange MISSING the severity key
+   crashes (KeyError) rather than soft-failing — value-domain validation
+   only was ratified here.

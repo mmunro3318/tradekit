@@ -252,3 +252,6 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] T1: fill payload field + fee_rate accessor
 - [x] T2: broker fill physics (paper + alpaca in-kind withhold) — MONEY-PATH review round
 - [x] T3: compute_pnl in-kind arithmetic + live-receipts golden + docs
+
+### Wound-scale migration (SPEC-wound-scale.md, feature/wound-scale)
+- [x] severity enum minor/major/fatal + parse-boundary mapping + tally (round 15)

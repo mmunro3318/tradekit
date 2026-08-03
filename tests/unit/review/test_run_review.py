@@ -215,7 +215,10 @@ def test_parse_boundary_maps_legacy_int_severity_to_enum_before_scoring(
     )
 
 
-@pytest.mark.parametrize("bad_severity", ["catastrophic", 3.5, None, 6])
+# True/False included (review round 15): bool is an int subclass in Python
+# (True == 1), so an unguarded legacy-int path would silently clamp JSON
+# `true` to "minor" — exactly the silent-clamp class AC-6 kills.
+@pytest.mark.parametrize("bad_severity", ["catastrophic", 3.5, None, 6, True, False])
 def test_parse_boundary_rejects_non_enum_non_legacy_severity_loudly(
     seed_submitted_thesis, monkeypatch, bad_severity
 ) -> None:

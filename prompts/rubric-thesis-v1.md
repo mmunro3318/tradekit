@@ -5,9 +5,9 @@
 > batch D TDD pass to give `tradekit.review._rubric` something concrete to
 > score against and to give `run_review`'s attack/defense prompt something
 > concrete to cite. DESIGN §12.1 is the binding mechanics doc; this file is
-> the CONTENT the mechanics run over. One pending migration: the wound
-> severity scale (see Adjudication #2) — until that batch lands, `_rubric.py`
-> continues to pin int 1..5 and this schema block remains the live contract.
+> the CONTENT the mechanics run over. Wound-scale migration (see Adjudication
+> #2) landed (docs/specs/SPEC-wound-scale.md): `_rubric.py` now pins the enum
+> `"minor"|"major"|"fatal"`, reflected in the schema block below.
 
 ## Purpose
 
@@ -26,7 +26,7 @@ decides (§12.1).
 {
   "attack": "string — the specific criticism",
   "category": "one of the five category ids below",
-  "severity": "int 1..5 (1 = minor nitpick, 5 = thesis-killing)",
+  "severity": "\"minor\" | \"major\" | \"fatal\" (minor = nitpick, fatal = thesis-killing)",
   "defense": "string — proposer's structured rebuttal",
   "resolved": "bool — the REVIEWER's own verdict on the rebuttal, not the proposer's"
 }
