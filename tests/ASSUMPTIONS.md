@@ -3243,3 +3243,28 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
    (scan() has NO internal provider containment; hud contains at its call
    site with different wording, hud/_build.py) — reconcile wordings if
    containment is ever added to scan().
+
+### 173 — strategy registry T-MTF-3 adjudications (review round 17)
+1. StrategyDef is the 7-field STRATEGY-PACK shape (MTF-SCAN's 6 fields +
+   `r_multiple_override: Decimal | None = None`) — STRATEGY-PACK.md
+   legitimately extends MTF-SCAN.md's narrower original; readers of
+   MTF-SCAN alone should follow this entry.
+2. S1 = key "s1_momentum", buy, single 4h leg {"macd_signal":
+   "bullish_cross", "volume_spike": 1.5} **min_tags=1** (RE-ADJUDICATED
+   from 0, round 17 F3: decision-identical to today's hud — its arm gate
+   already requires >=1 surviving tag, an empty-tag match maps to wait
+   either way — and prevents an unconditional S1 leg from shadowing S2
+   under T-MTF-4's first-match-wins walk), regime_families
+   ("momentum","breakout"), size_scale 1, override None.
+3. Registry surface: build_registry(defs) -> dict raising ValueError
+   naming any duplicate key; STRATEGY_BY_KEY prebuilt; ALL exported
+   read-only via mae (public imports only — tradekit.mae, never
+   tradekit.mae._strategies).
+4. T-MTF-4 PIN (required before its red): a StrategyDef "passes" for
+   first-match-wins ONLY with non-empty surviving tags; an empty-tag
+   confluence match must not arm anything.
+5. StrategyDef freezing is shallow (legs are TypedDict dicts) — nothing
+   mutates legs today; the T-MTF-4 walk must not either.
+6. Hygiene backlog: pytest --import-mode=importlib would retire the
+   test-basename-collision class suite-wide (three tests/ __init__.py
+   files added this batch are the partial fix).
