@@ -53,7 +53,10 @@ def test_real_subprocess_stub_executable_returns_canned_stdout(tmp_path) -> None
         """\
         import sys
         sys.stdout.write('[{"attack": "a", "category": "ev_arithmetic", '
-                          '"severity": 1, "defense": "d", "resolved": true}]')
+                          '"severity": "minor", "defense": "d", "resolved": true}]')
+        # AC-8 (SPEC-wound-scale): was "severity": 1 -- this test only checks
+        # "ev_arithmetic" appears in the raw stdout text (plumbing test, no
+        # JSON parsing happens here), so the re-pin is cosmetic/direct.
         """,
     )
     adapter = SubprocessReviewerAdapter(

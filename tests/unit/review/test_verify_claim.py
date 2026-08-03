@@ -44,7 +44,7 @@ _ALL_RESOLVED_EXCHANGE = [
     {
         "attack": "is this a real structural break, or just a price move the stop covers?",
         "category": "invalidation_distinctness",
-        "severity": 4,
+        "severity": "fatal",  # AC-8 (SPEC-wound-scale): was 4
         "defense": "the primary listing venue delisted the pair -- no price level fixes that.",
         "resolved": True,
     }
@@ -54,7 +54,7 @@ _UNRESOLVED_EXCHANGE = [
     {
         "attack": "this reads like the stop restated in prose, not a structural break.",
         "category": "invalidation_distinctness",
-        "severity": 4,
+        "severity": "fatal",  # AC-8 (SPEC-wound-scale): was 4
         "defense": "it's about delisting.",
         "resolved": False,
     }

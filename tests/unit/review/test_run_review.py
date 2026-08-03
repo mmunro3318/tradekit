@@ -58,7 +58,7 @@ _ALL_RESOLVED_EXCHANGE = [
     {
         "attack": "p_win=0.55 with no base-rate citation.",
         "category": "ev_arithmetic",
-        "severity": 2,
+        "severity": "minor",  # AC-8 (SPEC-wound-scale): was 2
         "defense": "Base rate drawn from the strategy_tag's last 40 trades (wiki-cited).",
         "resolved": True,
     }
@@ -68,7 +68,7 @@ _ONE_UNRESOLVED_FATAL_EXCHANGE = [
     {
         "attack": "Your structural invalidation is just the stop restated in prose.",
         "category": "invalidation_distinctness",
-        "severity": 5,
+        "severity": "fatal",  # AC-8 (SPEC-wound-scale): was 5
         "defense": "It references delisting risk, not price.",
         "resolved": False,
     }
@@ -169,3 +169,85 @@ def test_unresolved_attack_at_or_above_threshold_fails_review(
     ]
     assert len(completed) == 1
     assert completed[0].payload["passed"] is False
+
+
+# --- wound-scale parse boundary (docs/specs/SPEC-wound-scale.md AC-5/AC-6)
+# -- U1 probe result: `review/__init__.py::_call_reviewer_and_score` is the
+# ONLY site in this pipeline that turns raw reviewer stdout into the
+# `exchanges` list `score_exchanges` consumes (`json.loads(stdout)` at
+# lines ~197-202); it is therefore the pinned parse boundary these tests
+# exercise end-to-end through the public `run_review` verb (never by
+# reaching into the private helper directly). ---------------------------
+
+
+@pytest.mark.parametrize(
+    "legacy_severity, expected_enum",
+    [
+        (1, "minor"),
+        (2, "minor"),
+        (3, "major"),
+        (4, "fatal"),
+        (5, "fatal"),
+    ],
+)
+def test_parse_boundary_maps_legacy_int_severity_to_enum_before_scoring(
+    seed_submitted_thesis, monkeypatch, legacy_severity: int, expected_enum: str
+) -> None:
+    """BEHAVIOR (AC-5): reviewer-output exchange JSON carrying a legacy int
+    severity must reach `score_exchanges` already mapped to the enum --
+    the CALLER (`run_review`) exposes the mapped exchange in the returned
+    artifact, proving the mapping happened at parse time, not lazily."""
+    thesis_id = seed_submitted_thesis()
+    exchange = [{**_ALL_RESOLVED_EXCHANGE[0], "severity": legacy_severity}]
+    adapter = _RecordingFakeAdapter([json.dumps(exchange)])
+    _patch_adapter(monkeypatch, adapter)
+
+    artifact = review.run_review(thesis_id)
+
+    assert artifact["failure_mode"] is None, (
+        "a legacy int 1..5 is a VALID severity (mapped, not rejected) -- this must be a "
+        "clean scored round, never a boundary failure"
+    )
+    assert artifact["exchanges"][0]["severity"] == expected_enum, (
+        "AC-5 (SPEC-wound-scale): legacy int severity from reviewer JSON must be mapped to "
+        "the enum at the parse boundary (review/__init__.py::_call_reviewer_and_score's "
+        "json.loads site), so score_exchanges only ever sees enum strings"
+    )
+
+
+@pytest.mark.parametrize("bad_severity", ["catastrophic", 3.5, None, 6])
+def test_parse_boundary_rejects_non_enum_non_legacy_severity_loudly(
+    seed_submitted_thesis, monkeypatch, bad_severity
+) -> None:
+    """BEHAVIOR (AC-6): a severity value that is neither the enum string
+    nor a legacy int 1..5 must hit the pipeline's EXISTING loud
+    schema-rejection path -- today that is `_call_reviewer_and_score`'s
+    `failure_mode="malformed_output"` taxonomy (the same one a
+    json.JSONDecodeError on the whole payload already produces) -- never a
+    silent clamp, never an uncaught TypeError escaping `score_exchanges`'
+    rank-based max().
+
+    ASSUMPTION-FLAG (see tests/ASSUMPTIONS.md, numbered there): the spec's
+    'existing loud schema-rejection path...same error taxonomy as other
+    malformed-exchange rejections today' presumes such per-FIELD validation
+    already exists somewhere in the pipeline. Probing found none -- the
+    only existing loud-rejection taxonomy in `review/__init__.py` is the
+    whole-payload `json.JSONDecodeError -> ReviewMalformedOutput ->
+    failure_mode='malformed_output'` path. This test pins THAT taxonomy as
+    the best reading. Competing reading: a distinct/new exception or error
+    shape is intended and 'today' refers to a validation site this probe
+    missed -- if so, the green dispatch should say so explicitly rather
+    than silently satisfying this test with a different shape."""
+    thesis_id = seed_submitted_thesis()
+    exchange = [{**_ALL_RESOLVED_EXCHANGE[0], "severity": bad_severity}]
+    adapter = _RecordingFakeAdapter([json.dumps(exchange)])
+    _patch_adapter(monkeypatch, adapter)
+
+    artifact = review.run_review(thesis_id)
+
+    assert artifact["failure_mode"] == "malformed_output", (
+        f"severity={bad_severity!r} is neither the enum string nor a legacy int 1..5 -- "
+        "must hit the existing malformed_output rejection path"
+    )
+    assert artifact["exchanges"] == [], "a boundary failure carries no exchanges (existing shape)"
+    assert artifact["passed"] is False
