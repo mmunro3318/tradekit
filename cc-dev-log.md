@@ -1,3 +1,19 @@
+## 2026-08-03f (Fable — paper-sprint batch F: S4 reversion GREEN, verdict ACCEPT)
+
+- S4 restricted reversion registered (STRATEGIES = S1, S2, S4): single 1h
+  leg {rsi_max 25, bb_position below_lower} min_tags 2, mean_reversion
+  family, HALF SIZE (0.5) + r_multiple_override 1 -- the bear-regime
+  strategy, most likely to fire in current market. ThesisContract gains
+  horizon_hours: int = 168 (S4 will set 48 when cadence wires
+  StrategyDef->thesis). Red 80dc469, review round 19 ACCEPT. Adjudications:
+  doc's "at_support" = tag/value conflation (below_lower is the value);
+  red's "(1/2 tags)" contradicted 172.1 AND-kill semantics (corrected 0/2);
+  S2's exact-registry pins broke on append -> relaxed per round-13
+  fragile-pin lesson. ASSUMPTIONS 175. GATE green.
+- THE FUNNEL NOW HAS ITS BEAR-REGIME STRATEGY. Remaining: T-MTF-4 hud
+  registry walk + autonomous funnel-only paper cadence (batch G) -- the
+  last machinery before paper trades accumulate toward 30.
+
 ## 2026-08-03e (Fable — paper-sprint batch E: S2 pullback GREEN, verdict ACCEPT)
 
 - S2 pullback-continuation live in the registry: 4h {ema_above 50 +

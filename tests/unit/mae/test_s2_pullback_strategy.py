@@ -412,7 +412,11 @@ def test_s2_registered_after_s1_in_strategies_tuple() -> None:
     # PIN: "Registry order after this lands: S1, then S2 (S1's stricter
     # volume-confirmed signal outranks; first-match-wins)."
     keys = [s.key for s in STRATEGIES]
-    assert keys == ["s1_momentum", "s2_pullback"]
+    # Prefix pin, not exact-tuple (CTO adjudication at S4 registration):
+    # an exact-equality pin breaks every time a strategy is appended —
+    # the fragile-exact-pin class from the round-13 lesson. S2's own pin
+    # is only "S1 before S2".
+    assert keys[:2] == ["s1_momentum", "s2_pullback"]
 
 
 def test_strategy_by_key_contains_s2_and_matches_build_registry() -> None:
@@ -491,4 +495,6 @@ def test_s2_end_to_end_hot_1h_rsi_fails_leg_two(monkeypatch) -> None:
 
 def test_build_registry_still_succeeds_with_s1_and_s2_present() -> None:
     registry = build_registry(STRATEGIES)
-    assert set(registry.keys()) == {"s1_momentum", "s2_pullback"}
+    # Superset pin (CTO adjudication at S4 registration) — see the
+    # prefix-pin note above.
+    assert {"s1_momentum", "s2_pullback"} <= set(registry.keys())

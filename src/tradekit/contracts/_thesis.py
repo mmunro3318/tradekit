@@ -43,6 +43,12 @@ class ThesisContract(FrozenModel):
 
     entry: EntrySpec
     horizon_end: AwareDatetime  # UTC; grading hard stop (TD-17)
+    # Default 168 (7d) preserves every pre-batch thesis unchanged; S4 sets
+    # 48 (STRATEGY-PACK.md "S4 — Downside-extreme reversion" time-stop).
+    # Independent of horizon_end — StrategyDef->thesis wiring is deferred
+    # to the cadence batch (ASSUMPTION-FLAG S4-2); hud/_serve.py's
+    # hardcoded 7d draft-builder is untouched this batch.
+    horizon_hours: int = 168
     target_price: Decimal  # success predicate anchor
     stop_price: Decimal  # failure predicate anchor (price-based)
     invalidation: InvalidationSpec  # structural; separate from stop (F1)
