@@ -123,7 +123,10 @@ def test_compute_pnl_on_the_live_eth_round_trip_matches_the_venue_balance_delta_
         ts=_ENTRY_TS,
         price=_ENTRY_PRICE,
         qty=_ENTRY_QTY,
-        fees_usd=Decimal("0"),  # irrelevant once fee_asset_qty > 0 (SPEC formula drops this term)
+        # Realistic USD valuation (fee_asset_qty * price), NOT zero: the SPEC
+        # formula must DROP this term when fee_asset_qty > 0 — feeding zero
+        # here would let a double-subtracting implementation pass silently.
+        fees_usd=_ENTRY_FEE_ASSET_QTY * _ENTRY_PRICE,
         side="buy",
         fee_asset_qty=_ENTRY_FEE_ASSET_QTY,
     )
