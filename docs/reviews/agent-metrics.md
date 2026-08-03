@@ -445,3 +445,19 @@ T-MTF-4).
 |---|---|---|---|---|---|---|
 | red-s2 | 3 test files, 22 tests | 0 | 1 | 0 | A | Hand-derived goldens all float-verified correct; vacuous-at-red trio honestly flagged; doc typo caught per precedent; escape hatch escalated, never improvised. |
 | green-s2 | _scanner/_confluence/strategies/_strategies | 0 | 0 | 1 | A− | Surgical wiring, RSI series shared (no recompute drift), one shared validator pre-fetch in both verbs; docked one garbled docstring sentence. |
+
+## Round 19 — 2026-08-03 — STRATEGY-PACK S4 + horizon_hours (red 80dc469, green this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate (1172 passed) + independent
+fixture re-derivation. Verdict ACCEPT (4 LOW, none blocking; F1/F2 comment
+touch-ups folded into commit, F3/F4 carried to S3/cadence batches). The
+round's substantive work was adjudication: red pinned "(1/2 tags)" against
+ASSUMPTIONS 172.1's AND-kill semantics (corrected to 0/2), and two S2-batch
+exact-registry pins broke on S4's append (relaxed to prefix/superset per the
+round-13 fragile-pin lesson). Green implementer correctly STOPPED on both
+rather than improvising — exactly the flag-don't-improvise discipline.
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-s4 | 2 test files, 17 tests | 0 | 1 | 2 | B− | Outstanding S4-1 flag (argued from the scanner's own tag table) + oracle-verified fixtures; shipped a warning expectation contradicting a 3-rounds-old pinned assumption, stale residue, one wrong band number. |
+| green-s4 | _strategies.py + _thesis.py | 0 | 0 | 0 | A | Minimal faithful diff, exact money-param Decimals, load-bearing why-comments, stopped-and-flagged on both test defects instead of improvising. |

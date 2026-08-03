@@ -3296,3 +3296,25 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
 6. ema_above's numeric param is unvalidated (loud-but-late on garbage,
    same convention as volume_spike) — candidate for a uniform
    numeric-param validation batch, not a defect.
+
+### 175 — S4 restricted reversion + horizon_hours (STRATEGY-PACK S4, review round 19)
+1. S4's bb_position filter VALUE is "below_lower" — the doc's "at_support"
+   conflates the value with the TAG it produces (_scanner's tag table:
+   below_lower -> "at_support"); same ratified typo class as 174.4. Doc
+   samples are NOT authoritative on vocabulary values; the closed enums are.
+2. Round-19 confirmation of 172.1: a leg's filters are AND-composed kills —
+   any failing filter kills the candidate outright (0 surviving tags);
+   n>0 partial counts arise ONLY via regime pruning. Consequence: S4's
+   min_tags=2 is decision-identical to 1 today (both tags share the
+   mean_reversion family, pruning yields 0-or-2); kept as faithful doc
+   transcription.
+3. ThesisContract.horizon_hours: int = 168 (default = pre-batch 7d, every
+   historical thesis validates unchanged; S4 sets 48). StrategyDef→thesis
+   wiring DEFERRED to the cadence batch; hud/_serve.py's hardcoded 7d
+   stands until then. Field unvalidated (174.6 convention) — the cadence
+   batch MUST validate nonpositive hours when horizon_end wiring lands
+   (a nonpositive value would mint an already-expired thesis).
+4. Fragile-exact-pin doctrine (round-13 lesson, applied rounds 19): registry
+   content pins are prefix/superset/relative-order, never exact-equality —
+   the S4 tuple test's exact pin is designated for relative rewrite in the
+   S3 batch (S3 lands between S2 and S4 per doc order).

@@ -146,8 +146,9 @@ def _mean_reversion_regime(*_args: object, **_kwargs: object) -> dict[str, objec
 # / volatility.bollinger as an ORACLE, not as the code under test -- this is
 # a BEHAVIOR/CONTRACT fixture, not a GOLDEN numeric assertion): last
 # bollinger position for this series is "inside" (close=101.0, lower band
-# ~=98.97, upper ~=110.5) -- i.e. the RSI condition fires ALONE, the
-# bb_position condition does NOT, giving the "1/2 tags" case.
+# ~=98.97, upper ~=122.03; 110.5 is the band MEAN) -- i.e. the RSI condition fires ALONE, the
+# bb_position condition does NOT -- the outright-failure "(0/2 tags)" case
+# per ASSUMPTIONS 172.1 AND-kill semantics (round-19 adjudication).
 _RSI_OVERSOLD_ONLY_CLOSES = [120.0 - i for i in range(20)]
 
 # Both-conditions-fire fixture: 24 bars of seeded small noise (SAME seed and
@@ -220,13 +221,17 @@ def test_s4_strategy_def_is_frozen_immutable() -> None:
 
 def test_build_registry_still_succeeds_with_s1_s2_s4_present() -> None:
     registry = build_registry(STRATEGIES)
-    assert set(registry.keys()) == {"s1_momentum", "s2_pullback", "s4_reversion"}
+    # Superset pin (round-19 adjudication): exact-set pins break on every
+    # future strategy append -- the fragile-exact-pin class.
+    assert {"s1_momentum", "s2_pullback", "s4_reversion"} <= set(registry.keys())
 
 
 # ---------------------------------------------------------------------------
 # 2. S4 leg semantics end-to-end through scan_confluence: min_tags=2 needs
 #    BOTH rsi_max and bb_position to fire; rsi oversold alone (bb absent)
-#    fails with the pinned "(1/2 tags)" warning shape.
+#    fails outright -- "(0/2 tags)" per 172.1's AND-kill semantics (CTO
+#    adjudication, round 19; min_tags=2's independent bite is via regime
+#    pruning, not partial filter passes).
 # ---------------------------------------------------------------------------
 
 
@@ -252,7 +257,7 @@ def test_s4_end_to_end_both_conditions_fire_yields_match_with_both_tags(
     assert set(match["legs"]["1h"]["signal_tags"]) == {"oversold", "at_support"}
 
 
-def test_s4_end_to_end_oversold_without_bb_support_fails_leg_one_of_two_tags(
+def test_s4_end_to_end_oversold_without_bb_support_fails_leg_outright(
     monkeypatch,
 ) -> None:
     series = _series(_RSI_OVERSOLD_ONLY_CLOSES, symbol="BTC/USD", timeframe="1h")
@@ -268,7 +273,7 @@ def test_s4_end_to_end_oversold_without_bb_support_fails_leg_one_of_two_tags(
     )
 
     assert result["matches"] == []
-    assert "BTC/USD: leg 1h failed (1/2 tags)" in result["warnings"]
+    assert "BTC/USD: leg 1h failed (0/2 tags)" in result["warnings"]
 
 
 # ---------------------------------------------------------------------------

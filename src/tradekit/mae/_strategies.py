@@ -72,7 +72,31 @@ _S2_PULLBACK = StrategyDef(
     tag="s2_pullback",
 )
 
-STRATEGIES: tuple[StrategyDef, ...] = (_S1_MOMENTUM, _S2_PULLBACK)
+_S4_REVERSION = StrategyDef(
+    key="s4_reversion",
+    side="buy",
+    legs=(
+        {
+            "timeframe": "1h",
+            # ASSUMPTION-FLAG S4-1 (CTO ratified, ASSUMPTIONS 174.4
+            # precedent): "below_lower" is the filter VALUE; "at_support"
+            # (STRATEGY-PACK.md's sample) is the TAG that value produces
+            # (_scanner._BB_POSITION_TAGS) — same typo class as S2's
+            # "bullish".
+            "filters": {"rsi_max": 25, "bb_position": "below_lower"},
+            "min_tags": 2,
+        },
+    ),
+    regime_families=("mean_reversion",),
+    # Restricted sizing/target is the "restricted" in "restricted
+    # reversion" (STRATEGY-PACK.md S4): half size, target the mean (1R)
+    # rather than a trend — both permanent, load-bearing restrictions.
+    size_scale=Decimal("0.5"),
+    r_multiple_override=Decimal("1"),
+    tag="s4_reversion",
+)
+
+STRATEGIES: tuple[StrategyDef, ...] = (_S1_MOMENTUM, _S2_PULLBACK, _S4_REVERSION)
 
 
 def build_registry(defs: tuple[StrategyDef, ...]) -> dict[str, StrategyDef]:

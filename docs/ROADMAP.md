@@ -263,5 +263,5 @@ See ASSUMPTIONS 161 (supersedes 33) and
 
 ### STRATEGY-PACK (docs/design/STRATEGY-PACK.md)
 - [x] S2 pullback (round 18)
-- [ ] S4 restricted reversion
+- [x] S4 restricted reversion (round 19)
 - [ ] S3 breakout (deferred this sprint)
