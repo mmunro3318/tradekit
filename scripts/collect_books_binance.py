@@ -48,6 +48,7 @@ from typing import Any
 
 import httpx
 from collect_ticks import GREENLIST_PAIRS
+from collector_core import stream_dir, symbol_dirname
 
 VENUE = "binance"
 WS_BASE_URL = "wss://stream.binance.us:9443/stream"
@@ -119,12 +120,15 @@ def parse_depth_row(msg: dict[str, Any], ts: str) -> tuple[str, dict[str, Any]] 
     return stream, row
 
 
+# Layout is owned by collector_core (see collect_ticks.py for why) so every
+# collector agrees on where a pair lives, and PARTITION_BY_CLASS moves them
+# all together.
 def _pair_dirname(pair: str) -> str:
-    return pair.replace("/", "_")
+    return symbol_dirname(pair)
 
 
 def book_file_path(base_dir: Path, pair: str, ts: datetime) -> Path:
-    return base_dir / _pair_dirname(pair) / ts.strftime("%Y-%m-%d") / f"book-{ts:%H}.parquet"
+    return stream_dir(base_dir, pair, ts) / f"book-{ts:%H}.parquet"
 
 
 class RowThrottle:

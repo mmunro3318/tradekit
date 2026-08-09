@@ -48,6 +48,7 @@ from typing import Any
 
 import httpx
 from collect_ticks import GREENLIST_PAIRS
+from collector_core import stream_dir, symbol_dirname
 
 VENUE = "coinbase"
 WS_URL = "wss://advanced-trade-ws.coinbase.com"
@@ -61,6 +62,14 @@ FLUSH_INTERVAL_S = 60.0
 FLUSH_ROW_LIMIT = 5000
 HEARTBEAT_TIMEOUT_S = 15.0
 ROW_INTERVAL_S = 1.0
+
+# Coinbase caps level2 product streams per WS session (probed 2026-08-08:
+# 30 subscribes fine, 31 returns {"type":"error","message":"too many L2
+# streams requested in a single session"}). Over the cap the server sends
+# that one frame and then goes silent, which the read loop cannot distinguish
+# from a dead connection — it reconnects on heartbeat timeout, re-subscribes,
+# and livelocks without ever writing a row. Shard across sessions instead.
+MAX_STREAMS_PER_SESSION = 30
 
 
 def resolve_books_dir(
@@ -139,12 +148,15 @@ def parse_l2_events(msg: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+# Layout is owned by collector_core (see collect_ticks.py for why) so every
+# collector agrees on where a pair lives, and PARTITION_BY_CLASS moves them
+# all together.
 def _pair_dirname(pair: str) -> str:
-    return pair.replace("/", "_")
+    return symbol_dirname(pair)
 
 
 def book_file_path(base_dir: Path, pair: str, ts: datetime) -> Path:
-    return base_dir / _pair_dirname(pair) / ts.strftime("%Y-%m-%d") / f"book-{ts:%H}.parquet"
+    return stream_dir(base_dir, pair, ts) / f"book-{ts:%H}.parquet"
 
 
 class RowThrottle:
@@ -265,64 +277,82 @@ async def run_collector(
 
     sink = ParquetSink(base_dir)
     counts: dict[str, int] = dict.fromkeys(active, 0)
-    product_to_pair = {pair_to_product(p): p for p in active}
     throttle = RowThrottle()
     loop = asyncio.get_event_loop()
     deadline = (loop.time() + duration_s) if duration_s is not None else None
-    last_flush = loop.time()
-    attempt = 0
 
-    while deadline is None or loop.time() < deadline:
-        books: dict[str, OrderBookState] = {p: OrderBookState() for p in active}
-        try:
-            # max_size=None: level2 snapshot frames exceed the 1 MiB default.
-            async with websockets.connect(WS_URL, open_timeout=10, max_size=None) as ws:
-                attempt = 0
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "subscribe",
-                            "channel": "level2",
-                            "product_ids": [pair_to_product(p) for p in active],
-                        }
+    shards = [
+        active[i : i + MAX_STREAMS_PER_SESSION]
+        for i in range(0, len(active), MAX_STREAMS_PER_SESSION)
+    ]
+    if len(shards) > 1:
+        print(
+            f"INFO: {len(active)} pairs over {len(shards)} sessions "
+            f"(cap {MAX_STREAMS_PER_SESSION}/session)"
+        )
+
+    async def run_shard(shard: list[str]) -> None:
+        product_to_pair = {pair_to_product(p): p for p in shard}
+        last_flush = loop.time()
+        attempt = 0
+        while deadline is None or loop.time() < deadline:
+            books: dict[str, OrderBookState] = {p: OrderBookState() for p in shard}
+            try:
+                # max_size=None: level2 snapshot frames exceed the 1 MiB default.
+                async with websockets.connect(WS_URL, open_timeout=10, max_size=None) as ws:
+                    attempt = 0
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "subscribe",
+                                "channel": "level2",
+                                "product_ids": [pair_to_product(p) for p in shard],
+                            }
+                        )
                     )
-                )
-                while deadline is None or loop.time() < deadline:
-                    remaining = (deadline - loop.time()) if deadline is not None else None
-                    timeout = (
-                        min(HEARTBEAT_TIMEOUT_S, remaining)
-                        if remaining is not None
-                        else HEARTBEAT_TIMEOUT_S
-                    )
-                    if timeout <= 0:
-                        break
-                    raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-                    msg = json.loads(raw)
-                    now = datetime.now(UTC)
-                    for product, event in parse_l2_events(msg):
-                        pair = product_to_pair.get(product)
-                        if pair is None:
-                            continue
-                        books[pair].apply_event(event)
-                        if not throttle.allow(pair, time.monotonic()):
-                            continue
-                        row = books[pair].top_row(ts=now.isoformat(), depth=BOOK_DEPTH)
-                        sink.add(pair, row, now)
-                        counts[pair] += 1
-                    if loop.time() - last_flush >= FLUSH_INTERVAL_S:
-                        sink.flush_all(now)
-                        last_flush = loop.time()
-        except TimeoutError:
-            if deadline is not None and loop.time() >= deadline:
-                break
-            print("WARN: heartbeat timeout — reconnecting")
-        except Exception as exc:  # reconnect on any transport error
-            delay = backoff_delay(attempt)
-            print(f"WARN: connection error {exc!r}; reconnecting in {delay}s")
-            attempt += 1
-            await asyncio.sleep(delay)
-        else:
-            continue
+                    while deadline is None or loop.time() < deadline:
+                        remaining = (deadline - loop.time()) if deadline is not None else None
+                        timeout = (
+                            min(HEARTBEAT_TIMEOUT_S, remaining)
+                            if remaining is not None
+                            else HEARTBEAT_TIMEOUT_S
+                        )
+                        if timeout <= 0:
+                            break
+                        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+                        msg = json.loads(raw)
+                        # A rejected subscribe is followed by silence, not a close
+                        # — surface it instead of looping on heartbeat timeouts.
+                        if msg.get("type") == "error":
+                            raise RuntimeError(f"Coinbase rejected subscribe: {msg.get('message')}")
+                        now = datetime.now(UTC)
+                        for product, event in parse_l2_events(msg):
+                            pair = product_to_pair.get(product)
+                            if pair is None:
+                                continue
+                            books[pair].apply_event(event)
+                            if not throttle.allow(pair, time.monotonic()):
+                                continue
+                            row = books[pair].top_row(ts=now.isoformat(), depth=BOOK_DEPTH)
+                            sink.add(pair, row, now)
+                            counts[pair] += 1
+                        if loop.time() - last_flush >= FLUSH_INTERVAL_S:
+                            for pair in shard:
+                                sink.flush(pair, now)
+                            last_flush = loop.time()
+            except TimeoutError:
+                if deadline is not None and loop.time() >= deadline:
+                    break
+                print("WARN: heartbeat timeout — reconnecting")
+            except Exception as exc:  # reconnect on any transport error
+                delay = backoff_delay(attempt)
+                print(f"WARN: connection error {exc!r}; reconnecting in {delay}s")
+                attempt += 1
+                await asyncio.sleep(delay)
+            else:
+                continue
+
+    await asyncio.gather(*(run_shard(s) for s in shards))
 
     sink.flush_all(datetime.now(UTC))
     return counts

@@ -15,10 +15,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
 import collect_books_binance as cbb
 import collect_books_coinbase as cbc
+import collector_core as cc
 
 
 class TestBinanceSymbolMapping:
@@ -182,13 +185,26 @@ class TestCoinbaseOrderBookState:
 class TestPathLayout:
     TS = datetime(2026, 7, 26, 9, 5, tzinfo=UTC)
 
-    def test_binance_book_file_path(self) -> None:
+    # Layout delegated to collector_core.stream_dir (2026-08-08). Both venues
+    # must agree with each other and with the tick collector, so pin them
+    # against the flag rather than against a hardcoded shape.
+    def test_binance_book_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cc, "PARTITION_BY_CLASS", True)
         p = cbb.book_file_path(Path("base"), "ETH/USD", self.TS)
-        assert p == Path("base/ETH_USD/2026-07-26/book-09.parquet")
+        assert p == Path("base/crypto/ETH_USD/2026-07-26/book-09.parquet")
 
-    def test_coinbase_book_file_path(self) -> None:
+    def test_coinbase_book_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cc, "PARTITION_BY_CLASS", True)
         p = cbc.book_file_path(Path("base"), "SOL/USD", self.TS)
-        assert p == Path("base/SOL_USD/2026-07-26/book-09.parquet")
+        assert p == Path("base/crypto/SOL_USD/2026-07-26/book-09.parquet")
+
+    def test_both_venues_agree_on_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A divergence here is what silently splits the archive in two.
+        for flag in (True, False):
+            monkeypatch.setattr(cc, "PARTITION_BY_CLASS", flag)
+            assert cbb.book_file_path(Path("b"), "USDC/EUR", self.TS) == cbc.book_file_path(
+                Path("b"), "USDC/EUR", self.TS
+            )
 
     def test_resolve_books_dir_prefers_external(self, tmp_path: Path) -> None:
         assert cbb.resolve_books_dir("binance", external_root=tmp_path) == (

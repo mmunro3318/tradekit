@@ -54,6 +54,10 @@ from typing import Any
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from collector_core import stream_dir, symbol_dirname
+
 WS_URL = "wss://ws.kraken.com/v2"
 REST_ASSET_PAIRS_URL = "https://api.kraken.com/0/public/AssetPairs"
 
@@ -83,18 +87,167 @@ FLUSH_ROW_LIMIT = 5000
 RETENTION_DAYS = 730
 HEARTBEAT_TIMEOUT_S = 15.0
 
-GREENLIST_PAIRS: list[str] = [
+# Kraken WS v2 symbols (BTC, not the REST-side XBT — see `_ws_v2_symbol`).
+# Grouped by research intent; each group can be cut without touching the others.
+# The book collectors import this list and drop what their own venue doesn't
+# list, so non-USD and Kraken-only pairs are safe to include here.
+
+# L1 gas / settlement assets.
+_PAIRS_L1: list[str] = [
+    "BTC/USD",
     "ETH/USD",
     "SOL/USD",
-    "LINK/USD",
-    "NEAR/USD",
-    "EIGEN/USD",
-    "RENDER/USD",
-    "PAXG/USD",
-    "TAO/USD",
     "XRP/USD",
     "AVAX/USD",
+    "NEAR/USD",
+    "ADA/USD",
+    "SUI/USD",
+    "BNB/USD",
+    "ZEC/USD",
+]
+
+# Picks-and-shovels: compute, storage, oracles, DA, staking, L2 gas.
+_PAIRS_INFRA: list[str] = [
+    "LINK/USD",
+    "TAO/USD",
     "AKT/USD",
+    "RENDER/USD",
+    "EIGEN/USD",
+    "TIA/USD",
+    "POL/USD",
+    "FIL/USD",
+]
+
+# Research-pedigree L1s held for the long-horizon utility thesis.
+_PAIRS_ACADEMIC: list[str] = [
+    "ALGO/USD",
+    "DOT/USD",
+    "HBAR/USD",
+]
+
+# Cross-chain messaging / bridges.
+_PAIRS_BRIDGE: list[str] = [
+    "ZRO/USD",
+    "W/USD",
+]
+
+# DEX / DeFi rails. CAKE is retained as a reference series only — its US tape
+# is a fragment of real (Binance-global) CAKE volume, so treat it as a venue
+# artifact, not a price. ACX was dropped: Risk Labs is converting the token to
+# C-corp equity, so the series has a scheduled death.
+_PAIRS_DEX: list[str] = [
+    "AERO/USD",
+    "CAKE/USD",
+]
+
+# RWA sleeve: two gold issuers (basis), tokenized treasuries, private credit.
+_PAIRS_RWA: list[str] = [
+    "PAXG/USD",
+    "XAUT/USD",
+    "ONDO/USD",
+    "CFG/USD",
+]
+
+# Stablecoin peg monitoring — the depeg tape is the point, so thin issuers are
+# deliberately included; a quiet book is itself the signal.
+#
+# Volumes below are true USD notional measured 2026-08-08 (base volume x price,
+# with non-USD quotes converted through Kraken's own fiat pairs). Do NOT read
+# a venue's raw 24h volume field as USD: OKX reports `volCcy24h` in the QUOTE
+# currency, so USDT/TRY looks like "470M" when the USD notional is ~$9.9M.
+_PAIRS_STABLE: list[str] = [
+    "USDT/USD",  # $34.9M
+    "USDC/USD",  # $16.0M
+    "USDC/USDT",  # $9.2M — the reference stable-vs-stable leg
+    "DAI/USD",  # $36k
+    "PYUSD/USD",  # $253k
+    "RLUSD/USD",  # $7.6k
+    "USDG/USD",  # $202k
+    "USDS/USD",  # thin on Kraken ($1.6k); ~$2.2M on Coinbase
+    "EURC/USD",  # $136k
+    "EURC/EUR",  # $70k
+    "EURC/USDC",  # $33k
+    # Non-USD-native issuers. Real and tradeable but genuinely tiny — carried
+    # for peg-history coverage, not because anything can be traded on them.
+    "TGBP/USD",  # $2.9k, 0.4bp
+    "QCAD/USD",  # $1.4k
+    "BRL1/USD",  # $28k, 220 trades
+    "MXNB/USD",  # $114, 2 trades
+    "EURQ/USD",  # $153, 6 trades
+    "XSGD/USDC",  # Coinbase only
+    "AUDD/USDC",  # Coinbase only
+    "TGBP/USDC",  # Coinbase only
+]
+
+# Stablecoins quoted in fiat. This is where on-chain-vs-real-world FX drift
+# shows up: USDC/EUR against EUR/USD is the same exposure priced two ways, and
+# the emerging-market legs (TRY, BRL, AED) are where capital controls put a
+# persistent premium on dollar access.
+_PAIRS_STABLE_FX: list[str] = [
+    "USDC/EUR",  # $13.0M, 15.5k trades — busiest of the whole sleeve
+    "USDT/EUR",  # $4.4M
+    "USDC/GBP",  # $4.0M
+    "USDT/GBP",  # $1.3M
+    "USDC/CAD",  # $1.0M
+    "USDT/CAD",  # $172k
+    "USDC/AUD",  # $496k
+    "USDT/AUD",  # $574k
+    "USDC/CHF",  # $130k
+    "USDT/CHF",  # $246k
+    "USDT/JPY",  # $4.3M but only 64 trades/day at 40bp — wide, treat with care
+    # OKX-only legs. Kraken/Coinbase drop what they do not list, so these cost
+    # nothing on the other venues.
+    "USDT/TRY",  # $9.9M — the capital-controls instrument
+    "USDT/BRL",  # $3.5M
+    "USDT/AED",  # $697k
+    "USDT/SGD",  # $240k
+    "USDC/BRL",  # $59k
+    "USDC/TRY",  # $28k
+    "BRL1/BRL",  # $810k
+    "AUDF/AUD",  # listed, ~zero volume — coverage only
+]
+
+# Fiat and cross-quote basis. Same asset quoted in several currencies lets the
+# implied FX rate be recovered from crypto and compared against the venue's own
+# fiat book. JPY is excluded — BTC/JPY trades ~70x/day, ETH/JPY ~4x.
+_PAIRS_FX: list[str] = [
+    "EUR/USD",
+    "GBP/USD",
+    "AUD/USD",
+    "BTC/EUR",
+    "ETH/EUR",
+    "SOL/EUR",
+    "BTC/GBP",
+    "ETH/GBP",
+    "BTC/CHF",
+    "BTC/CAD",
+    "BTC/AUD",
+]
+
+# Crypto-quoted ratios and stablecoin-quoted majors (CEX basis).
+_PAIRS_CROSS: list[str] = [
+    "ETH/BTC",
+    "SOL/BTC",
+    "XRP/BTC",
+    "ADA/BTC",
+    "SOL/ETH",
+    "BTC/USDT",
+    "BTC/USDC",
+    "ETH/USDT",
+    "ETH/USDC",
+]
+
+GREENLIST_PAIRS: list[str] = [
+    *_PAIRS_L1,
+    *_PAIRS_INFRA,
+    *_PAIRS_ACADEMIC,
+    *_PAIRS_BRIDGE,
+    *_PAIRS_DEX,
+    *_PAIRS_RWA,
+    *_PAIRS_STABLE,
+    *_PAIRS_STABLE_FX,
+    *_PAIRS_FX,
+    *_PAIRS_CROSS,
 ]
 
 
@@ -162,16 +315,22 @@ class OrderBookState:
         return row
 
 
+# Layout is owned by collector_core so this collector and the newer ones can
+# never disagree about where a pair lives. `stream_dir` honours
+# collector_core.PARTITION_BY_CLASS, so flipping that constant (after running
+# migrate_layout.py) moves every collector at once. Delegating rather than
+# duplicating is the whole point: a private copy here is exactly how the tree
+# would end up half flat and half partitioned.
 def _pair_dirname(pair: str) -> str:
-    return pair.replace("/", "_")
+    return symbol_dirname(pair)
 
 
 def trade_file_path(base_dir: Path, pair: str, ts: datetime) -> Path:
-    return base_dir / _pair_dirname(pair) / ts.strftime("%Y-%m-%d") / f"trades-{ts:%H}.parquet"
+    return stream_dir(base_dir, pair, ts) / f"trades-{ts:%H}.parquet"
 
 
 def book_file_path(base_dir: Path, pair: str, ts: datetime) -> Path:
-    return base_dir / _pair_dirname(pair) / ts.strftime("%Y-%m-%d") / f"book-{ts:%H}.parquet"
+    return stream_dir(base_dir, pair, ts) / f"book-{ts:%H}.parquet"
 
 
 def prune_cutoff_date(now: datetime, retention_days: int = RETENTION_DAYS) -> Any:
@@ -214,10 +373,25 @@ def backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
 # --------------------------------------------------------------------------
 
 
+# REST `wsname` still carries Kraken's legacy asset codes; WS v2 renamed them
+# (probed 2026-08-07: subscribing to "XBT/USD" returns "Currency pair not
+# supported", "BTC/USD" succeeds). Verification compares WS v2 symbols, so the
+# REST side is translated — without this, every BTC/* pair verifies False and
+# is silently dropped from the greenlist.
+_WS_V2_ASSET_RENAMES = {"XBT": "BTC", "XDG": "DOGE"}
+
+
+def _ws_v2_symbol(wsname: str | None) -> str | None:
+    if not wsname or "/" not in wsname:
+        return wsname
+    base, _, quote = wsname.partition("/")
+    return f"{_WS_V2_ASSET_RENAMES.get(base, base)}/{_WS_V2_ASSET_RENAMES.get(quote, quote)}"
+
+
 def verify_pairs(pairs: Iterable[str], timeout: float = 15.0) -> dict[str, bool]:
-    """Check each pair against Kraken's public AssetPairs endpoint by
-    `wsname`. Never raises on an unknown pair (e.g. AKT may be unlisted) —
-    callers log + skip."""
+    """Check each pair against Kraken's public AssetPairs endpoint, comparing
+    WS v2 symbols (see `_ws_v2_symbol`). Never raises on an unknown pair (e.g.
+    AKT may be unlisted) — callers log + skip."""
     result = dict.fromkeys(pairs, False)
     try:
         resp = httpx.get(REST_ASSET_PAIRS_URL, timeout=timeout)
@@ -229,7 +403,7 @@ def verify_pairs(pairs: Iterable[str], timeout: float = 15.0) -> dict[str, bool]
     if body.get("error"):
         print(f"WARN: AssetPairs returned error {body['error']}; assuming all pairs unknown")
         return result
-    live_wsnames = {info.get("wsname") for info in body.get("result", {}).values()}
+    live_wsnames = {_ws_v2_symbol(info.get("wsname")) for info in body.get("result", {}).values()}
     for pair in pairs:
         result[pair] = pair in live_wsnames
     return result
@@ -318,6 +492,7 @@ async def run_collector(
     books: dict[str, OrderBookState] = {p: OrderBookState() for p in active}
     loop = asyncio.get_event_loop()
     deadline = (loop.time() + duration_s) if duration_s is not None else None
+    last_flush = loop.time()
     attempt = 0
 
     while deadline is None or loop.time() < deadline:
@@ -377,6 +552,14 @@ async def run_collector(
                             row = book.top_row(ts=now.isoformat(), depth=BOOK_DEPTH)
                             sink.add(pair, "book", row, now)
                             counts[pair]["book_updates"] += 1
+                    # Time-based flush. Without it the only drain is the
+                    # per-pair FLUSH_ROW_LIMIT, so a quiet pair holds its rows
+                    # in RAM indefinitely — losing them if the process dies and
+                    # mis-filing them into the flush hour's file when it finally
+                    # crosses the threshold. Mirrors the book collectors.
+                    if loop.time() - last_flush >= FLUSH_INTERVAL_S:
+                        sink.flush_all(now)
+                        last_flush = loop.time()
         except TimeoutError:
             if deadline is not None and loop.time() >= deadline:
                 break

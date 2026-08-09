@@ -12,9 +12,12 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
 import collect_ticks as ct
+import collector_core as cc
 
 
 class TestParseTradeRows:
@@ -125,17 +128,35 @@ class TestOrderBookState:
 
 
 class TestFilePathRotation:
-    def test_trade_file_path(self) -> None:
+    """Layout is delegated to collector_core.stream_dir (2026-08-08) so every
+    collector agrees on where a pair lives and PARTITION_BY_CLASS moves them
+    all together. These pin the hourly rotation and the file naming; the
+    directory shape itself is owned and tested in test_collector_core.py.
+    """
+
+    def test_trade_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cc, "PARTITION_BY_CLASS", True)
         base = Path("data/ticks")
         ts = datetime(2026, 7, 19, 14, 30, tzinfo=UTC)
         path = ct.trade_file_path(base, "ETH/USD", ts)
-        assert path == base / "ETH_USD" / "2026-07-19" / "trades-14.parquet"
+        assert path == base / "crypto" / "ETH_USD" / "2026-07-19" / "trades-14.parquet"
 
-    def test_book_file_path(self) -> None:
+    def test_book_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cc, "PARTITION_BY_CLASS", True)
         base = Path("data/ticks")
         ts = datetime(2026, 1, 1, 0, 5, tzinfo=UTC)
         path = ct.book_file_path(base, "SOL/USD", ts)
-        assert path == base / "SOL_USD" / "2026-01-01" / "book-00.parquet"
+        assert path == base / "crypto" / "SOL_USD" / "2026-01-01" / "book-00.parquet"
+
+    def test_paths_follow_the_partition_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The flag is the single switch for the whole archive — a collector
+        # that ignored it would silently split the tree in half.
+        base = Path("data/ticks")
+        ts = datetime(2026, 7, 19, 14, 30, tzinfo=UTC)
+        monkeypatch.setattr(cc, "PARTITION_BY_CLASS", False)
+        assert ct.book_file_path(base, "ETH/USD", ts) == (
+            base / "ETH_USD" / "2026-07-19" / "book-14.parquet"
+        )
 
     def test_pair_slash_is_sanitized_in_directory_name(self) -> None:
         base = Path("data/ticks")
