@@ -351,6 +351,15 @@ class PartitionedParquetSink:
         has no say in where a row is filed — only the row's own timestamp
         does — and a parameter that looks like it decides the path but does
         not is exactly how the misfiling bug survived review.
+
+        Each group is written to a temp name and renamed into place, and only
+        the groups that landed are dropped from the buffer. A write that dies
+        partway therefore leaves no half-file and no lost rows, and the retry
+        cannot duplicate what already succeeded. The old sinks wrote straight
+        to the target: one of them left
+        books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet with a PAR1
+        header and no footer, and its exception escaped before the buffer was
+        cleared, so the same rows were written again on the next pass.
         """
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -364,22 +373,37 @@ class PartitionedParquetSink:
             _, rows = groups.setdefault((ts.strftime("%Y-%m-%d"), ts.hour), (ts, []))
             rows.append(row)
         n = 0
-        for ts, rows in groups.values():
-            path = hour_file_path(
-                self.base_dir,
-                symbol,
-                stream,
-                ts,
-                self._next_part(symbol, stream, ts),
-                self.partition,
-            )
-            path.parent.mkdir(parents=True, exist_ok=True)
-            table = pa.Table.from_pylist(rows)
-            pq.write_table(table, path, compression="zstd", compression_level=3)
-            n += len(rows)
-        buf.rows.clear()
-        buf.first_ts = None
-        self._rows_written += n
+        landed: list[tuple[str, int]] = []
+        try:
+            for key, (ts, rows) in groups.items():
+                path = hour_file_path(
+                    self.base_dir,
+                    symbol,
+                    stream,
+                    ts,
+                    self._next_part(symbol, stream, ts),
+                    self.partition,
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".parquet.tmp")
+                try:
+                    table = pa.Table.from_pylist(rows)
+                    pq.write_table(table, tmp, compression="zstd", compression_level=3)
+                    tmp.replace(path)
+                except BaseException:
+                    tmp.unlink(missing_ok=True)
+                    raise
+                landed.append(key)
+                n += len(rows)
+        finally:
+            done = set(landed)
+            buf.rows = [
+                (ts, row)
+                for ts, row in buf.rows
+                if (ts.strftime("%Y-%m-%d"), ts.hour) not in done
+            ]
+            buf.first_ts = buf.rows[0][0] if buf.rows else None
+            self._rows_written += n
         return n
 
     def flush_all(self, ts: datetime, force: bool = False) -> int:

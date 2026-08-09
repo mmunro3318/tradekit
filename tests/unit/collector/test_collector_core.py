@@ -1120,3 +1120,80 @@ class TestPartFilesAreAppendOnly:
         assert cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", self.TS, part=1, partition=False
         ).exists()
+
+
+class TestFlushIsAtomic:
+    """A failed write must leave no file and lose no rows — and duplicate none.
+
+    This is the defect class that produced
+    books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet, a file with a
+    PAR1 header and no footer. The old sinks wrote straight to the target, so
+    a kill or an error mid-write left a corrupt file behind; the exception
+    then escaped `flush` before the buffer was cleared, and the collector's
+    broad `except Exception` misread it as a connection error and reconnected
+    — leaving the same rows buffered to be written a second time. Temp-plus-
+    rename makes the write all-or-nothing, and the buffer is only cleared for
+    groups that actually landed.
+    """
+
+    TS = datetime(2026, 8, 8, 9, 5, tzinfo=UTC)
+
+    def test_a_failed_write_leaves_no_file_and_the_rows_are_written_once_on_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import pyarrow.parquet as pq
+
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
+        sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
+
+        real = pq.write_table
+        monkeypatch.setattr(pq, "write_table", _die_partway)
+        with pytest.raises(OSError):
+            sink.flush("BTC/USD", "trades")
+
+        day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
+        assert list(day_dir.glob("*")) == []  # no corpse, not even a .tmp
+        assert sink.buffered_rows() == 2  # nothing lost
+
+        monkeypatch.setattr(pq, "write_table", real)
+        assert sink.flush("BTC/USD", "trades") == 2
+        written = [r["ts"] for f in day_dir.glob("*.parquet") for r in pq.read_table(f).to_pylist()]
+        assert sorted(written) == ["t1", "t2"]  # written once, not twice
+
+    def test_a_group_that_landed_is_not_rewritten_when_a_later_group_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # One flush spans two hours. If the second write fails, the first
+        # hour's rows are on disk and must not be replayed on the retry.
+        import pyarrow.parquet as pq
+
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        sink.add("BTC/USD", "trades", {"ts": "h9", "price": 1.0}, self.TS)
+        sink.add("BTC/USD", "trades", {"ts": "h10", "price": 2.0}, self.TS.replace(hour=10))
+
+        real = pq.write_table
+        calls = {"n": 0}
+
+        def fail_on_second(*args: object, **kwargs: object) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("disk full")
+            real(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(pq, "write_table", fail_on_second)
+        with pytest.raises(OSError):
+            sink.flush("BTC/USD", "trades")
+
+        assert sink.buffered_rows() == 1  # only the failed hour is still held
+        monkeypatch.setattr(pq, "write_table", real)
+        sink.flush("BTC/USD", "trades")
+
+        rows = [r["ts"] for f in tmp_path.rglob("*.parquet") for r in pq.read_table(f).to_pylist()]
+        assert sorted(rows) == ["h10", "h9"]
+
+
+def _die_partway(table: object, where: object, *args: object, **kwargs: object) -> None:
+    """Write a header and then die — what a kill mid-write actually leaves."""
+    Path(str(where)).write_bytes(b"PAR1truncated")
+    raise OSError("disk full")
