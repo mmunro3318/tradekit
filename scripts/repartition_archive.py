@@ -192,6 +192,12 @@ def _repartition_unit(
         if f not in targets.values():
             f.unlink(missing_ok=True)
             report.files_removed += 1
+    # A day directory we emptied must go with its files. The husk is not
+    # cosmetic: collect_equities_alpaca resumes from the newest day directory,
+    # and an empty one read as "nothing stored", sending the poller back to
+    # its lookback floor to re-store five days of tape on every pass.
+    if not any(day_dir.iterdir()):
+        day_dir.rmdir()
 
 
 def _hour(path: Path) -> int | None:

@@ -163,41 +163,44 @@ def last_stored_cursor(
     boundary instant again and the rows we already have are dropped on
     arrival — no gap, no duplicate.
 
-    Only the newest hour of the newest day is read. That is exact rather than
-    a heuristic because the sink files every row under its own event time, so
-    the newest hour directory is necessarily where the newest row lives.
+    Only the newest hour of the newest day HOLDING DATA is read. Walking days
+    newest-first and stopping at the first one with rows is not defensive
+    padding: an empty day directory is a real state — repartition_archive
+    moves every row out of a misfiled day and can leave the husk behind — and
+    treating it as "no cursor" sent the poller back to the lookback floor,
+    re-storing five days of tape on every pass.
     """
     import pyarrow.parquet as pq
 
     want = symbol_dirname(symbol)
     days = [d for d in iter_symbol_dirs(base_dir) if d.parent.name == want]
-    if not days:
-        return None
-    day = max(days, key=lambda d: d.name)
-    hours = {f.name: h for f in day.iterdir() if (h := _hour_of(f.name, stream)) is not None}
-    if not hours:
-        return None
-    newest_hour = max(hours.values())
+    for day in sorted(days, key=lambda d: d.name, reverse=True):
+        hours = {f.name: h for f in day.iterdir() if (h := _hour_of(f.name, stream)) is not None}
+        if not hours:
+            continue
+        newest_hour = max(hours.values())
 
-    newest: datetime | None = None
-    held: set[str] = set()
-    for name, hour in hours.items():
-        if hour != newest_hour:
-            continue
-        try:
-            table = pq.read_table(day / name, columns=["ts", *_IDENTITY_COLUMNS[stream]])
-        except Exception:
-            continue
-        for row in table.to_pylist():
-            raw = row.get("ts")
-            if not raw:
+        newest: datetime | None = None
+        held: set[str] = set()
+        for name, hour in hours.items():
+            if hour != newest_hour:
                 continue
-            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            if newest is None or ts > newest:
-                newest, held = ts, set()
-            if ts == newest:
-                held.add(row_identity(stream, row))
-    return None if newest is None else (newest, held)
+            try:
+                table = pq.read_table(day / name, columns=["ts", *_IDENTITY_COLUMNS[stream]])
+            except Exception:
+                continue
+            for row in table.to_pylist():
+                raw = row.get("ts")
+                if not raw:
+                    continue
+                ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if newest is None or ts > newest:
+                    newest, held = ts, set()
+                if ts == newest:
+                    held.add(row_identity(stream, row))
+        if newest is not None:
+            return newest, held
+    return None
 
 
 def fetch_pages(

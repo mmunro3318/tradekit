@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-09 — repartition left empty day dirs and that destroyed the Alpaca cursor `collector,alpaca,cursor,repair-tooling`
+- **Symptom:** After repairing equities/alpaca, the poller went from 'rows=0' (correct, market closed) to writing 3.7 MILLION rows per 5-minute pass across 7 symbols, re-storing the same five days of tape over and over.
+- **Cause:** Two of my own changes combined. repartition_archive moved every row out of RIOT/2026-08-08 into its true day and deleted the files, but left the empty directory. last_stored_cursor took the single newest day directory, found no files in it, and returned None — which the caller reads as 'nothing stored', so start fell back to the 5-day lookback floor. GLD was unaffected because it happened to keep one file in that day, which is why only 7 of 10 symbols showed the symptom and why the log line looked plausible at a glance.
+- **Solution:** Both ends. last_stored_cursor now walks day directories newest-first and stops at the first one that actually yields a timestamp, because an empty day is a real state rather than an impossible one. repartition_archive removes a day directory it has emptied. Caught only because the final health sweep read the collector's own log instead of trusting the earlier green verification — a fix verified at 15:12 was already broken at 14:55.
+
 ## 2026-08-09 — three collectors each passed arrival time to the sink `collector,partitioning,api-design,time`
 - **Symptom:** After fixing the sink to partition on the row's timestamp, measured wrong-hour was still 0.1083% (hour 13). Fixing run_ws_collector took it to 0.0009% (hour 14). Six rows still wrong. Each round of measurement exposed another caller.
 - **Cause:** The sink's add(symbol, stream, row, ts) looked like it wanted 'the row's timestamp' but every caller had 'now' in hand and passed it. run_ws_collector passed arrival; collect_perps_hyperliquid is a custom orchestrator that never touches run_ws_collector and passed arrival at its own call site. On chatty feeds arrival and event time differ by milliseconds and only leak at the hour boundary, so the defect is invisible without measuring the whole archive. On Coinbase market_trades, which replays history, they differ by DAYS.

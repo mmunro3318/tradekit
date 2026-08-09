@@ -251,3 +251,55 @@ class TestOnDiskLayout:
             f"trades-{first:%H}.part-0000.parquet",
             f"trades-{second:%H}.part-0000.parquet",
         ]
+
+
+class TestCursorSurvivesAnEmptyDayDirectory:
+    """An empty newest-day directory must not destroy the cursor.
+
+    Regression, 2026-08-09, and self-inflicted: repartition_archive moved
+    every row out of `RIOT/2026-08-08` into its true day and deleted the
+    files, but left the directory. The cursor looked only at the single
+    newest day, found nothing, returned None, and fell back to the 5-day
+    lookback floor — so the poller re-fetched and re-stored five days of tape
+    every five minutes (3.7 MILLION rows a pass across seven symbols) until it
+    was killed. The cursor must fall back to the newest day that actually
+    holds data.
+    """
+
+    def test_an_empty_newest_day_falls_back_to_the_newest_day_with_data(
+        self, tmp_path: Path
+    ) -> None:
+        when = datetime.now(UTC) - timedelta(hours=30)
+        stored = _ts(when, 111_222_333)
+        _seed_stored_trade(tmp_path, "RIOT", when, stored, "A1")
+        (tmp_path / "RIOT" / f"{when + timedelta(days=1):%Y-%m-%d}").mkdir(parents=True)
+
+        cursor = alpaca.last_stored_cursor(tmp_path, "RIOT", "trades")
+
+        assert cursor is not None, "an empty day directory wiped out the cursor"
+        assert cursor[0] == datetime.fromisoformat(stored[:26] + "+00:00")
+        assert cursor[1] == {"A1"}
+
+    def test_a_symbol_with_no_data_at_all_still_reports_no_cursor(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "RIOT" / "2026-08-08").mkdir(parents=True)
+
+        assert alpaca.last_stored_cursor(tmp_path, "RIOT", "trades") is None
+
+    def test_the_poller_does_not_refetch_the_floor_when_the_newest_day_is_empty(
+        self, tmp_path: Path, wired: Any
+    ) -> None:
+        # The end-to-end shape of the regression: with a live cursor the
+        # request must start at the stored instant, not five days back.
+        when = datetime.now(UTC) - timedelta(hours=30)
+        stored = _ts(when, 5_000_000)
+        _seed_stored_trade(tmp_path, "RIOT", when, stored, "A1")
+        (tmp_path / "RIOT" / f"{when + timedelta(days=1):%Y-%m-%d}").mkdir(parents=True)
+        wire = wired({("RIOT", "trades"): [_trade(stored, "A1")]})
+
+        alpaca.run_once(["RIOT"], tmp_path, max_lookback_days=5.0)
+
+        sent = datetime.fromisoformat(wire.calls[0]["start"].replace("Z", "+00:00"))
+        assert sent == datetime.fromisoformat(stored[:26] + "+00:00")
+        assert _read_all(tmp_path) and len(_read_all(tmp_path)) == 1

@@ -251,3 +251,30 @@ class TestSafety:
         assert src.read_bytes() == before_bytes
         assert not (tmp_path / "BTC_USD" / "2026-08-09").exists()
         assert report.rows_moved == 0
+
+
+class TestEmptiedDirectories:
+    def test_a_day_directory_emptied_of_every_row_is_removed(self, tmp_path: Path) -> None:
+        # Leaving the husk behind is not cosmetic: collect_equities_alpaca
+        # resumes from the newest day directory, and an empty one made it
+        # fall back to the lookback floor and re-store five days of tape on
+        # every poll.
+        write_file(
+            tmp_path / "RIOT" / "2026-08-08" / "trades-04.parquet",
+            [row("2026-08-07T23:59:51Z")],
+        )
+
+        ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+
+        assert (tmp_path / "RIOT" / "2026-08-07").is_dir()
+        assert not (tmp_path / "RIOT" / "2026-08-08").exists()
+
+    def test_a_directory_still_holding_anything_is_kept(self, tmp_path: Path) -> None:
+        day = tmp_path / "RIOT" / "2026-08-08"
+        write_file(day / "trades-04.parquet", [row("2026-08-07T23:59:51Z")])
+        (day / "notes.txt").write_text("keep me", encoding="utf-8")
+
+        ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+
+        assert day.is_dir()
+        assert (day / "notes.txt").read_text(encoding="utf-8") == "keep me"
