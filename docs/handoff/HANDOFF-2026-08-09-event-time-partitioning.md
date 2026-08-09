@@ -140,26 +140,34 @@ the callers. `add` now treats `ts` as the ARRIVAL time — a fallback — and
 Collectors restarted onto the final build at **14:25 UTC** (all 8, by the
 scheduled task, `LastTaskResult: 0`).
 
-**Hour 15 UTC, the first full hour on the final build — PASS:**
+**Hour 15 UTC — a COMPLETE, CLOSED hour entirely on the final build — PASS:**
 
 | stream | symbols | rows | wrong-hour |
 |---|---|---|---|
-| ticks | 73 | 365,078 | 0 |
-| books/coinbase | 48 | 19,417 | 0 |
-| books/okx | 51 | 13,023 | 0 |
-| trades/coinbase | 34 | 7,582 | 0 |
-| trades/okx | 20 | 6,165 | 0 |
-| perps/hyperliquid | 232 | 31,203 | 0 |
-| liquidations/okx | 6 | 11 | 0 |
+| ticks | 75 | 1,528,043 | 0 |
+| books/coinbase | 51 | 103,876 | 0 |
+| books/okx | 51 | 71,391 | 0 |
+| trades/coinbase | 46 | 37,607 | 0 |
+| trades/okx | 33 | 19,743 | 0 |
+| perps/hyperliquid | 232 | 192,982 | 0 |
+| liquidations/okx | 60 | 287 | 0 |
 | equities/alpaca | 0 | 0 | 0 (market closed — correct) |
-| **TOTAL** | | **442,479** | **0 (0.0000%)** |
+| **TOTAL** | | **1,953,929** | **0 (0.0000%)** |
 
-Corroborating checks, same run:
-- **855,546 rows** stamped after the restart, across all 8 streams: 0 misfiled.
-- **56,053 rows stamped `14:59:xx`**: every one in an hour-14 file. The hour
+Corroborating checks:
+- **32,308 rows stamped `15:59:xx`**: every one in an hour-15 file. The hour
   boundary is where this bug always hid, so this is the check that matters.
-- 0 duplicate rows post-restart on every stream carrying an id.
-- Every stream written within ~1 minute at the time of the sweep.
+- **855,546 rows** stamped after the restart: 0 misfiled.
+- 0 duplicate rows on every stream carrying a unique id (trades/coinbase,
+  trades/okx, perps trades) and on books/coinbase, books/okx, perps ctx.
+  Kraken's shared timestamps are finding 5b(b), not duplicates in these.
+- `LastTaskResult: 0`, 0 missed runs, 8/8 collectors up, compaction current
+  (hour 15 merged in 187s), archive 7.59 GB with 457 GB free.
+
+**Verify like this, not by reading the code.** A green partition audit at
+15:12 sat alongside a cursor that had been re-storing five days of Alpaca tape
+every five minutes since 14:55 (§5c). Partition correctness and cursor
+correctness are different properties.
 
 - **Alpaca, live proof:** every pre-fix poll logged `rows=15` — the same 15
   phantom prints. Every post-fix poll logs `rows=0`, which is correct on a
@@ -189,6 +197,41 @@ something `_HOUR_FILE_RE` does not match (e.g. `book-05.parquet.corrupt`) —
 **preserve the bytes, do not delete** — then re-run the tool on
 `books/coinbase`.
 
+## 5c. The regression this session caused, and how it was caught
+
+Repairing the archive broke the Alpaca cursor, and the partition audit stayed
+green throughout.
+
+`repartition_archive` moved every row out of `RIOT/2026-08-08` into its true
+day and deleted the files, but left the empty directory. `last_stored_cursor`
+read only the single newest day directory, found nothing, and returned None —
+which the caller reads as "nothing stored", so `start` fell back to the 5-day
+lookback floor:
+
+```
+14:55:13 rows=3710400 COIN=456898 MSTR=874838 HOOD=707493 ...
+15:04:41 rows=3682342 ...
+15:13:14 rows=3661542 ...
+```
+
+Counts drift DOWN because the 5-day floor slides forward — the signature of a
+cursor that never advances. 82,087,002 rows were written, of which
+76,939,365 were duplicates; collapsing them returned the tree to exactly
+5,147,637 rows, the same distinct-observation count as before. Nothing lost.
+
+GLD happened to keep one file in that day, so 3 of 10 symbols behaved and the
+log line read plausibly at a glance.
+
+Fixed at both ends: the cursor walks days newest-first and stops at the first
+that yields a timestamp (an empty day is a real state, not an impossible one),
+and the repair tool removes a day directory it has emptied.
+
+**Two lessons worth more than the fix.** A repair tool that leaves a husk can
+break a consumer that reads directory structure as state. And a green
+verification of one property says nothing about another — this was found by
+reading the collector's own log, not by re-running the audit that had just
+passed.
+
 ## 5b. Two OPEN findings, both pre-existing, neither fixed
 
 Found while verifying. Characterised, not solved — do not assume either is
@@ -207,21 +250,36 @@ those rows land in their true day/hour, where they are exact duplicates that
 step: instrument the running collector to log event types and frame counts,
 rather than probing a separate connection.
 
-**(b) Kraken book rows are not throttled, and share timestamps.**
+**(b) Kraken book is unthrottled — ~23% of its rows are byte-identical.**
 `collect_ticks.py` contains no `RowThrottle` at all. Every other venue goes
 through `run_ws_collector`, which coalesces `book` to 1 Hz
 (`BOOK_ROW_INTERVAL_S`). So the archive's LARGEST stream has a different
-temporal resolution from every other book stream — which directly undercuts
-the stated differentiator, "L2 depth with aligned cross-venue timestamps".
-Measured on BTC_USD hour 15: 1,555 rows in ~12 minutes (~2.2/s, against 1/s
-elsewhere), and only 1,101 distinct timestamps, because `now` is computed once
-per MESSAGE (`collect_ticks.py:478`) and one frame can yield several rows.
-Rows sharing a microsecond are indistinguishable.
+temporal resolution from every other book stream, which directly undercuts
+the stated differentiator: "L2 depth with aligned cross-venue timestamps".
 
-This is a product decision, not a bug fix: full resolution costs disk and
-breaks cross-venue alignment; 1 Hz matches the rest of the archive and would
-cut the biggest stream substantially. **Mike's call** — deliberately not
-changed.
+Measured on BTC_USD, complete hour 15 UTC 2026-08-09 — 40,334 book rows,
+against a 1 Hz ceiling of 3,600:
+
+| | rows |
+|---|---|
+| total | 40,334 |
+| distinct timestamps | 30,820 |
+| **byte-identical duplicate rows** | **9,186 (23%)** |
+| distinct book states sharing a timestamp | 6,508 |
+
+Two separate problems in that table. The 9,186 identical rows are pure waste:
+the same top-10 written again because nothing coalesces them. The 6,508 are
+worse in kind — genuinely different book states that are indistinguishable by
+`(symbol, ts)`, because `now` is computed once per MESSAGE
+(`collect_ticks.py:478`) and one frame can yield several rows.
+
+Kraken trades are fine by comparison (1,474 rows, 7 identical): several fills
+of one order sweeping levels legitimately share a venue timestamp.
+
+Adding the 1 Hz throttle would cut the biggest stream by roughly an order of
+magnitude and make it comparable with its peers. But that is a resolution
+decision with a real cost — full depth-update resolution is genuinely more
+information — so it is **Mike's call and deliberately not changed here.**
 
 ## 6. Two corrections to the previous seed
 

@@ -85,7 +85,27 @@
   runs unthrottled at ~2.2 rows/s against 1/s everywhere else, and `now` is
   computed per message so rows share timestamps. That one is Mike's call, not
   a unilateral fix.
-- Gate green at every step; eight commits, red committed separately.
+- REGRESSION I CAUSED, AND THE AUDIT DID NOT CATCH IT. repartition_archive
+  emptied RIOT/2026-08-08 and left the directory; last_stored_cursor read only
+  the newest day dir, found nothing, returned None, and the poller fell back
+  to its 5-day floor — re-storing five days of tape every five minutes
+  (rows=3710400 per pass). 82,087,002 rows written, 76,939,365 of them
+  duplicates; collapsing returned the tree to exactly 5,147,637 rows, the
+  same distinct count as before. Nothing lost. Fixed at both ends (cursor
+  walks days newest-first; the tool removes a directory it empties). Found by
+  reading the collector's own LOG — the partition audit was green at 15:12
+  while this had been running since 14:55. One green property implies nothing
+  about another.
+- FINAL VERIFICATION, complete closed hour 15 UTC entirely on the final build:
+  1,953,929 rows across all 8 streams, 0 misfiled (0.0000%). 32,308 rows
+  stamped 15:59:xx, every one in an hour-15 file. 0 duplicates on every stream
+  carrying a unique id. Watchdog LastTaskResult 0, 8/8 up, compaction current,
+  archive 7.59 GB / 457 GB free. Alpaca rows=0 per poll (market closed).
+- MEASURED finding (b): Kraken book, BTC_USD hour 15 = 40,334 rows against a
+  1 Hz ceiling of 3,600. 9,186 are BYTE-IDENTICAL duplicates (23%) and 6,508
+  are distinct book states sharing a timestamp. Adding the throttle other
+  venues already have would cut the biggest stream ~10x. Mike's call.
+- Gate green at every step; ten commits, red committed separately.
 
 ## 2026-08-09a (Opus — data-vacuum cutover complete: 8 live streams, watchdog was silently dead)
 
