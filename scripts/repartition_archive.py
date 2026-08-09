@@ -31,9 +31,12 @@ SAFETY. This deletes source files, so it is deliberately timid:
   - An hour that is already correct is not rewritten at all, not even
     byte-identically.
 
-Byte-identical duplicate rows are collapsed: the same observation stored
-twice is not two facts, and the broken Alpaca cursor produced 2,625 of them.
-The dry run reports the count before anything is removed.
+Byte-identical duplicate rows are collapsed only with `--dedupe`, which is
+OFF by default. The Alpaca cursor genuinely stored the same print twice and
+needs it. But Kraken's unthrottled book re-writes an unchanged top-10
+constantly (~23% of its rows), and whether that is redundancy or resolution
+is a deliberate decision — a partition repair must not quietly make it. The
+dry run reports the count before anything is removed.
 """
 
 from __future__ import annotations
@@ -75,15 +78,24 @@ class Report:
         )
 
 
-def target_of(row: dict[str, Any]) -> tuple[str, int] | None:
-    """The (YYYY-MM-DD, hour) a row belongs to, or None if its ts is unusable."""
-    raw = str(row.get("ts") or "")
-    if len(raw) < 13 or raw[4] != "-" or raw[10] not in "T ":
-        return None
-    day, hour = raw[:10], raw[11:13]
-    if not _DAY_RE.match(day) or not hour.isdigit():
-        return None
-    return day, int(hour)
+def _placement(key: str | None, here: tuple[str, int], cutoff: date) -> tuple[str, int]:
+    """Where rows carrying this `YYYY-MM-DDTHH` key belong.
+
+    Falls back to `here` — leave the rows exactly where they are — when the
+    timestamp is unreadable (we do not know where they go, and guessing is
+    worse than leaving them) or when it names a day a live collector still
+    owns.
+    """
+    if not key or len(key) < 13 or key[10] not in "T " or not _DAY_RE.match(key[:10]):
+        return here
+    if not key[11:13].isdigit():
+        return here
+    try:
+        if date.fromisoformat(key[:10]) >= cutoff:
+            return here
+    except ValueError:
+        return here
+    return key[:10], int(key[11:13])
 
 
 def _dedupe(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
@@ -107,11 +119,29 @@ def _hour_files(day_dir: Path, stream: str) -> list[Path]:
     return out
 
 
+def _hour_keys(table: Any) -> Any:
+    """The `YYYY-MM-DDTHH` prefix of each row's `ts`, as an Arrow array.
+
+    Everything downstream works off this instead of materialising rows. A
+    41-column L10 book table inflates ~145x through `to_pylist()` — one 58 MB
+    day of ETH/USD reached 8.5 GB resident and never finished — whereas
+    slicing with an Arrow mask stays proportional to the data.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    ts = table.column("ts")
+    if pa.types.is_timestamp(ts.type):
+        return pc.strftime(ts, format="%Y-%m-%dT%H")
+    return pc.utf8_slice_codeunits(ts.cast(pa.string()), 0, 13)
+
+
 def _repartition_unit(
-    day_dir: Path, stream: str, cutoff: date, dry_run: bool, report: Report
+    day_dir: Path, stream: str, cutoff: date, dry_run: bool, dedupe: bool, report: Report
 ) -> None:
     """Re-file one (symbol, day, stream). Reads everything before writing anything."""
     import pyarrow as pa
+    import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
     sources = _hour_files(day_dir, stream)
@@ -126,36 +156,38 @@ def _repartition_unit(
             return
     report.files_read += len(tables)
 
-    buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    buckets: dict[tuple[str, int], list[Any]] = {}
     moved = 0
     for f, table in tables.items():
         m = _HOUR_FILE_RE.match(f.name)
         assert m is not None  # _hour_files only returns matches
         here = (day_dir.name, int(m.group("hour")))
-        for row in table.to_pylist():
-            report.rows_read += 1
-            want = target_of(row)
-            if want is None or date.fromisoformat(want[0]) >= cutoff:
-                want = here  # unplaceable, or owned by a live collector
-            elif want != here:
-                moved += 1
-            buckets.setdefault(want, []).append(row)
+        report.rows_read += table.num_rows
+        keys = _hour_keys(table)
+        for raw in pc.unique(keys).to_pylist():
+            want = _placement(raw, here, cutoff)
+            sub = table.filter(
+                pc.is_null(keys) if raw is None else pc.equal(keys, raw)
+            )
+            if not sub.num_rows:
+                continue
+            if want != here:
+                moved += sub.num_rows
+            buckets.setdefault(want, []).append(sub)
 
-    # An hour already in compacted form, holding only its own rows and no
-    # duplicates, is left completely alone — rewriting the archive to change
-    # nothing is how a repair tool becomes the thing that breaks it.
-    deduped = {k: _dedupe(v) for k, v in buckets.items()}
-    dupes = sum(n for _, n in deduped.values())
+    # An hour already in compacted form and holding only its own rows is left
+    # completely alone — rewriting the archive to change nothing is how a
+    # repair tool becomes the thing that breaks it.
     tidy = all(
         f.name == f"{stream}-{h:02d}.parquet" for f in sources if (h := _hour(f)) is not None
     )
-    if moved == 0 and dupes == 0 and tidy:
+    if moved == 0 and tidy and not dedupe:
         return
 
     # Pull in any target that already exists outside this unit (the cross-day
     # case) before writing, so a read failure aborts before any destruction.
     targets: dict[tuple[str, int], Path] = {
-        key: day_dir.parent / key[0] / f"{stream}-{key[1]:02d}.parquet" for key in deduped
+        key: day_dir.parent / key[0] / f"{stream}-{key[1]:02d}.parquet" for key in buckets
     }
     for key, path in targets.items():
         if path in tables or not path.exists():
@@ -166,29 +198,29 @@ def _repartition_unit(
             report.skipped.append(f"{path}: {exc!r}")
             return
         tables[path] = existing
-        rows, extra = _dedupe(existing.to_pylist() + deduped[key][0])
-        deduped[key] = (rows, deduped[key][1] + extra)
+        buckets[key].append(existing)
 
-    try:
-        schema = pa.unify_schemas([t.schema for t in tables.values()])
-    except Exception:
-        schema = None  # let pyarrow infer rather than refuse to repair
+    merged: dict[tuple[str, int], Any] = {}
+    for key, parts in buckets.items():
+        table = pa.concat_tables(parts, promote_options="default")
+        if dedupe:
+            rows, dropped = _dedupe(table.to_pylist())
+            if dropped:
+                table = pa.Table.from_pylist(rows, schema=table.schema)
+                report.rows_deduped += dropped
+        merged[key] = table
 
+    if moved == 0 and tidy and not report.rows_deduped:
+        return
     report.rows_moved += moved
-    report.rows_deduped += sum(n for _, n in deduped.values())
     if dry_run:
         return
 
-    for key, (rows, _) in deduped.items():
+    for key, table in merged.items():
         path = targets[key]
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".parquet.tmp")
-        pq.write_table(
-            pa.Table.from_pylist(rows, schema=schema),
-            tmp,
-            compression="zstd",
-            compression_level=3,
-        )
+        pq.write_table(table, tmp, compression="zstd", compression_level=3)
         tmp.replace(path)
         report.files_written += 1
     for f in sources:
@@ -243,13 +275,15 @@ def tree_lock(root: Path) -> Iterator[None]:
         lock.unlink(missing_ok=True)
 
 
-def repartition_tree(root: Path, dry_run: bool = True, before: date | None = None) -> Report:
+def repartition_tree(
+    root: Path, dry_run: bool = True, before: date | None = None, dedupe: bool = False
+) -> Report:
     """Repair every closed day under `root`. See the module docstring."""
     with tree_lock(root):
-        return _repartition_tree(root, dry_run, before)
+        return _repartition_tree(root, dry_run, before, dedupe)
 
 
-def _repartition_tree(root: Path, dry_run: bool, before: date | None) -> Report:
+def _repartition_tree(root: Path, dry_run: bool, before: date | None, dedupe: bool) -> Report:
     cutoff = before or datetime.now(UTC).date()
     report = Report()
     for day_dir in sorted(p for p in root.rglob("*") if p.is_dir() and _DAY_RE.match(p.name)):
@@ -259,7 +293,7 @@ def _repartition_tree(root: Path, dry_run: bool, before: date | None) -> Report:
             m.group("stream") for f in day_dir.iterdir() if (m := _HOUR_FILE_RE.match(f.name))
         }
         for stream in sorted(streams):
-            _repartition_unit(day_dir, stream, cutoff, dry_run, report)
+            _repartition_unit(day_dir, stream, cutoff, dry_run, dedupe, report)
     return report
 
 
@@ -273,6 +307,15 @@ def main() -> int:
         help="inspect only (default); pass --no-dry-run to write",
     )
     parser.add_argument(
+        "--dedupe",
+        action="store_true",
+        help="also drop byte-identical rows. OFF by default: on a stream that is "
+        "not de-duplicated at the source those rows may be a resolution choice "
+        "rather than an error, and a partition repair should not quietly make "
+        "that call. Needed for the Alpaca tree, whose cursor really did store "
+        "the same print twice.",
+    )
+    parser.add_argument(
         "--before",
         default=None,
         help="YYYY-MM-DD; days at or after this are left to the live collectors "
@@ -281,7 +324,9 @@ def main() -> int:
     args = parser.parse_args()
 
     before = date.fromisoformat(args.before) if args.before else None
-    report = repartition_tree(Path(args.root), dry_run=args.dry_run, before=before)
+    report = repartition_tree(
+        Path(args.root), dry_run=args.dry_run, before=before, dedupe=args.dedupe
+    )
     print(("DRY RUN " if args.dry_run else "") + str(report))
     for s in report.skipped:
         print(f"  SKIPPED {s}")

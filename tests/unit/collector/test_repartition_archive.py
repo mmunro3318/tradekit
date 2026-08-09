@@ -100,24 +100,38 @@ class TestRepartition:
         assert src.read_bytes() == before_bytes
         assert not (tmp_path / "BTC_USD" / "2026-08-08" / "trades-10.parquet").exists()
 
-    def test_exact_duplicate_rows_are_collapsed(self, tmp_path: Path) -> None:
+    def test_exact_duplicate_rows_are_collapsed_when_asked(self, tmp_path: Path) -> None:
         # The Alpaca shape: the same print re-stored on every poll, scattered
         # across the partitions it was misfiled into.
         dup = row("2026-08-07T23:59:51Z")
         write_file(tmp_path / "RIOT" / "2026-08-07" / "trades-23.parquet", [dup])
         write_file(tmp_path / "RIOT" / "2026-08-08" / "trades-04.parquet", [dup, dup])
 
-        report = ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+        report = ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE, dedupe=True)
 
         assert all_rows(tmp_path) == [dup]
         assert report.rows_deduped == 2
+
+    def test_duplicates_are_KEPT_by_default(self, tmp_path: Path) -> None:
+        # Deleting rows is a bigger decision than moving them. On a stream that
+        # is not de-duplicated at the source — Kraken's unthrottled book
+        # re-writes an unchanged top-10, ~23% of its rows — identical rows may
+        # be a resolution choice rather than an error, and a PARTITION repair
+        # must not quietly make that call.
+        dup = row("2026-08-07T23:59:51Z")
+        write_file(tmp_path / "RIOT" / "2026-08-08" / "trades-04.parquet", [dup, dup])
+
+        report = ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+
+        assert all_rows(tmp_path) == [dup, dup]
+        assert report.rows_deduped == 0
 
     def test_a_distinct_row_at_the_same_timestamp_is_not_collapsed(self, tmp_path: Path) -> None:
         # Two prints can share an instant. Only byte-identical rows are dupes.
         a, b = row("2026-08-08T10:00:00Z", 1.0), row("2026-08-08T10:00:00Z", 2.0)
         write_file(tmp_path / "BTC_USD" / "2026-08-08" / "trades-12.parquet", [a, b])
 
-        ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+        ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE, dedupe=True)
 
         assert sorted(r["price"] for r in all_rows(tmp_path)) == [1.0, 2.0]
 
