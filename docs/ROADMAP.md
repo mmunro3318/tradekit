@@ -294,8 +294,13 @@ See ASSUMPTIONS 161 (supersedes 33) and
       different temporal resolution from its peers, which undercuts the
       cross-venue-alignment premise. Also `now` is computed per MESSAGE, so rows
       can share a timestamp (collect_ticks.py:478).
-- [ ] Finish `repartition_archive` on D:/tradekit-data/ticks (5.49 GB, the long
-      one; idempotent, just re-run). All other trees are done.
+- [x] repartition_archive applied to every tree; all CLOSED days audit 0.00% wrong-hour
+- [ ] Re-run repartition_archive on every tree after 00:00 UTC to sweep 2026-08-09,
+      whose hours 00-14 were written pre-fix. The tool never touches the live day,
+      so this is the normal way that partition finishes.
+- [ ] Decide Kraken book dedup: `--dedupe` is now OFF by default, so the tool no
+      longer silently drops ~23% of that stream. Days repaired before that change
+      DID have it applied, so book density is not uniform until this is settled.
 - [ ] Alpaca NBBO for IBIT + GLD only (~25 MB/day)
 - [ ] Retention vs. disk — re-measure burn now the archive is deduplicated and compacted
 - [ ] GitHub remote + push (Mike's hands)

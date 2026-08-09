@@ -197,6 +197,43 @@ something `_HOUR_FILE_RE` does not match (e.g. `book-05.parquet.corrupt`) —
 **preserve the bytes, do not delete** — then re-run the tool on
 `books/coinbase`.
 
+## 4b. The whole archive, after repair
+
+Audited every tree, every day, 2026-08-09 ~18:15 UTC.
+
+**Every CLOSED day, in every tree, is 0.00% wrong-hour:**
+
+| tree | rows on 2026-08-08 | wrong-hour |
+|---|---|---|
+| ticks (book) | 23,213,832 | 0 |
+| ticks (trades) | 155,780 | 0 |
+| books/coinbase | 1,889,470 | 0 |
+| books/okx | 207,137 | 0 |
+| trades/coinbase | 90,145 | 0 |
+| trades/okx | 35,323 | 0 |
+| perps/hyperliquid (ctx) | 399,050 | 0 |
+| perps/hyperliquid (trades) | 105,778 | 0 |
+| liquidations/okx | 299 | 0 |
+| equities/alpaca (all days) | 5,147,637 | 0 |
+
+The ticks repair moved 2,678,592 rows over 308,854,446 read, 0 skipped, and a
+second pass reads the identical 308,854,446 and moves nothing — idempotent,
+nothing lost.
+
+**What is still misfiled, and why that is correct.** An archive-wide audit
+shows small non-zero rates (ticks 0.04%, books/okx 6.07%, trades/coinbase
+6.26%). Every one of those rows is in **today's partition**, written by the
+old code during hours 00–14 before the fixes went live. `repartition_archive`
+never touches the day a live collector owns, by design. **Run it once after
+00:00 UTC and 2026-08-09 clears too** — the younger trees show the highest
+percentages simply because most of their data IS today (books/okx and perps
+only started 2026-08-08).
+
+Not corruption: an audit pass reported `FileNotFoundError` on a perps
+`ctx-17.part-0006.parquet`. That is the audit listing a directory a moment
+before `compact_archive.py` merged and unlinked that part. Harmless race
+between two readers of a live tree.
+
 ## 5c. The regression this session caused, and how it was caught
 
 Repairing the archive broke the Alpaca cursor, and the partition audit stayed
