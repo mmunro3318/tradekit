@@ -241,3 +241,31 @@ class TestResolveDataDir:
         assert ct.resolve_data_dir(
             external_root=tmp_path / "no-such-drive", local_dir=Path("data/ticks")
         ) == Path("data/ticks")
+
+
+class TestTickSinkFilesByEventTime:
+    """The tick collector must persist through the shared event-time sink.
+
+    It carried a private ParquetSink until 2026-08-09 with both defects the
+    shared one has since been fixed for: the hourly file was named from FLUSH
+    time, and writes were read-modify-write. Measured on 2026-08-08 alone,
+    1.87% of 24,236,349 Kraken book rows sat in the wrong hour and 38,148 of
+    them in the wrong day.
+    """
+
+    HOUR_9 = datetime(2026, 8, 8, 9, 59, 30, tzinfo=UTC)
+    HOUR_10 = datetime(2026, 8, 8, 10, 0, 30, tzinfo=UTC)
+
+    def test_rows_reach_the_hourly_file_their_own_timestamp_names(self, tmp_path: Path) -> None:
+        # Buffered at 09:59:30, flushed at 10:00:30 — the straggler case that
+        # made thin-pair hour attribution unrecoverable.
+        sink = ct.PartitionedParquetSink(tmp_path)
+        sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0, "qty": 2.0}, self.HOUR_9)
+        sink.add("BTC/USD", "book", {"ts": "t1", "bid_px": 1.0}, self.HOUR_9)
+        sink.flush_all(self.HOUR_10, force=True)
+
+        for stream, path_of in (("trades", ct.trade_file_path), ("book", ct.book_file_path)):
+            wanted = path_of(tmp_path, "BTC/USD", self.HOUR_9)
+            cc.compact_hour(wanted.parent, stream, self.HOUR_9.hour)
+            assert wanted.exists(), f"{stream} row did not reach hour 09"
+            assert not path_of(tmp_path, "BTC/USD", self.HOUR_10).exists()

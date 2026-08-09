@@ -238,3 +238,29 @@ class TestRowThrottle:
         assert t.allow("SOL/USD", 100.1) is True
         assert t.allow("ETH/USD", 100.5) is False
         assert t.allow("SOL/USD", 100.5) is False
+
+
+class TestBookSinksFileByEventTime:
+    """Both book collectors must persist through the shared event-time sink.
+
+    Each carried a private ParquetSink until 2026-08-09 that named the hourly
+    file from FLUSH time and rewrote it in place on every flush. 0.74% of
+    Coinbase book rows were misfiled on 2026-08-08, and one hourly file was
+    left corrupt (no footer) by a kill mid-rewrite.
+    """
+
+    HOUR_9 = datetime(2026, 8, 8, 9, 59, 30, tzinfo=UTC)
+    HOUR_10 = datetime(2026, 8, 8, 10, 0, 30, tzinfo=UTC)
+
+    @pytest.mark.parametrize("mod", [cbb, cbc], ids=["binance", "coinbase"])
+    def test_rows_reach_the_hourly_file_their_own_timestamp_names(
+        self, mod: Any, tmp_path: Path
+    ) -> None:
+        sink = mod.PartitionedParquetSink(tmp_path)
+        sink.add("ETH/USD", "book", {"ts": "t1", "bid_px": 1.0}, self.HOUR_9)
+        sink.flush_all(self.HOUR_10, force=True)
+
+        wanted = mod.book_file_path(tmp_path, "ETH/USD", self.HOUR_9)
+        cc.compact_hour(wanted.parent, "book", self.HOUR_9.hour)
+        assert wanted.exists()
+        assert not mod.book_file_path(tmp_path, "ETH/USD", self.HOUR_10).exists()

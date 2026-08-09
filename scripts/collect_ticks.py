@@ -47,7 +47,6 @@ import asyncio
 import json
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -56,7 +55,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from collector_core import stream_dir, symbol_dirname
+from collector_core import PartitionedParquetSink, stream_dir, symbol_dirname
 
 WS_URL = "wss://ws.kraken.com/v2"
 REST_ASSET_PAIRS_URL = "https://api.kraken.com/0/public/AssetPairs"
@@ -83,7 +82,6 @@ def resolve_data_dir(
 DATA_DIR = resolve_data_dir()
 BOOK_DEPTH = 10
 FLUSH_INTERVAL_S = 60.0
-FLUSH_ROW_LIMIT = 5000
 RETENTION_DAYS = 730
 HEARTBEAT_TIMEOUT_S = 15.0
 
@@ -414,58 +412,12 @@ def verify_pairs(pairs: Iterable[str], timeout: float = 15.0) -> dict[str, bool]
 # --------------------------------------------------------------------------
 
 
-@dataclass
-class _Buffer:
-    rows: list[dict[str, Any]] = field(default_factory=list)
-    last_flush: float = 0.0
-
-
-class ParquetSink:
-    """Buffers rows per (pair, kind) and flushes to hourly Parquet files
-    every FLUSH_INTERVAL_S or FLUSH_ROW_LIMIT rows, whichever first."""
-
-    def __init__(self, base_dir: Path = DATA_DIR) -> None:
-        try:
-            import pyarrow  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "ParquetSink requires the optional collector dependency group — "
-                "run `uv sync --group collector`"
-            ) from exc
-        self.base_dir = base_dir
-        self._buffers: dict[tuple[str, str], _Buffer] = {}
-
-    def add(self, pair: str, kind: str, row: dict[str, Any], ts: datetime) -> None:
-        key = (pair, kind)
-        buf = self._buffers.setdefault(key, _Buffer())
-        buf.rows.append(row)
-        if len(buf.rows) >= FLUSH_ROW_LIMIT:
-            self.flush(pair, kind, ts)
-
-    def flush(self, pair: str, kind: str, ts: datetime) -> int:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-
-        buf = self._buffers.get((pair, kind))
-        if not buf or not buf.rows:
-            return 0
-        path = trade_file_path(self.base_dir, pair, ts) if kind == "trades" else book_file_path(
-            self.base_dir, pair, ts
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        table = pa.Table.from_pylist(buf.rows)
-        if path.exists():
-            existing = pq.read_table(path)
-            table = pa.concat_tables([existing, table], promote_options="default")
-        pq.write_table(table, path)
-        n = len(buf.rows)
-        buf.rows.clear()
-        return n
-
-    def flush_all(self, ts: datetime) -> None:
-        for pair, kind in list(self._buffers.keys()):
-            self.flush(pair, kind, ts)
-
+# The per-venue ParquetSink that used to live here is gone (2026-08-09). It
+# named the hourly file from FLUSH time rather than from the row's own
+# timestamp, and it wrote by read-modify-write — reading the whole hourly file
+# back and rewriting it on every flush. collector_core.PartitionedParquetSink
+# fixes both: event-time partitioning and append-only part files, merged by
+# scripts/compact_archive.py.
 
 async def run_collector(
     pairs: list[str], base_dir: Path = DATA_DIR, duration_s: float | None = None
@@ -487,7 +439,7 @@ async def run_collector(
         if not live[p]:
             print(f"WARN: pair {p} not found via AssetPairs — skipping")
 
-    sink = ParquetSink(base_dir)
+    sink = PartitionedParquetSink(base_dir)
     counts: dict[str, dict[str, int]] = {p: {"trades": 0, "book_updates": 0} for p in active}
     books: dict[str, OrderBookState] = {p: OrderBookState() for p in active}
     loop = asyncio.get_event_loop()
@@ -553,10 +505,9 @@ async def run_collector(
                             sink.add(pair, "book", row, now)
                             counts[pair]["book_updates"] += 1
                     # Time-based flush. Without it the only drain is the
-                    # per-pair FLUSH_ROW_LIMIT, so a quiet pair holds its rows
-                    # in RAM indefinitely — losing them if the process dies and
-                    # mis-filing them into the flush hour's file when it finally
-                    # crosses the threshold. Mirrors the book collectors.
+                    # sink's own row limit, so a quiet pair holds its rows in
+                    # RAM indefinitely and loses them if the process dies.
+                    # Mirrors the book collectors.
                     if loop.time() - last_flush >= FLUSH_INTERVAL_S:
                         sink.flush_all(now)
                         last_flush = loop.time()
@@ -572,7 +523,7 @@ async def run_collector(
         else:
             continue
 
-    sink.flush_all(datetime.now(UTC))
+    sink.flush_all(datetime.now(UTC), force=True)
     return counts
 
 

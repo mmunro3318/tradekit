@@ -41,14 +41,13 @@ import json
 import sys
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 from collect_ticks import GREENLIST_PAIRS
-from collector_core import stream_dir, symbol_dirname
+from collector_core import PartitionedParquetSink, stream_dir, symbol_dirname
 
 VENUE = "coinbase"
 WS_URL = "wss://advanced-trade-ws.coinbase.com"
@@ -59,7 +58,6 @@ _LOCAL_BOOKS_DIR = Path("data/books")
 
 BOOK_DEPTH = 20
 FLUSH_INTERVAL_S = 60.0
-FLUSH_ROW_LIMIT = 5000
 HEARTBEAT_TIMEOUT_S = 15.0
 ROW_INTERVAL_S = 1.0
 
@@ -206,54 +204,12 @@ def verify_pairs(pairs: Iterable[str], timeout: float = 15.0) -> dict[str, bool]
 # --------------------------------------------------------------------------
 
 
-@dataclass
-class _Buffer:
-    rows: list[dict[str, Any]] = field(default_factory=list)
-
-
-class ParquetSink:
-    """Buffers book rows per pair and flushes to hourly Parquet files every
-    FLUSH_INTERVAL_S or FLUSH_ROW_LIMIT rows, whichever first."""
-
-    def __init__(self, base_dir: Path = DATA_DIR) -> None:
-        try:
-            import pyarrow  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "ParquetSink requires the optional collector dependency group — "
-                "run `uv sync --group collector`"
-            ) from exc
-        self.base_dir = base_dir
-        self._buffers: dict[str, _Buffer] = {}
-
-    def add(self, pair: str, row: dict[str, Any], ts: datetime) -> None:
-        buf = self._buffers.setdefault(pair, _Buffer())
-        buf.rows.append(row)
-        if len(buf.rows) >= FLUSH_ROW_LIMIT:
-            self.flush(pair, ts)
-
-    def flush(self, pair: str, ts: datetime) -> int:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-
-        buf = self._buffers.get(pair)
-        if not buf or not buf.rows:
-            return 0
-        path = book_file_path(self.base_dir, pair, ts)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        table = pa.Table.from_pylist(buf.rows)
-        if path.exists():
-            existing = pq.read_table(path)
-            table = pa.concat_tables([existing, table], promote_options="default")
-        pq.write_table(table, path)
-        n = len(buf.rows)
-        buf.rows.clear()
-        return n
-
-    def flush_all(self, ts: datetime) -> None:
-        for pair in list(self._buffers.keys()):
-            self.flush(pair, ts)
-
+# The per-venue ParquetSink that used to live here is gone (2026-08-09). It
+# named the hourly file from FLUSH time rather than from the row's own
+# timestamp, and it wrote by read-modify-write — reading the whole hourly file
+# back and rewriting it on every flush. collector_core.PartitionedParquetSink
+# fixes both: event-time partitioning and append-only part files, merged by
+# scripts/compact_archive.py.
 
 async def run_collector(
     pairs: list[str], base_dir: Path = DATA_DIR, duration_s: float | None = None
@@ -275,7 +231,7 @@ async def run_collector(
         if not live[p]:
             print(f"WARN: pair {p} not found via products endpoint — skipping")
 
-    sink = ParquetSink(base_dir)
+    sink = PartitionedParquetSink(base_dir)
     counts: dict[str, int] = dict.fromkeys(active, 0)
     throttle = RowThrottle()
     loop = asyncio.get_event_loop()
@@ -334,11 +290,10 @@ async def run_collector(
                             if not throttle.allow(pair, time.monotonic()):
                                 continue
                             row = books[pair].top_row(ts=now.isoformat(), depth=BOOK_DEPTH)
-                            sink.add(pair, row, now)
+                            sink.add(pair, "book", row, now)
                             counts[pair] += 1
                         if loop.time() - last_flush >= FLUSH_INTERVAL_S:
-                            for pair in shard:
-                                sink.flush(pair, now)
+                            sink.flush_all(now)
                             last_flush = loop.time()
             except TimeoutError:
                 if deadline is not None and loop.time() >= deadline:
@@ -354,7 +309,7 @@ async def run_collector(
 
     await asyncio.gather(*(run_shard(s) for s in shards))
 
-    sink.flush_all(datetime.now(UTC))
+    sink.flush_all(datetime.now(UTC), force=True)
     return counts
 
 

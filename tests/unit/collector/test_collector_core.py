@@ -1087,3 +1087,36 @@ class TestPartitionedParquetSinkEventTimePartitioning:
         assert sink.flush("BTC/USD", "trades") == 3
         assert sink.rows_written == 3
         assert sink.buffered_rows() == 0
+
+
+class TestPartFilesAreAppendOnly:
+    """A part file, once written, is never reopened.
+
+    The three per-venue sinks this replaced all did read-modify-write: read
+    the whole hourly file back, concat, rewrite. That is quadratic in rows per
+    hour on a stream doing 24M rows/day, and a process killed mid-rewrite
+    takes the entire hour with it — which is what left
+    books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet with no footer
+    magic bytes. Append-only is why the shared sink cannot do that.
+    """
+
+    TS = datetime(2026, 8, 8, 9, 5, tzinfo=UTC)
+
+    def test_a_second_flush_leaves_the_first_part_file_byte_identical(
+        self, tmp_path: Path
+    ) -> None:
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
+        sink.flush("BTC/USD", "trades")
+        first = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.TS, part=0, partition=False
+        )
+        before = first.read_bytes()
+
+        sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
+        sink.flush("BTC/USD", "trades")
+
+        assert first.read_bytes() == before
+        assert cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.TS, part=1, partition=False
+        ).exists()
