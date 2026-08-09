@@ -107,6 +107,20 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
+**DATA-VACUUM EXPANSION 2026-08-08/09 — seed: `docs/handoff/HANDOFF-2026-08-09-data-vacuum-expansion.md`
+(READ IT FIRST; it carries the pipeline architecture, verified venue-access facts, and the
+mistake log).** Greenlist 11 -> 87 pairs; 3 -> 8 live collector streams (Kraken ticks, Coinbase
+books+trades, OKX books+trades+liquidations, Hyperliquid perps, Alpaca SIP equities); new shared
+`scripts/collector_core.py` (VenueSpec + append-only part-file sink); 3 backfillers; archive
+migrated to asset-class-partitioned layout (`PARTITION_BY_CLASS = True`). Binance.US retired for
+OKX. Gate 1314 green but **THE WHOLE TREE IS UNCOMMITTED — commit before anything else.**
+NEXT: (1) commit; (2) Binance archive backfill (`scripts/backfill_binance_archive.py`, 0% used,
+history to 2017); (3) repair the confirmed 53h July book gap on ETH/USD + SOL/USD via
+`scripts/backfill_books_chd.py` (fillable now, but its recent-side lag boundary moves daily);
+(4) enable Alpaca NBBO for IBIT+GLD only; (5) retention vs. disk (~193 days at current burn).
+Ops gotcha: the watchdog scheduled task was silently failing on `pwsh` (ERROR_FILE_NOT_FOUND) —
+always check `LastTaskResult` is 0, a "Ready" state means nothing.
+
 PAPER SPRINT MACHINERY COMPLETE 2026-08-03: batches A-G2 ALL SHIPPED (fee physics, wound-scale,
 scan_confluence, registry, S2, S4, hud walk — MTF-SCAN complete; ASSUMPTIONS
 170-176, review rounds 14-20). NEXT: (1) MIKE registers the cadence scheduled task (command in

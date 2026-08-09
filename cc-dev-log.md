@@ -1,3 +1,85 @@
+## 2026-08-09a (Opus — data-vacuum cutover complete: 8 live streams, watchdog was silently dead)
+
+- Seed: `docs/handoff/HANDOFF-2026-08-09-data-vacuum-expansion.md`. Gate 1314
+  green, ruff clean, TREE UNCOMMITTED (26 paths).
+- GREENLIST 56 -> 87: full stablecoin sleeve (peg + stable-vs-stable + fiat
+  legs incl. OKX-only USDT/TRY, USDT/BRL, USDT/AED). Perplexity cross-check
+  surfaced 4 real tokens our own scan missed (AUDF, BRL1, MXNB, EURQ).
+- 8 LIVE STREAMS (was 3): +Coinbase trades, +OKX books/trades/liquidations,
+  +Hyperliquid perps (all 232), +Alpaca SIP equities. Binance.US RETIRED
+  (2,669 BTC prints/day vs Kraken 42,063; its WS trade channel publishes
+  nothing — proved with a control stream on the same socket).
+- LAYOUT MIGRATED: 124 dirs -> <class>/<SYMBOL>/<date>/, PARTITION_BY_CLASS
+  True. Required unifying paths first — the 3 original collectors had private
+  path helpers and would have recreated flat dirs alongside the migrated tree.
+- NUMBERS CORRECTED: a subagent read OKX `volCcy24h` (QUOTE ccy) as USD.
+  USDT/TRY is $9.9M, not "$470M". Kraken figures were ~3x high too. Recomputed
+  all of them by hand with explicit fx conversion; true values now in comments.
+- THREE MORE COLLECTOR BUGS (docs/FRICTION.md):
+  (4) `_PART_RE` was `[a-z_]+` — a stream named `aggTrades`/`book5` matched
+      nothing, so compaction became a silent no-op AND `_next_part` always
+      returned 0, so every flush overwrote part-0000. Same data-loss bug as
+      (1), through a different door. One regex fed two consumers.
+  (5) tiny part files: flushing every buffer every 60s wrote 6-row files at
+      232 symbols. 6.54 -> 2.55 GB/day via MIN_PART_ROWS + bounded escapes.
+  (6) OKX closes idle conns ~30s and ignores protocol pings — the sparse
+      liquidation feed reconnected ~10x/240s. Added VenueSpec keepalive; then
+      had to tolerate the non-JSON `pong` reply. Now 0 reconnects.
+- OPS, THE BIG ONE: the watchdog SCHEDULED TASK had been failing every run
+  with 0x80070002 (ERROR_FILE_NOT_FOUND) — it executed `pwsh`, which resolves
+  only to a Store app-execution alias that Task Scheduler cannot run.
+  Collectors survived by luck; compaction did not run for 9.5h (1048s backlog).
+  Repointed at full-path powershell.exe, verified LastTaskResult 0.
+- OPS: collectors now launch with `python -u`. The historical "dies silently,
+  empty logs" note was stdout BUFFERING — the buffer died with the process.
+  Logs populate for the first time.
+- Dead code removed: the unreachable try/except in `_next_part` (part_files
+  already guarantees `\d{4}`).
+
+## 2026-08-08a (Opus — data-vacuum expansion: greenlist 11->56, collector_core landed, 3 collector bugs fixed)
+
+- GREENLIST 11 -> 56 pairs, grouped in-code by research intent (L1/infra/
+  academic/bridge/dex/rwa/stables/fx/cross). Added BTC/USD — the venue's most
+  active pair (42k trades/day, 0.02bp) was simply absent. Dropped CRV, kept
+  CAKE as a reference series (research: NOT abandoned — $2.69B weekly DEX vol
+  Jun-2026, supply cap cut to 400M Jan-2026; the thin tape is a US-venue
+  artifact, not a dead protocol). ACX refused: Risk Labs is converting the
+  token to C-corp equity, so the series has a scheduled death.
+- THREE COLLECTOR BUGS (all in docs/FRICTION.md with repro):
+  (1) verify_pairs compared REST `wsname` (XBT/USD) against WS v2 symbols
+      (BTC/USD) — every BTC pair would have verified False and been dropped
+      with only a warning into a 0-byte log. Fixed via _ws_v2_symbol.
+  (2) Coinbase level2 caps at 30 products/session (binary-searched: 30 OK,
+      31 rejected) then goes SILENT — indistinguishable from a dead socket,
+      so the collector livelocked on reconnect and wrote nothing. Sharded.
+  (3) collect_ticks had NO time-based flush; FLUSH_INTERVAL_S was defined,
+      documented, and never used. Only 8 of 56 pairs ever wrote. Quiet pairs
+      held rows in RAM (lost on crash) and were mis-filed into the flush
+      hour's file. Historical thin-pair hour attribution is unrecoverable.
+- NEW scripts/collector_core.py — one VenueSpec (url + subscribe + parse)
+  per venue, runner owns sink/paths/throttle/backoff/sharding/error-frames.
+  Writes are APPEND-ONLY part files compacted after the hour closes: O(rows)
+  per flush instead of the old read-concat-rewrite (which cost ~0.1s/file/min
+  and grew the process to ~414MB within an hour). Part files beat a
+  persistent ParquetWriter here because these collectors DO die and a
+  footer-less parquet is unreadable. Verified on 1010 real parts: 5.03M rows
+  merged in 13.5s, 13% smaller, idempotent, current hour correctly skipped.
+- NEW collectors, ALL OFF (not in watchdog, no scheduled task): Coinbase
+  trades (public market_trades, no key — 453 rows/90s over 40 pairs), OKX
+  books (NEW venue, reachable unlike Bybit — 37 pairs, 20-level, 1396
+  rows/75s), Alpaca delayed-SIP equity puller (COIN/MSTR/IBIT/FBTC/GBTC/
+  ETHA/GLD/MARA/RIOT/HOOD; real-time SIP needs a paid plan but historical
+  SIP is free at T-15min; measured ~2MB/sym/day trades, ~10-15MB quotes).
+- migrate_layout.py: flat <SYMBOL>/ -> <class>/<SYMBOL>/, dry-run default,
+  refuses to run while collectors are live. 124 dirs would move.
+- BINANCE.US IS NEARLY DEAD and its WS trade channel publishes nothing.
+  Control test, one socket, 240s: depth20 -> 103 frames, @trade/@aggTrade ->
+  0. REST confirms trades exist (BTCUSD 2,669/day = 1 per 32s, $1.26M/day vs
+  Kraken's $90M). Trades must be REST-polled; consider dropping the venue.
+- data.binance.vision (Binance GLOBAL history) is reachable although
+  api.binance.com is 451. OKX live is 200; Bybit is 403.
+- Gate: 1277 passed (+54 new collector_core/trades tests), ruff clean.
+
 ## 2026-08-03i (Fable — paper-sprint batch G2: AUTONOMOUS CADENCE GREEN. Sprint machinery COMPLETE.)
 
 - SPEC-cadence T1+T2+T3 all landed (reviews rounds 21+22, ASSUMPTIONS

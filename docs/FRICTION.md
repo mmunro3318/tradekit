@@ -6,6 +6,46 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-08 — tiny part files made per-file overhead dwarf the data `parquet,collector,disk`
+- **Symptom:** after turning on 8 collectors the archive burned 6.54 GB/day (85 days to fill D:), with Hyperliquid perps alone at 2.57 GB/day and OKX books at 1.96 — against Coinbase's 0.40 on a near-identical schema and pair count
+- **Cause:** `flush_all` wrote a part file for EVERY buffer on every 60s tick regardless of size. A parquet file pays fixed footer/schema overhead whether it holds 6 rows or 6000, and at 232 perp assets x 2 streams that meant ~460 files/minute averaging **6 rows/file** (572 bytes/row vs 126 on the same schema elsewhere); OKX books averaged 25 rows/file at 1110 bytes/row. Compaction existed and would have fixed it, but had never been scheduled — it only merges CLOSED hours, so it cannot help the current hour anyway
+- **Solution:** a buffer must earn its file — `MIN_PART_ROWS = 500`, with two escapes that keep this from becoming the old data-loss bug: `MAX_BUFFER_AGE_S = 600` bounds how long any row waits, and a buffer is force-flushed before crossing an hour (the filename comes from flush time, so a straggler would be misfiled). `flush_all(force=True)` on shutdown. Plus `compact_archive.py` now runs from the watchdog every 15 min. Result: 6.54 -> 3.27 GB/day, perps 572 -> 117 bytes/row, and row rates verified unchanged (OKX and Coinbase both ~1,550 rows/hr on top symbols)
+
+## 2026-08-08 — Binance global WS is geo-blocked, not just the REST API `binance,geo,liquidations`
+- **Symptom:** `wss://fstream.binance.com/ws/!forceOrder@arr` connects cleanly and then delivers nothing, which reads as "no liquidations happening"
+- **Cause:** the host is geo-blocked like api.binance.com, but the block manifests as silence rather than an error frame or a 451
+- **Solution:** control-test with a stream that CANNOT be quiet — `btcusdt@aggTrade` also returned zero frames in 60s, which settles it. Live Binance liquidations are unavailable; the archive's `liquidationSnapshot` is CM-only and stopped 2024-10-14. **OKX `liquidation-orders` (instType SWAP) is the one live public liquidation feed we can reach** — verified, one subscription covers all swaps, and it carries bankruptcy price, size and position side
+
+## 2026-08-08 — part-file numbering restarted at 0 per sink instance, silently destroying rows `parquet,collector,data-loss`
+- **Symptom:** a REST poller reported writing rows but the on-disk total did not move; reproduced minimally as two `PartitionedParquetSink` instances writing one row each to the same hour -> one file, one row, first row gone, no error
+- **Cause:** part index came from an in-memory counter starting at 0 per instance with no check of what was already on disk, so the second instance wrote `part-0000.parquet` over the first. Hit any poller that builds a sink per pass, and — far worse — ANY collector that dies mid-hour and gets watchdog-relaunched, which would clobber every part written since the top of that hour
+- **Solution:** `PartitionedParquetSink._next_part` memoises per (symbol, stream, day, hour) and seeds from disk (`max(existing)+1`) on first write to each hour. One small directory listing per hour; correct across instances, restarts and crashes. Found by a subagent during its own verification, not by the author — cheap independent verification earned its keep here
+
+## 2026-08-08 — Alpaca real-time SIP needs a paid plan; historical SIP is free at T-15min `alpaca,equities,api-shape`
+- **Symptom:** `wss://stream.data.alpaca.markets/v2/sip` auth returns `{"T":"error","code":409,"msg":"insufficient subscription"}`; the REST tick endpoint returns 403 for any window ending inside 15 minutes but 200 beyond it
+- **Cause:** the account's data entitlement covers the historical consolidated tape but not the real-time SIP stream; free real-time is IEX-only (~2-3% of volume, unrepresentative)
+- **Solution:** collect equities as a DELAYED POLLER, not a stream — request `[last_stored_ts, now-16min]` and page the cursor (`scripts/collect_equities_alpaca.py`). For an archive the lag is irrelevant, and the cursor being derived from stored state means restarts resume exactly and outages self-backfill
+
+## 2026-08-08 — Binance global archive reachable although the live API is geo-blocked `binance,geo,archive`
+- **Symptom:** `api.binance.com` returns HTTP 451 from this machine (consistent with the existing G6/fapi note), so Binance global was assumed unavailable and only thin Binance.US was collected
+- **Cause:** the 451 is applied to the trading/market API hosts, not to the public historical archive bucket
+- **Solution:** `https://data.binance.vision/...` serves 200 with real zips — verified `data/spot/daily/klines/BTCUSDT/1m/BTCUSDT-1m-2026-08-01.zip` (63 KB). The world's deepest venue is available to us for history even though live streaming is not. (Bybit is 403 and stays unavailable; OKX returns 200 and is usable live.)
+
+## 2026-08-08 — Coinbase level2 caps at 30 products/session then goes SILENT `coinbase,websocket,livelock`
+- **Symptom:** expanding the greenlist to 40 Coinbase book pairs produced zero rows; the collector looped `heartbeat timeout — reconnecting` forever
+- **Cause:** the 31st product makes Coinbase emit one `{"type":"error","message":"too many L2 streams requested in a single session"}` frame and then stop sending anything. A read loop that only watches for silence cannot distinguish that from a dead socket, so it reconnects, re-subscribes, and livelocks
+- **Solution:** binary-searched the cap (30 OK / 31 rejected); shard products across sessions (`MAX_STREAMS_PER_SESSION`) and treat an `error` frame as a raise, never as something to reconnect through. Generalised into `collector_core.VenueSpec.error_of` so every future venue must declare how it signals rejection
+
+## 2026-08-08 — Kraken WS v2 renamed XBT->BTC but REST `wsname` did not `kraken,websocket,api-shape`
+- **Symptom:** `verify_pairs("BTC/USD")` returned False, which would have silently dropped every BTC pair from the greenlist with only a warning into a 0-byte log
+- **Cause:** verification compares against REST `AssetPairs.wsname`, which still carries the legacy `XBT/USD`; WS v2 accepts only `BTC/USD` and rejects `XBT/USD` with "Currency pair not supported"
+- **Solution:** translate REST names into WS v2 symbols before comparing (`_ws_v2_symbol`, map `XBT->BTC`, `XDG->DOGE`). Probe both spellings against the live socket when adding any Kraken asset
+
+## 2026-08-08 — collect_ticks had no time-based flush; quiet pairs lost and hour-misfiled `parquet,collector,data-loss`
+- **Symptom:** after expanding to 56 pairs only 8 ever wrote files; the process grew ~0.5 MB/s
+- **Cause:** `FLUSH_INTERVAL_S` was defined and documented but never used — the only drain was the per-pair 5000-row threshold. Liquid pairs crossed it constantly so the bug stayed invisible at 11 pairs; quiet pairs held rows in RAM for hours. Worse, the hourly filename is computed at FLUSH time, so rows buffered across an hour boundary were written into the wrong hour's file
+- **Solution:** added the periodic `flush_all` to the message loop (56/56 pairs write within 4 min). Historical thin-pair data already on disk has some hour misattribution and cannot be recovered. `collector_core.PartitionedParquetSink` avoids the whole class of bug by flushing to append-only part files that a compaction pass merges after the hour closes
+
 ## 2026-08-03 — reviewer git-restore wiped uncommitted review target `git,review,subagent`
 - **Symptom:** review round 20: reviewer probed a defect by editing the uncommitted implementation, then reverted with 'git restore' -- which restored HEAD and destroyed the green-stage work; had to reconstruct from a captured full-file read (verified byte-faithful via diff-stat + gate)
 - **Cause:** git restore on a file whose only current version was uncommitted working-tree state; no stash/backup taken before the destructive probe
