@@ -40,8 +40,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -205,8 +208,48 @@ def _hour(path: Path) -> int | None:
     return int(m.group("hour")) if m else None
 
 
+LOCK_NAME = ".repartition.lock"
+
+
+@contextmanager
+def tree_lock(root: Path) -> Iterator[None]:
+    """Refuse to repair a tree another run is already repairing.
+
+    Two runs racing can lose rows: A reads, B reads, A writes its targets and
+    unlinks the sources, then B writes targets built from its now-stale read
+    and unlinks again. Hit for real on 2026-08-09 — nothing was lost only
+    because both happened to still be in the read phase.
+
+    Deliberately fails closed and does NOT try to detect a stale lock: there
+    is no portable, safe liveness check for a pid (on Windows `os.kill(pid, 0)`
+    terminates the process rather than probing it), and guessing wrong here
+    means racing a live run. A lock left behind by a killed run costs one
+    manual delete, and the error message says exactly that.
+    """
+    lock = root / LOCK_NAME
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise RuntimeError(
+            f"{root} is already being repartitioned — {lock} exists "
+            f"({lock.read_text(encoding='utf-8').strip()}). If that process is "
+            f"gone, delete the lock file and re-run."
+        ) from None
+    try:
+        os.write(fd, f"pid={os.getpid()} root={root}".encode())
+        os.close(fd)
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def repartition_tree(root: Path, dry_run: bool = True, before: date | None = None) -> Report:
     """Repair every closed day under `root`. See the module docstring."""
+    with tree_lock(root):
+        return _repartition_tree(root, dry_run, before)
+
+
+def _repartition_tree(root: Path, dry_run: bool, before: date | None) -> Report:
     cutoff = before or datetime.now(UTC).date()
     report = Report()
     for day_dir in sorted(p for p in root.rglob("*") if p.is_dir() and _DAY_RE.match(p.name)):

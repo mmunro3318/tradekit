@@ -14,6 +14,7 @@ from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
@@ -278,3 +279,68 @@ class TestEmptiedDirectories:
 
         assert day.is_dir()
         assert (day / "notes.txt").read_text(encoding="utf-8") == "keep me"
+
+
+class TestConcurrencyLock:
+    """Two repairs on one tree must not race — the tool deletes source files.
+
+    Hit for real on 2026-08-09: a second run was launched while the first was
+    still working, and both were reading the same 698 MB symbol. Nothing was
+    lost, but only because all reads happen before any write and both were
+    still in the read phase. The window is real: run A reads, run B reads, A
+    writes its targets and deletes the sources, B then writes targets built
+    from its now-stale read and deletes sources again.
+
+    Failing closed is the right trade. A stale lock costs one manual delete;
+    a race costs rows.
+    """
+
+    def test_a_second_run_on_the_same_tree_refuses(self, tmp_path: Path) -> None:
+        write_file(
+            tmp_path / "BTC_USD" / "2026-08-08" / "trades-12.parquet",
+            [row("2026-08-08T10:30:00Z")],
+        )
+        held = ra.tree_lock(tmp_path)
+        held.__enter__()
+        try:
+            with pytest.raises(RuntimeError, match="already"):
+                ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+        finally:
+            held.__exit__(None, None, None)
+
+    def test_the_lock_is_released_so_the_next_run_proceeds(self, tmp_path: Path) -> None:
+        write_file(
+            tmp_path / "BTC_USD" / "2026-08-08" / "trades-12.parquet",
+            [row("2026-08-08T10:30:00Z")],
+        )
+        ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+
+        second = ra.repartition_tree(tmp_path, dry_run=False, before=BEFORE)
+
+        assert second.rows_moved == 0
+        assert not (tmp_path / ra.LOCK_NAME).exists()
+
+    def test_a_dry_run_takes_the_lock_too(self, tmp_path: Path) -> None:
+        # A dry run writes nothing, but it reads the whole tree to decide what
+        # WOULD move. Letting it overlap a real run reports a plan built from
+        # a tree that is being rewritten underneath it.
+        held = ra.tree_lock(tmp_path)
+        held.__enter__()
+        try:
+            with pytest.raises(RuntimeError, match="already"):
+                ra.repartition_tree(tmp_path, dry_run=True, before=BEFORE)
+        finally:
+            held.__exit__(None, None, None)
+
+    def test_the_lock_names_the_process_so_a_stale_one_can_be_judged(
+        self, tmp_path: Path
+    ) -> None:
+        import os
+
+        held = ra.tree_lock(tmp_path)
+        held.__enter__()
+        try:
+            text = (tmp_path / ra.LOCK_NAME).read_text(encoding="utf-8")
+        finally:
+            held.__exit__(None, None, None)
+        assert str(os.getpid()) in text
