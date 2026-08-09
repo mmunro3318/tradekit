@@ -486,14 +486,15 @@ def sink_stream_name(datatype: str) -> str:
 
 
 def write_rows(sink: PartitionedParquetSink, symbol: str, stream: str, rows: list[dict]) -> None:
-    buckets: dict[datetime, list[dict]] = defaultdict(list)
+    # The sink files each row under its own hour, so this only has to remember
+    # which hours were touched in order to compact them afterwards.
+    hours: set[datetime] = set()
     for row in rows:
         ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
-        buckets[ts.replace(minute=0, second=0, microsecond=0)].append(row)
-    for hour_ts, hour_rows in buckets.items():
-        for row in hour_rows:
-            sink.add(symbol, stream, row, hour_ts)
-        sink.flush(symbol, stream, hour_ts)
+        sink.add(symbol, stream, row, ts)
+        hours.add(ts.replace(minute=0, second=0, microsecond=0))
+    sink.flush(symbol, stream)
+    for hour_ts in sorted(hours):
         day_dir = stream_dir(sink.base_dir, symbol, hour_ts, sink.partition)
         compact_hour(day_dir, stream, hour_ts.hour)
 

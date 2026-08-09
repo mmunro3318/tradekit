@@ -134,7 +134,14 @@ class TestResumeCursor:
         alpaca.run_once(["RIOT"], tmp_path)
 
         assert wire.calls, "the poller never asked the venue for anything"
-        assert wire.calls[0]["start"] == stored
+        sent = wire.calls[0]["start"]
+        # Resume AT the stored instant (to microsecond resolution, the finest
+        # a datetime carries), never at the top of its second — asking for
+        # 23:59:51Z re-delivers every print in that second, forever.
+        assert sent != f"{when:%Y-%m-%dT%H:%M:%S}Z"
+        assert datetime.fromisoformat(sent.replace("Z", "+00:00")) == datetime.fromisoformat(
+            stored[:26] + "+00:00"
+        )
 
     def test_regression_the_row_already_stored_at_the_cursor_is_not_written_twice(
         self, tmp_path: Path, wired: Any

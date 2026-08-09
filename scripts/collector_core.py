@@ -237,16 +237,17 @@ def compact_hour(day_dir: Path, stream: str, hour: int) -> int:
 #
 # So a buffer is only written once it is worth a file. The age and hour
 # escapes below bound what that costs: no row waits more than
-# MAX_BUFFER_AGE_S, and nothing is ever carried across an hour boundary (the
-# filename comes from flush time, so a straggler would be misfiled into the
-# wrong hour).
+# MAX_BUFFER_AGE_S, and a buffer whose oldest row belongs to a past hour is
+# written out rather than held, so a closed hour reaches compaction promptly.
 MIN_PART_ROWS = 500
 MAX_BUFFER_AGE_S = 600.0
 
 
 @dataclass
 class _Buffer:
-    rows: list[dict[str, Any]] = field(default_factory=list)
+    # (event timestamp, row). The timestamp is carried alongside the row
+    # because it, not the moment of the flush, decides where the row is filed.
+    rows: list[tuple[datetime, dict[str, Any]]] = field(default_factory=list)
     # Timestamp of the first row currently buffered — drives both the age
     # escape and the hour-boundary escape.
     first_ts: datetime | None = None
@@ -255,8 +256,21 @@ class _Buffer:
 class PartitionedParquetSink:
     """Buffers rows per (symbol, stream) and flushes them to part files.
 
+    Every row is filed under the day and hour of ITS OWN timestamp. That is
+    the whole point of an hour-partitioned archive and it was wrong until
+    2026-08-09: the target file used to be named from flush time, so the path
+    recorded when we ingested a row rather than when it happened. On a live
+    websocket the two are close enough that only hour-boundary stragglers
+    leaked (~0.7% of rows), but a delayed poller diverges by design and filed
+    an entire Friday equity tape under Sunday's date. A partition key you
+    cannot trust is worse than none, because it invites time-ranged reads that
+    silently return the wrong rows.
+
+    One flush therefore writes one part file per (day, hour) the buffer spans,
+    not one file per flush.
+
     `add` triggers a flush at FLUSH_ROW_LIMIT; callers must additionally call
-    `flush_due`/`flush_all` on a timer so quiet symbols cannot sit in RAM.
+    `flush_all` on a timer so quiet symbols cannot sit in RAM.
     """
 
     def __init__(self, base_dir: Path, partition: bool | None = None) -> None:
@@ -310,9 +324,9 @@ class PartitionedParquetSink:
         buf = self._buffers.setdefault((symbol, stream), _Buffer())
         if not buf.rows:
             buf.first_ts = ts
-        buf.rows.append(row)
+        buf.rows.append((ts, row))
         if len(buf.rows) >= FLUSH_ROW_LIMIT:
-            self.flush(symbol, stream, ts)
+            self.flush(symbol, stream)
 
     def _should_flush(self, buf: _Buffer, ts: datetime) -> bool:
         """Whether this buffer has earned a part file yet. See MIN_PART_ROWS."""
@@ -323,26 +337,46 @@ class PartitionedParquetSink:
         first = buf.first_ts
         if first is None:
             return True
-        # Never carry rows across an hour (or day) boundary: the target file is
-        # named from flush time, so a straggler lands in the wrong hour.
+        # Rows are filed by their own timestamp, so holding one past its hour
+        # no longer misfiles it — but it does keep a closed hour out of reach
+        # of compaction. Write it out instead.
         if (first.hour, first.date()) != (ts.hour, ts.date()):
             return True
         return (ts - first).total_seconds() >= MAX_BUFFER_AGE_S
 
-    def flush(self, symbol: str, stream: str, ts: datetime) -> int:
+    def flush(self, symbol: str, stream: str) -> int:
+        """Write the buffer out, one part file per (day, hour) it spans.
+
+        There is deliberately no `ts` parameter. The caller's notion of "now"
+        has no say in where a row is filed — only the row's own timestamp
+        does — and a parameter that looks like it decides the path but does
+        not is exactly how the misfiling bug survived review.
+        """
         import pyarrow as pa
         import pyarrow.parquet as pq
 
         buf = self._buffers.get((symbol, stream))
         if not buf or not buf.rows:
             return 0
-        path = hour_file_path(
-            self.base_dir, symbol, stream, ts, self._next_part(symbol, stream, ts), self.partition
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        table = pa.Table.from_pylist(buf.rows)
-        pq.write_table(table, path, compression="zstd", compression_level=3)
-        n = len(buf.rows)
+        # Insertion-ordered, so arrival order survives inside each hour.
+        groups: dict[tuple[str, int], tuple[datetime, list[dict[str, Any]]]] = {}
+        for ts, row in buf.rows:
+            _, rows = groups.setdefault((ts.strftime("%Y-%m-%d"), ts.hour), (ts, []))
+            rows.append(row)
+        n = 0
+        for ts, rows in groups.values():
+            path = hour_file_path(
+                self.base_dir,
+                symbol,
+                stream,
+                ts,
+                self._next_part(symbol, stream, ts),
+                self.partition,
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            table = pa.Table.from_pylist(rows)
+            pq.write_table(table, path, compression="zstd", compression_level=3)
+            n += len(rows)
         buf.rows.clear()
         buf.first_ts = None
         self._rows_written += n
@@ -358,7 +392,7 @@ class PartitionedParquetSink:
         for key in list(self._buffers):
             buf = self._buffers[key]
             if force or self._should_flush(buf, ts):
-                total += self.flush(key[0], key[1], ts)
+                total += self.flush(key[0], key[1])
         return total
 
     def buffered_rows(self) -> int:

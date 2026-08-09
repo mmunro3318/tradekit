@@ -49,8 +49,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -117,11 +119,53 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(k.strip(), v.strip())
 
 
-def last_stored_ts(base_dir: Path, symbol: str, stream: str) -> datetime | None:
-    """Newest timestamp already on disk for (symbol, stream), or None.
+# What makes a row unique WITHIN one instant. Alpaca stamps every print with
+# a venue trade id; NBBO quotes carry no id, so the quote itself is its
+# identity — two byte-identical quotes at the same nanosecond are not two
+# facts.
+_IDENTITY_COLUMNS: dict[str, tuple[str, ...]] = {
+    "trades": ("trade_id",),
+    "quotes": ("bid_price", "bid_qty", "bid_exchange", "ask_price", "ask_qty", "ask_exchange"),
+}
 
-    Reads only the most recent day-directory's files rather than the whole
-    archive — the cursor only ever moves forward.
+_HOUR_FILE_RE = re.compile(r"^(?P<stream>[A-Za-z0-9_]+)-(?P<hour>\d{2})(?:\.part-\d{4})?\.parquet$")
+
+
+def row_identity(stream: str, row: Mapping[str, Any]) -> str:
+    return "|".join(str(row[c]) for c in _IDENTITY_COLUMNS[stream])
+
+
+def _hour_of(name: str, stream: str) -> int | None:
+    m = _HOUR_FILE_RE.match(name)
+    return int(m.group("hour")) if m and m.group("stream") == stream else None
+
+
+def rfc3339(when: datetime) -> str:
+    """Microsecond-precision RFC-3339 — the only safe format for `start`.
+
+    `%H:%M:%SZ` silently widens the request to a whole second, and since
+    Alpaca's `start` is inclusive that re-delivers the entire tail of the tape
+    on every pass. See `last_stored_cursor`.
+    """
+    return f"{when:%Y-%m-%dT%H:%M:%S}.{when.microsecond:06d}Z"
+
+
+def last_stored_cursor(
+    base_dir: Path, symbol: str, stream: str
+) -> tuple[datetime, set[str]] | None:
+    """Where to resume, plus the identity of what we already hold there.
+
+    Alpaca's `start` is INCLUSIVE and its timestamps carry nanoseconds, which
+    leaves no purely arithmetic answer: resuming at `newest + 1us` drops any
+    print inside that microsecond, and truncating to a whole second re-writes
+    the tail of the tape forever (measured 2026-08-09 over the closed weekend:
+    15 prints re-stored 176 times each). So the venue is asked for the
+    boundary instant again and the rows we already have are dropped on
+    arrival — no gap, no duplicate.
+
+    Only the newest hour of the newest day is read. That is exact rather than
+    a heuristic because the sink files every row under its own event time, so
+    the newest hour directory is necessarily where the newest row lives.
     """
     import pyarrow.parquet as pq
 
@@ -129,22 +173,31 @@ def last_stored_ts(base_dir: Path, symbol: str, stream: str) -> datetime | None:
     days = [d for d in iter_symbol_dirs(base_dir) if d.parent.name == want]
     if not days:
         return None
+    day = max(days, key=lambda d: d.name)
+    hours = {f.name: h for f in day.iterdir() if (h := _hour_of(f.name, stream)) is not None}
+    if not hours:
+        return None
+    newest_hour = max(hours.values())
+
     newest: datetime | None = None
-    for day in sorted(days, reverse=True)[:1]:
-        for f in day.iterdir():
-            if not f.name.startswith(f"{stream}-") or f.suffix != ".parquet":
+    held: set[str] = set()
+    for name, hour in hours.items():
+        if hour != newest_hour:
+            continue
+        try:
+            table = pq.read_table(day / name, columns=["ts", *_IDENTITY_COLUMNS[stream]])
+        except Exception:
+            continue
+        for row in table.to_pylist():
+            raw = row.get("ts")
+            if not raw:
                 continue
-            try:
-                col = pq.read_table(f, columns=["ts"]).column("ts").to_pylist()
-            except Exception:
-                continue
-            for raw in col:
-                if not raw:
-                    continue
-                ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-                if newest is None or ts > newest:
-                    newest = ts
-    return newest
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if newest is None or ts > newest:
+                newest, held = ts, set()
+            if ts == newest:
+                held.add(row_identity(stream, row))
+    return None if newest is None else (newest, held)
 
 
 def fetch_pages(
@@ -156,8 +209,8 @@ def fetch_pages(
     while True:
         params: dict[str, Any] = {
             "symbols": symbol,
-            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "start": rfc3339(start),
+            "end": rfc3339(end),
             "feed": "sip",
             "limit": PAGE_LIMIT,
         }
@@ -210,7 +263,10 @@ def run_once(
     """One incremental pass. Returns rows written per "SYMBOL/stream"."""
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     headers = auth_headers()
-    sink = PartitionedParquetSink(base_dir)
+    # No class partitioning: `equities/alpaca` IS the asset class. Routing
+    # these through asset_class() only found no matching rule and dropped
+    # every ticker into `crypto/`.
+    sink = PartitionedParquetSink(base_dir, partition=False)
     written: dict[str, int] = {}
     end = datetime.now(UTC) - timedelta(seconds=SIP_DELAY_S)
     floor = end - timedelta(days=max_lookback_days)
@@ -223,16 +279,23 @@ def run_once(
             ):
                 if stream == "quotes" and symbol not in quote_symbols:
                     continue
-                last = last_stored_ts(base_dir, symbol, stream)
-                start = max(last + timedelta(microseconds=1), floor) if last else floor
+                cursor = last_stored_cursor(base_dir, symbol, stream)
+                boundary, held = cursor if cursor else (None, set())
+                start = max(boundary, floor) if boundary else floor
                 if start >= end:
                     continue
-                raw = fetch_pages(client, endpoint, symbol, start, end)
-                for r in raw:
+                kept = 0
+                for r in fetch_pages(client, endpoint, symbol, start, end):
                     ts = datetime.fromisoformat(r["t"].replace("Z", "+00:00"))
-                    sink.add(symbol, stream, to_row(r), ts)
-                key = f"{symbol}/{stream}"
-                written[key] = len(raw)
+                    row = to_row(r)
+                    # The inclusive `start` hands back the boundary instant we
+                    # already stored. Only that instant is suppressed, so a
+                    # trade id that recurs later is still recorded.
+                    if ts == boundary and row_identity(stream, row) in held:
+                        continue
+                    sink.add(symbol, stream, row, ts)
+                    kept += 1
+                written[f"{symbol}/{stream}"] = kept
                 sink.flush_all(end, force=True)
     return written
 

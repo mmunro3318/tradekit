@@ -271,7 +271,7 @@ class TestPartitionedParquetSink:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0, "qty": 2.0}, self.TS)
         sink.add("BTC/USD", "trades", {"ts": "t2", "price": 1.1, "qty": 2.1}, self.TS)
-        n = sink.flush("BTC/USD", "trades", self.TS)
+        n = sink.flush("BTC/USD", "trades")
         assert n == 2
 
         path = cc.hour_file_path(tmp_path, "BTC/USD", "trades", self.TS, part=0, partition=False)
@@ -284,9 +284,9 @@ class TestPartitionedParquetSink:
     def test_part_numbers_increment_per_symbol_stream_independently(self, tmp_path: Path) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
 
         p0 = cc.hour_file_path(tmp_path, "BTC/USD", "trades", self.TS, part=0, partition=False)
         p1 = cc.hour_file_path(tmp_path, "BTC/USD", "trades", self.TS, part=1, partition=False)
@@ -298,9 +298,9 @@ class TestPartitionedParquetSink:
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
         sink.add("ETH/USD", "trades", {"ts": "t1", "price": 2.0}, self.TS)
         sink.add("BTC/USD", "book", {"ts": "t1", "bid": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
-        sink.flush("ETH/USD", "trades", self.TS)
-        sink.flush("BTC/USD", "book", self.TS)
+        sink.flush("BTC/USD", "trades")
+        sink.flush("ETH/USD", "trades")
+        sink.flush("BTC/USD", "book")
 
         # each (symbol, stream) buffer starts its own part sequence at 0
         assert cc.hour_file_path(
@@ -345,9 +345,9 @@ class TestPartitionedParquetSink:
         assert sink.buffered_rows() == 0
 
     def test_quiet_buffer_is_flushed_before_crossing_an_hour(self, tmp_path: Path) -> None:
-        # The target filename comes from FLUSH time, so a straggler carried
-        # into the next hour would be silently misfiled — exactly the bug that
-        # corrupted thin-pair hour attribution before. Never carry across.
+        # Filing is by event time now, so a straggler can no longer be
+        # misfiled — but holding it keeps a closed hour out of compaction's
+        # reach indefinitely. Write it out at the boundary instead.
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("QUIET/USD", "trades", {"ts": "t1", "price": 3.0}, self.TS)
         next_hour = self.TS + timedelta(hours=1)
@@ -377,9 +377,9 @@ class TestPartitionedParquetSink:
     def test_flushing_an_empty_buffer_is_a_noop_returning_zero(self, tmp_path: Path) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         # buffer now empty; flushing again must be a no-op, no new part file
-        n = sink.flush("BTC/USD", "trades", self.TS)
+        n = sink.flush("BTC/USD", "trades")
         assert n == 0
         assert not cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", self.TS, part=1, partition=False
@@ -387,7 +387,7 @@ class TestPartitionedParquetSink:
 
     def test_flushing_a_never_touched_key_is_a_noop(self, tmp_path: Path) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
-        assert sink.flush("NEVER/USD", "trades", self.TS) == 0
+        assert sink.flush("NEVER/USD", "trades") == 0
 
     def test_buffered_rows_and_rows_written_accounting(self, tmp_path: Path) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
@@ -397,11 +397,11 @@ class TestPartitionedParquetSink:
         assert sink.buffered_rows() == 3
         assert sink.rows_written == 0
 
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         assert sink.buffered_rows() == 1
         assert sink.rows_written == 2
 
-        sink.flush("ETH/USD", "trades", self.TS)
+        sink.flush("ETH/USD", "trades")
         assert sink.buffered_rows() == 0
         assert sink.rows_written == 3
 
@@ -423,7 +423,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         for i in range(3):
             sink = cc.PartitionedParquetSink(tmp_path, partition=False)
             sink.add("BTC/USD", "trades", {"ts": f"t{i}", "price": float(i)}, self.TS)
-            sink.flush("BTC/USD", "trades", self.TS)
+            sink.flush("BTC/USD", "trades")
 
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
         parts = cc.part_files(day_dir, "trades", self.TS.hour)
@@ -440,13 +440,13 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         for i in range(3):
             sink.add("BTC/USD", "trades", {"ts": f"h11-{i}", "price": float(i)}, hour_11)
-            sink.flush("BTC/USD", "trades", hour_11)
+            sink.flush("BTC/USD", "trades")
         assert cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", hour_11, part=2, partition=False
         ).exists()
 
         sink.add("BTC/USD", "trades", {"ts": "h12-0", "price": 0.0}, hour_12)
-        sink.flush("BTC/USD", "trades", hour_12)
+        sink.flush("BTC/USD", "trades")
 
         assert cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", hour_12, part=0, partition=False
@@ -459,15 +459,15 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         # each must independently seed to 0 rather than sharing a counter.
         sink_a = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink_a.add("BTC/USD", "trades", {"ts": "a", "price": 1.0}, self.TS)
-        sink_a.flush("BTC/USD", "trades", self.TS)
+        sink_a.flush("BTC/USD", "trades")
 
         sink_b = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink_b.add("ETH/USD", "trades", {"ts": "b", "price": 2.0}, self.TS)
-        sink_b.flush("ETH/USD", "trades", self.TS)
+        sink_b.flush("ETH/USD", "trades")
 
         sink_c = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink_c.add("BTC/USD", "book", {"ts": "c", "bid": 3.0}, self.TS)
-        sink_c.flush("BTC/USD", "book", self.TS)
+        sink_c.flush("BTC/USD", "book")
 
         assert cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", self.TS, part=0, partition=False
@@ -498,7 +498,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
 
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "new", "price": 2.0}, self.TS)
-        n = sink.flush("BTC/USD", "trades", self.TS)  # must not raise
+        n = sink.flush("BTC/USD", "trades")  # must not raise
 
         assert n == 1
         # continues from the real part (0000 -> 0001), ignoring the junk
@@ -514,7 +514,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         sink1 = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink1.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
         sink1.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
-        sink1.flush("BTC/USD", "trades", self.TS)
+        sink1.flush("BTC/USD", "trades")
         first_merge = cc.compact_hour(day_dir, "trades", self.TS.hour)
         assert first_merge == 2
 
@@ -522,7 +522,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         # more rows into the same (now-partially-compacted) hour
         sink2 = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink2.add("BTC/USD", "trades", {"ts": "t3", "price": 3.0}, self.TS)
-        sink2.flush("BTC/USD", "trades", self.TS)
+        sink2.flush("BTC/USD", "trades")
         second_merge = cc.compact_hour(day_dir, "trades", self.TS.hour)
 
         assert second_merge == 3  # 2 previously-compacted rows + 1 new, none lost
@@ -535,7 +535,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
     ) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t0", "price": 0.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         part0 = cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", self.TS, part=0, partition=False
         )
@@ -548,7 +548,7 @@ class TestPartitionedParquetSinkPartNumberingAcrossInstances:
         part0.unlink()
 
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
 
         assert cc.hour_file_path(
             tmp_path, "BTC/USD", "trades", self.TS, part=1, partition=False
@@ -569,9 +569,9 @@ class TestCompactHour:
 
         sink = self._make_sink(tmp_path)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
 
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
         n = cc.compact_hour(day_dir, "trades", 9)
@@ -593,7 +593,7 @@ class TestCompactHour:
     def test_idempotent_second_run_is_safe(self, tmp_path: Path) -> None:
         sink = self._make_sink(tmp_path)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
 
         first = cc.compact_hour(day_dir, "trades", 9)
@@ -614,12 +614,12 @@ class TestCompactHour:
 
         # first round: one part, compact it into the hourly file
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         cc.compact_hour(day_dir, "trades", 9)
 
         # second round: new part arrives after the hourly file already exists
         sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
         n = cc.compact_hour(day_dir, "trades", 9)
 
         assert n == 2  # merged file now has both old + new rows
@@ -633,7 +633,7 @@ class TestCompactHour:
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
 
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "trades", self.TS)
+        sink.flush("BTC/USD", "trades")
 
         # simulate a part truncated by a hard kill
         garbage = day_dir / "trades-09.part-0001.parquet"
@@ -654,7 +654,7 @@ class TestCompactClosedHours:
         now = datetime(2026, 8, 8, 9, 30, tzinfo=UTC)
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, now)
-        sink.flush("BTC/USD", "trades", now)
+        sink.flush("BTC/USD", "trades")
 
         merged = cc.compact_closed_hours(tmp_path, now=now)
 
@@ -668,7 +668,7 @@ class TestCompactClosedHours:
         now = datetime(2026, 8, 8, 9, 30, tzinfo=UTC)
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, past)
-        sink.flush("BTC/USD", "trades", past)
+        sink.flush("BTC/USD", "trades")
 
         merged = cc.compact_closed_hours(tmp_path, now=now)
 
@@ -684,11 +684,11 @@ class TestCompactClosedHours:
         now = datetime(2026, 8, 8, 9, 30, tzinfo=UTC)
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "trades", {"ts": "t1", "price": 1.0}, past)
-        sink.flush("BTC/USD", "trades", past)
+        sink.flush("BTC/USD", "trades")
         sink.add("ETH/USD", "book", {"ts": "t1", "bid": 1.0}, past)
-        sink.flush("ETH/USD", "book", past)
+        sink.flush("ETH/USD", "book")
         sink.add("BTC/USD", "trades", {"ts": "t2", "price": 2.0}, now)
-        sink.flush("BTC/USD", "trades", now)
+        sink.flush("BTC/USD", "trades")
 
         merged = cc.compact_closed_hours(tmp_path, now=now)
 
@@ -728,7 +728,7 @@ class TestStreamNameGuard:
         for i in range(3):
             sink = cc.PartitionedParquetSink(tmp_path, partition=False)
             sink.add("BTC/USD", stream, {"ts": f"t{i}", "price": float(i)}, self.TS)
-            sink.flush("BTC/USD", stream, self.TS)
+            sink.flush("BTC/USD", stream)
 
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
         parts = cc.part_files(day_dir, stream, self.TS.hour)
@@ -745,7 +745,7 @@ class TestStreamNameGuard:
     def test_part_files_finds_parts_for_a_mixed_case_stream_name(self, tmp_path: Path) -> None:
         sink = cc.PartitionedParquetSink(tmp_path, partition=False)
         sink.add("BTC/USD", "aggTrades", {"ts": "t1", "price": 1.0}, self.TS)
-        sink.flush("BTC/USD", "aggTrades", self.TS)
+        sink.flush("BTC/USD", "aggTrades")
 
         day_dir = cc.stream_dir(tmp_path, "BTC/USD", self.TS, partition=False)
         parts = cc.part_files(day_dir, "aggTrades", self.TS.hour)
