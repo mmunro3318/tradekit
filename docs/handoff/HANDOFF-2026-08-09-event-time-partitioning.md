@@ -116,10 +116,50 @@ tested, not aspirational:
 confirm compaction is caught up (no `part-NNNN` files in past days) so it
 cannot race `compact_archive.py`.
 
+## 3b. It took FOUR fixes, and only measurement found the last three
+
+Each round of measuring live data exposed another caller that had not been
+fixed. This is the most important thing in this document.
+
+| measured | overall wrong-hour | what was still wrong |
+|---|---|---|
+| 2026-08-08, before anything | 0.74–18.4% | the sink named files from flush time |
+| hour 13, after the sink fix | 0.1083% | `run_ws_collector` passed ARRIVAL time |
+| hour 14, after the runner fix | 0.0009% | `collect_perps_hyperliquid` (custom orchestrator) did too |
+| **hour 15, after the sink stopped trusting callers** | **0.0000%** | — |
+
+`PartitionedParquetSink.add(symbol, stream, row, ts)` looked like it wanted
+the row's timestamp, but every caller had `now` in hand and passed that. Three
+callers made the same mistake independently, so the parameter was the bug, not
+the callers. `add` now treats `ts` as the ARRIVAL time — a fallback — and
+`event_ts(row, ts)` prefers the row's own stamp whenever it parses. **Do not
+"simplify" that back to trusting the caller.**
+
 ## 4. Verification (2026-08-09)
 
-Collectors restarted onto the fixed code at **12:12 UTC** (all 8, by the
+Collectors restarted onto the final build at **14:25 UTC** (all 8, by the
 scheduled task, `LastTaskResult: 0`).
+
+**Hour 15 UTC, the first full hour on the final build — PASS:**
+
+| stream | symbols | rows | wrong-hour |
+|---|---|---|---|
+| ticks | 73 | 365,078 | 0 |
+| books/coinbase | 48 | 19,417 | 0 |
+| books/okx | 51 | 13,023 | 0 |
+| trades/coinbase | 34 | 7,582 | 0 |
+| trades/okx | 20 | 6,165 | 0 |
+| perps/hyperliquid | 232 | 31,203 | 0 |
+| liquidations/okx | 6 | 11 | 0 |
+| equities/alpaca | 0 | 0 | 0 (market closed — correct) |
+| **TOTAL** | | **442,479** | **0 (0.0000%)** |
+
+Corroborating checks, same run:
+- **855,546 rows** stamped after the restart, across all 8 streams: 0 misfiled.
+- **56,053 rows stamped `14:59:xx`**: every one in an hour-14 file. The hour
+  boundary is where this bug always hid, so this is the check that matters.
+- 0 duplicate rows post-restart on every stream carrying an id.
+- Every stream written within ~1 minute at the time of the sweep.
 
 - **Alpaca, live proof:** every pre-fix poll logged `rows=15` — the same 15
   phantom prints. Every post-fix poll logs `rows=0`, which is correct on a
@@ -148,6 +188,40 @@ It blocks `repartition_archive` from repairing that whole
 something `_HOUR_FILE_RE` does not match (e.g. `book-05.parquet.corrupt`) —
 **preserve the bytes, do not delete** — then re-run the tool on
 `books/coinbase`.
+
+## 5b. Two OPEN findings, both pre-existing, neither fixed
+
+Found while verifying. Characterised, not solved — do not assume either is
+handled.
+
+**(a) Coinbase persists snapshot blocks it is supposed to skip.**
+`trades/coinbase` stores 100-row descending blocks — exactly 100 per thin
+symbol, in multiples of 100 across reconnects (AUDD_USDC 200, W_USD 300,
+ADA_BTC 100, XSGD_USDC 100). 100 is the `market_trades` snapshot size, and
+`parse()` skips `type: "snapshot"`. That skip was verified directly: real
+frames from ADA-BTC, XSGD-USDC, AUDD-USDC and BTC-USD fed through the
+collector's own `parse()` produced 4 snapshots, all skipped, and emitted
+nothing stale. **The mechanism is unexplained.** Since the event-time fix
+those rows land in their true day/hour, where they are exact duplicates that
+`repartition_archive` collapses — so it is redundancy, not corruption. Next
+step: instrument the running collector to log event types and frame counts,
+rather than probing a separate connection.
+
+**(b) Kraken book rows are not throttled, and share timestamps.**
+`collect_ticks.py` contains no `RowThrottle` at all. Every other venue goes
+through `run_ws_collector`, which coalesces `book` to 1 Hz
+(`BOOK_ROW_INTERVAL_S`). So the archive's LARGEST stream has a different
+temporal resolution from every other book stream — which directly undercuts
+the stated differentiator, "L2 depth with aligned cross-venue timestamps".
+Measured on BTC_USD hour 15: 1,555 rows in ~12 minutes (~2.2/s, against 1/s
+elsewhere), and only 1,101 distinct timestamps, because `now` is computed once
+per MESSAGE (`collect_ticks.py:478`) and one frame can yield several rows.
+Rows sharing a microsecond are indistinguishable.
+
+This is a product decision, not a bug fix: full resolution costs disk and
+breaks cross-venue alignment; 1 Hz matches the rest of the archive and would
+cut the biggest stream substantially. **Mike's call** — deliberately not
+changed.
 
 ## 6. Two corrections to the previous seed
 

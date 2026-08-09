@@ -66,7 +66,26 @@
   pre-repair audit. Nothing lost.
 - ASSUMPTIONS 179 records the four judgment calls (partition key, cursor
   semantics, what counts as a duplicate, and "when unsure, do nothing").
-- Gate green at every step; four commits, red committed separately.
+- IT TOOK FOUR FIXES AND ONLY MEASUREMENT FOUND THE LAST THREE. Sink fix ->
+  0.1083% (hour 13); run_ws_collector was still passing ARRIVAL time ->
+  0.0009% (hour 14); collect_perps_hyperliquid is a custom orchestrator that
+  bypasses the shared runner and did the same -> 0.0000% (hour 15). Three
+  callers making the same mistake independently means the PARAMETER was the
+  bug: `add`'s `ts` is now the arrival time, a fallback, and the row's own
+  stamp wins. Do not simplify that back to trusting the caller.
+- VERIFIED hour 15 UTC, first full hour on the final build: 442,479 rows
+  across all 8 streams, **0 misfiled**. Plus 855,546 rows stamped after the
+  restart with 0 misfiled, and 56,053 rows stamped 14:59:xx every one of which
+  is in an hour-14 file — the boundary is where this bug always hid. 0
+  duplicates on every stream carrying an id.
+- TWO OPEN FINDINGS, both pre-existing, neither fixed, both in the seed §5b:
+  (a) Coinbase persists 100-row snapshot blocks though parse() provably skips
+  snapshots — mechanism unexplained, now redundancy rather than corruption;
+  (b) collect_ticks has NO RowThrottle, so Kraken book (the largest stream)
+  runs unthrottled at ~2.2 rows/s against 1/s everywhere else, and `now` is
+  computed per message so rows share timestamps. That one is Mike's call, not
+  a unilateral fix.
+- Gate green at every step; eight commits, red committed separately.
 
 ## 2026-08-09a (Opus — data-vacuum cutover complete: 8 live streams, watchdog was silently dead)
 

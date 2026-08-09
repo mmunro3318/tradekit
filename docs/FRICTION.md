@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-09 — three collectors each passed arrival time to the sink `collector,partitioning,api-design,time`
+- **Symptom:** After fixing the sink to partition on the row's timestamp, measured wrong-hour was still 0.1083% (hour 13). Fixing run_ws_collector took it to 0.0009% (hour 14). Six rows still wrong. Each round of measurement exposed another caller.
+- **Cause:** The sink's add(symbol, stream, row, ts) looked like it wanted 'the row's timestamp' but every caller had 'now' in hand and passed it. run_ws_collector passed arrival; collect_perps_hyperliquid is a custom orchestrator that never touches run_ws_collector and passed arrival at its own call site. On chatty feeds arrival and event time differ by milliseconds and only leak at the hour boundary, so the defect is invisible without measuring the whole archive. On Coinbase market_trades, which replays history, they differ by DAYS.
+- **Solution:** Stop enforcing it at call sites. PartitionedParquetSink.add now treats its ts argument as the ARRIVAL time — a fallback — and event_ts(row, ts) prefers the row's own stamp whenever it parses. Every caller becomes correct by construction, including orchestrators that bypass the shared runner. The general lesson: when the same mistake is made independently by three callers, the parameter is the bug, not the callers.
+
 ## 2026-08-09 — rtk swallows pytest's summary line `rtk,pytest,tooling,gate`
 - **Symptom:** 'rtk uv run pytest -q' reported 'Pytest: No tests collected' while the suite actually ran 1314 tests green; even 'rtk proxy uv run pytest -q' returned the warnings block with no 'N passed' line, so there was no way to read a test count from the filtered output.
 - **Cause:** rtk's pytest filter did not match this project's output shape. Exit code was 0 throughout, so the failure was purely in the reporting layer — dangerous precisely because 'no tests collected' reads as a red flag when the truth is green.

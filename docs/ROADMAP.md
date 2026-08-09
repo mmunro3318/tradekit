@@ -286,6 +286,16 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [ ] Repair the ~19h of genuine July tick+book outage via backfill_books_chd.py
       (NOT the "53h book gap" in the seed — Coinbase books collection began 2026-07-26,
       verified 2026-08-09, so there is nothing before that to repair)
+- [ ] Explain why Coinbase 100-row snapshot blocks are persisted despite parse()
+      skipping `type: "snapshot"` (verified skipped against real frames; mechanism
+      unknown). Instrument the RUNNING collector, not a separate probe.
+- [ ] MIKE'S CALL: Kraken book is unthrottled (collect_ticks has no RowThrottle)
+      while every other venue coalesces book to 1 Hz — the largest stream has a
+      different temporal resolution from its peers, which undercuts the
+      cross-venue-alignment premise. Also `now` is computed per MESSAGE, so rows
+      can share a timestamp (collect_ticks.py:478).
+- [ ] Finish `repartition_archive` on D:/tradekit-data/ticks (5.49 GB, the long
+      one; idempotent, just re-run). All other trees are done.
 - [ ] Alpaca NBBO for IBIT + GLD only (~25 MB/day)
 - [ ] Retention vs. disk — re-measure burn now the archive is deduplicated and compacted
 - [ ] GitHub remote + push (Mike's hands)
