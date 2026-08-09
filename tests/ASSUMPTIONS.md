@@ -3416,3 +3416,41 @@ the USD proceeds (unchanged fees_usd physics). Ratified pins:
 6. Scheduler: schtasks hourly via the cd /d working-directory-safe form
    (documented in scripts/run_cadence.py header); registration is MIKE'S
    step, never auto-executed. Script exits: 2 refusal, 1 unexpected.
+
+### 179 — event-time partitioning and archive repair (collector, no spec; CTO adjudication 2026-08-09)
+
+Four judgment calls made while fixing the archive-wide misfiling bug. None
+came from a spec — there is no spec for the collectors — so they are recorded
+here as the law the tests encode.
+
+1. THE PARTITION KEY IS THE ROW'S OWN TIMESTAMP, never the clock at write
+   time. `PartitionedParquetSink.flush()` therefore takes no `ts` argument at
+   all: the caller's notion of "now" has no say in where a row is filed, and
+   an argument that looks like it decides the path but does not is exactly how
+   the bug survived review. One flush writes one part file per (day, hour) the
+   buffer spans. Consequence accepted: a collector can now write into an
+   already-compacted hour. `compact_hour` already merges into an existing
+   target, so this is safe, and bounded to MAX_BUFFER_AGE_S of lateness.
+
+2. THE ALPACA CURSOR RESUMES AT THE BOUNDARY INSTANT AND DE-DUPLICATES ON
+   ARRIVAL. Alpaca's `start` is inclusive and its timestamps carry nanoseconds
+   while a Python datetime carries microseconds, so no arithmetic cursor is
+   correct: `newest + 1us` drops any print inside that microsecond, and whole
+   seconds re-request the tail of the tape forever. We re-ask for the
+   microsecond floor of the newest stored row and discard the rows we already
+   hold at exactly that instant. Suppression is scoped to that one instant, so
+   a trade id that legitimately recurs later is still recorded. Identity is
+   `trade_id` for trades; quotes carry no id, so the quote fields are their
+   own identity.
+
+3. BYTE-IDENTICAL ROWS ARE DUPLICATES, and `repartition_archive` collapses
+   them. Every row carries its own `ts`, so two rows identical in every column
+   are the same observation stored twice, not two facts. Rows sharing a
+   timestamp but differing anywhere else are kept — two venues can print the
+   same instant.
+
+4. WHEN THE TOOL CANNOT BE SURE, IT DOES NOTHING. A row whose `ts` will not
+   parse stays where it is; a (symbol, day, stream) unit containing an
+   unreadable file is skipped whole rather than rewritten around the gap; days
+   at or after the cutoff are neither read nor written into. The tool deletes
+   source files, so every ambiguity resolves toward leaving the archive alone.

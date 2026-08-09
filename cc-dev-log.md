@@ -1,3 +1,73 @@
+## 2026-08-09b (Opus — the archive was filing rows by INGEST time; every stream, every day)
+
+- Tree committed first (3 commits: .github assets, the collector sprint,
+  the docs/seed). It had been sitting green and uncommitted for a session.
+  Fix work then went on `fix/event-time-partitioning`.
+- THE BUG: every sink named its target file from FLUSH time, so a row's
+  on-disk hour recorded when we ingested it, not when it happened. Hour
+  partitioning that lies is worse than none — it invites time-ranged reads
+  that silently return the wrong rows.
+- Measured before the fix, 2026-08-08 alone. NOT a rounding error:
+
+  | stream | rows | wrong-hour | wrong-day |
+  |---|---|---|---|
+  | ticks (kraken book) | 24,236,349 | 1.87% | 38,148 |
+  | books/coinbase | 1,889,897 | 0.74% | 427 |
+  | books/okx | 207,137 | 5.65% | 0 |
+  | trades/coinbase | 92,076 | 5.90% | 110 |
+  | trades/okx | 35,323 | 4.72% | 0 |
+  | perps/hyperliquid (ctx) | 399,050 | 3.12% | 0 |
+  | liquidations/okx | 299 | 18.39% | 0 |
+  | equities/alpaca | 5,150,262 | 14.7-18.5% | 100% at weekends |
+
+- THE UNCOMFORTABLE PART: the collector_core streams score WORSE than the
+  legacy ones. That is a direct cost of last session's MIN_PART_ROWS change —
+  making a buffer wait until it earns a file means more buffers straddle an
+  hour boundary. Last session's own FRICTION entry claims the hour escape
+  handled it; the escape fired correctly and then wrote the rows into the NEW
+  hour's file, which is the bug it claimed to prevent. Trading file overhead
+  for hour attribution was not a trade anyone chose.
+- FIX: `PartitionedParquetSink` buffers (ts, row) pairs and one flush writes
+  one part file per (day, hour) the buffer spans. `flush()` lost its `ts`
+  parameter entirely — a parameter that looks like it decides the path but
+  does not is how this survived review.
+- SECOND BUG, Alpaca: `start` was formatted `%H:%M:%SZ`. Alpaca's `start` is
+  inclusive, so every pass re-requested and re-wrote the whole final second of
+  the tape. Over the closed weekend the cursor could not advance at all: 15
+  prints re-stored 176 times each, 2,625 redundant rows. Fixed with a
+  microsecond-exact cursor plus identity suppression scoped to the boundary
+  instant — no arithmetic cursor is correct here, because `start` is inclusive
+  and the venue stamps nanoseconds while a datetime carries microseconds.
+- THIRD, cosmetic: no `_CLASS_RULES` rule matches an equity ticker, so all ten
+  symbols were filed under `equities/alpaca/crypto/`. Alpaca's sink now runs
+  with `partition=False` — the venue tree IS the asset class.
+- SCOPE FOUND MID-FLIGHT: `collect_ticks`, `collect_books_coinbase` and
+  `collect_books_binance` each carried their OWN private ParquetSink — 74% of
+  the archive by volume, and not one test between them. All three had the
+  flush-time bug plus read-modify-write: read the whole hourly file back and
+  rewrite it, every 60s, quadratic in rows/hour, and a kill mid-write takes
+  the hour with it. It already had: `books/coinbase/crypto/CAKE_USD/
+  2026-08-08/book-05.parquet` has no footer magic bytes. All three retired
+  onto the shared sink; part files are append-only and cannot do that.
+- REPAIR: `scripts/repartition_archive.py` re-files what was already written
+  (possible only because the ts is in the data — nothing refetched). Deletes
+  source files, so it is deliberately timid: dry-run default, never touches or
+  writes into days at/after the cutoff, skips a whole (symbol, day, stream)
+  unit if any file in it is unreadable, leaves unparseable-ts rows put, and
+  does not rewrite an hour that is already correct. All reads happen before
+  any write. 15 tests; they passed first run rather than going red, so
+  discrimination was verified by mutation (4 mutants, all caught) instead.
+- ALPACA TREE REPAIRED AND VERIFIED: 5,148,222 rows read, 851,441 moved
+  (16.5%), 585 exact duplicates collapsed, 0 skipped; second pass a clean
+  no-op. The stale `2026-08-09` partitions held 2,145 rows of which **zero**
+  were unique — proved row-by-row against the rest of the tree before
+  deleting. Post-repair audit: 0.00% wrong-hour on every day, 0 duplicate
+  keys, 5,147,637 rows = exactly the distinct-observation count from the
+  pre-repair audit. Nothing lost.
+- ASSUMPTIONS 179 records the four judgment calls (partition key, cursor
+  semantics, what counts as a duplicate, and "when unsure, do nothing").
+- Gate green at every step; four commits, red committed separately.
+
 ## 2026-08-09a (Opus — data-vacuum cutover complete: 8 live streams, watchdog was silently dead)
 
 - Seed: `docs/handoff/HANDOFF-2026-08-09-data-vacuum-expansion.md`. Gate 1314

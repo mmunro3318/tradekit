@@ -271,3 +271,21 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] T2 execute_exit + trigger (r21)
 - [x] T3 run_once + digest + script (r22)
 - [ ] Mike: register the scheduled task (command in scripts/run_cadence.py header)
+
+## Data vacuum (seed: HANDOFF-2026-08-09-data-vacuum-expansion.md)
+- [x] 8 live collector streams on a shared collector_core (2026-08-08/09)
+- [x] Commit the sprint tree (was fully uncommitted)
+- [x] Partition every row by its own event timestamp, not by flush time
+- [x] Nanosecond-safe Alpaca resume cursor (was re-storing the tape's final second forever)
+- [x] Retire the three private per-venue ParquetSinks (flush-time bug + read-modify-write)
+- [x] scripts/repartition_archive.py + repair equities/alpaca (0.00% wrong-hour, 0 duplicates)
+- [ ] Merge `fix/event-time-partitioning`
+- [ ] Recover or write off `books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet`
+      (no footer magic bytes — killed mid read-modify-write; repartition skips its unit)
+- [ ] Binance archive backfill (scripts/backfill_binance_archive.py; 0% used, history to 2017)
+- [ ] Repair the ~19h of genuine July tick+book outage via backfill_books_chd.py
+      (NOT the "53h book gap" in the seed — Coinbase books collection began 2026-07-26,
+      verified 2026-08-09, so there is nothing before that to repair)
+- [ ] Alpaca NBBO for IBIT + GLD only (~25 MB/day)
+- [ ] Retention vs. disk — re-measure burn now the archive is deduplicated and compacted
+- [ ] GitHub remote + push (Mike's hands)

@@ -6,6 +6,16 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-09 — rtk swallows pytest's summary line `rtk,pytest,tooling,gate`
+- **Symptom:** 'rtk uv run pytest -q' reported 'Pytest: No tests collected' while the suite actually ran 1314 tests green; even 'rtk proxy uv run pytest -q' returned the warnings block with no 'N passed' line, so there was no way to read a test count from the filtered output.
+- **Cause:** rtk's pytest filter did not match this project's output shape. Exit code was 0 throughout, so the failure was purely in the reporting layer — dangerous precisely because 'no tests collected' reads as a red flag when the truth is green.
+- **Solution:** Do not read pass counts from rtk-filtered pytest output. Use the tk-gate script, which reports on exit codes and prints a canonical GATE: green/red block. Reserve 'rtk proxy' for cases where the raw tail is needed.
+
+## 2026-08-09 — MIN_PART_ROWS traded file overhead for hour-attribution error `collector,parquet,partitioning,time`
+- **Symptom:** The collector_core streams scored WORSE on wrong-hour partitioning than the legacy per-venue sinks they were supposed to improve on: books/okx 5.65% and trades/coinbase 5.90% against ticks' 1.87%, measured over 2026-08-08.
+- **Cause:** The 2026-08-08 tiny-file fix made a buffer wait until it earns a file (MIN_PART_ROWS=500). Waiting longer means more buffers are still open when the hour rolls, and the sink named its target file from FLUSH time — so every straggler was filed under the hour it was written in, not the hour it happened in. The fix for one silent cost bought a louder one. The FRICTION entry for that change even states the misfiling rationale as if it were handled ('a buffer is force-flushed before crossing an hour'); the force-flush fired correctly and then wrote the rows into the NEW hour's file, which is the bug it claimed to prevent.
+- **Solution:** Partition on the row's own timestamp, never on the clock: PartitionedParquetSink now buffers (ts, row) pairs and one flush writes one part file per (day, hour) the buffer spans. flush() lost its ts parameter entirely, because a parameter that looks like it decides the path but does not is how this survived review. scripts/repartition_archive.py repairs what was already written.
+
 ## 2026-08-08 — tiny part files made per-file overhead dwarf the data `parquet,collector,disk`
 - **Symptom:** after turning on 8 collectors the archive burned 6.54 GB/day (85 days to fill D:), with Hyperliquid perps alone at 2.57 GB/day and OKX books at 1.96 — against Coinbase's 0.40 on a near-identical schema and pair count
 - **Cause:** `flush_all` wrote a part file for EVERY buffer on every 60s tick regardless of size. A parquet file pays fixed footer/schema overhead whether it holds 6 rows or 6000, and at 232 perp assets x 2 streams that meant ~460 files/minute averaging **6 rows/file** (572 bytes/row vs 126 on the same schema elsewhere); OKX books averaged 25 rows/file at 1110 bytes/row. Compaction existed and would have fixed it, but had never been scheduled — it only merges CLOSED hours, so it cannot help the current hour anyway
