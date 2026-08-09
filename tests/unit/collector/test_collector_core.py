@@ -1268,3 +1268,46 @@ class TestRunWsCollectorFilesByEventTime:
         written = list(tmp_path.rglob("*.parquet"))
         assert len(written) == 1
         assert written[0].parent.name == f"{datetime.now(UTC):%Y-%m-%d}"
+
+
+class TestAddPrefersTheRowsOwnTimestamp:
+    """`add`'s `ts` is the ARRIVAL time — a fallback, not the partition key.
+
+    Three separate collectors passed arrival time for rows carrying a venue
+    timestamp (run_ws_collector, and the two custom orchestrators). Each was a
+    separate fix and each was found only by measuring the archive afterwards.
+    So the sink stopped trusting the caller to have picked the right clock:
+    the row's own timestamp wins whenever it can be read.
+
+    The last instance cost six CASHCAT-PERP trades stamped 13:59:59.888,
+    filed under hour 14 on 2026-08-09.
+    """
+
+    ARRIVED = datetime(2026, 8, 9, 14, 0, 0, tzinfo=UTC)
+
+    def test_the_rows_own_timestamp_beats_the_arrival_time_the_caller_passed(
+        self, tmp_path: Path
+    ) -> None:
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        sink.add(
+            "CASHCAT-PERP",
+            "trades",
+            {"ts": "2026-08-09T13:59:59.888000+00:00", "price": 0.13382},
+            self.ARRIVED,
+        )
+        sink.flush("CASHCAT-PERP", "trades")
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].name.startswith("trades-13.")
+
+    def test_arrival_is_used_when_the_row_carries_no_readable_timestamp(
+        self, tmp_path: Path
+    ) -> None:
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        sink.add("BTC/USD", "book", {"ts": "", "bid": 1.0}, self.ARRIVED)
+        sink.flush("BTC/USD", "book")
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].name.startswith("book-14.")

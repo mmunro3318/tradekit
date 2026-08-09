@@ -319,12 +319,21 @@ class PartitionedParquetSink:
         return self._rows_written
 
     def add(self, symbol: str, stream: str, row: dict[str, Any], ts: datetime) -> None:
+        """Buffer a row. `ts` is when it ARRIVED — the row's own stamp wins.
+
+        The sink deliberately does not trust the caller to have picked the
+        right clock. Three separate collectors passed arrival time for rows
+        carrying a venue timestamp, each was a separate fix, and each was
+        found only by measuring the archive days later. `ts` is now just the
+        fallback for a row whose own timestamp is missing or unreadable.
+        """
         if (symbol, stream) not in self._buffers:
             _assert_stream_name(stream)
+        at = event_ts(row, ts)
         buf = self._buffers.setdefault((symbol, stream), _Buffer())
         if not buf.rows:
-            buf.first_ts = ts
-        buf.rows.append((ts, row))
+            buf.first_ts = at
+        buf.rows.append((at, row))
         if len(buf.rows) >= FLUSH_ROW_LIMIT:
             self.flush(symbol, stream)
 
@@ -611,7 +620,7 @@ async def run_ws_collector(
                                 f"{symbol}/{stream}", loop.time()
                             ):
                                 continue
-                            sink.add(symbol, stream, row, event_ts(row, now))
+                            sink.add(symbol, stream, row, now)
                             counts[symbol] += 1
                         if loop.time() - last_flush >= FLUSH_INTERVAL_S:
                             sink.flush_all(now)
