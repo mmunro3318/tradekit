@@ -955,3 +955,135 @@ class TestRunWsCollectorKeepaliveAndLiveness:
         )
 
         assert factory.calls > 1  # reconnected at least once
+
+
+class TestPartitionedParquetSinkEventTimePartitioning:
+    """Every row must land in the day/hour ITS OWN timestamp names.
+
+    Regression cover for the archive-wide misfiling found 2026-08-09: the sink
+    named the target file from FLUSH time, so a row's on-disk hour recorded
+    when we ingested it rather than when it happened. On the live websocket
+    feeds those two are close enough that it only leaked at hour boundaries
+    (~0.7% of rows), but on the delayed Alpaca poller they diverge by design
+    and 100% of a weekend's rows were filed under the wrong day. Measured over
+    5,150,262 stored equity prints: 14.7-18.5% wrong-hour on trading days.
+
+    Hour-partitioning that cannot be trusted is worse than none — it invites
+    time-ranged reads that silently return the wrong rows.
+    """
+
+    DAY = datetime(2026, 8, 8, tzinfo=UTC)
+
+    @staticmethod
+    def _rows_at(path: Path) -> list[dict[str, object]]:
+        import pyarrow.parquet as pq
+
+        return pq.read_table(path).to_pylist()
+
+    def test_regression_rows_are_filed_by_their_own_event_hour_not_the_flush_hour(
+        self, tmp_path: Path
+    ) -> None:
+        # Discriminating: filing by flush time puts all five rows in hour 12;
+        # filing by the buffer's first row puts all five in hour 10. Only
+        # per-row event time produces 3-in-10 and 2-in-11 with nothing in 12.
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        for i in range(3):
+            ts = self.DAY.replace(hour=10, minute=i)
+            sink.add("BTC/USD", "trades", {"ts": ts.isoformat(), "price": float(i)}, ts)
+        for i in range(2):
+            ts = self.DAY.replace(hour=11, minute=i)
+            sink.add("BTC/USD", "trades", {"ts": ts.isoformat(), "price": 100.0 + i}, ts)
+
+        flushed_at = self.DAY.replace(hour=12)
+        assert sink.flush_all(flushed_at, force=True) == 5
+
+        h10 = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.DAY.replace(hour=10), part=0, partition=False
+        )
+        h11 = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.DAY.replace(hour=11), part=0, partition=False
+        )
+        h12 = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", flushed_at, part=0, partition=False
+        )
+        assert [r["price"] for r in self._rows_at(h10)] == [0.0, 1.0, 2.0]
+        assert [r["price"] for r in self._rows_at(h11)] == [100.0, 101.0]
+        assert not h12.exists()
+
+    def test_rows_spanning_a_day_boundary_land_in_their_own_day_directories(
+        self, tmp_path: Path
+    ) -> None:
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        late = self.DAY.replace(hour=23, minute=59)
+        early = self.DAY + timedelta(days=1, minutes=1)
+        sink.add("BTC/USD", "trades", {"ts": late.isoformat(), "price": 1.0}, late)
+        sink.add("BTC/USD", "trades", {"ts": early.isoformat(), "price": 2.0}, early)
+        sink.flush_all(early + timedelta(hours=2), force=True)
+
+        d1 = cc.hour_file_path(tmp_path, "BTC/USD", "trades", late, part=0, partition=False)
+        d2 = cc.hour_file_path(tmp_path, "BTC/USD", "trades", early, part=0, partition=False)
+        assert d1.parent.name == "2026-08-08"
+        assert d2.parent.name == "2026-08-09"
+        assert [r["price"] for r in self._rows_at(d1)] == [1.0]
+        assert [r["price"] for r in self._rows_at(d2)] == [2.0]
+
+    def test_regression_a_two_day_old_backfill_does_not_land_in_the_ingest_hour(
+        self, tmp_path: Path
+    ) -> None:
+        # The delayed-poller shape: a batch fetched now but stamped days ago.
+        # This is the case that put a whole Friday tape under Sunday's date.
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        event = self.DAY.replace(hour=19, minute=30)
+        ingest = self.DAY + timedelta(days=2, hours=3)
+        sink.add("RIOT", "trades", {"ts": event.isoformat(), "price": 9.0}, event)
+        sink.flush_all(ingest, force=True)
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].parent.name == "2026-08-08"
+        assert written[0].name == "trades-19.part-0000.parquet"
+
+    def test_part_numbering_is_independent_per_target_hour(self, tmp_path: Path) -> None:
+        # A single shared counter would emit part-0000 and part-0001 across two
+        # different hours, then collide or skip on the next flush.
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        for round_ in range(2):
+            for hour in (10, 11):
+                ts = self.DAY.replace(hour=hour, minute=round_)
+                sink.add("BTC/USD", "trades", {"ts": ts.isoformat(), "price": 1.0}, ts)
+            sink.flush_all(self.DAY.replace(hour=12), force=True)
+
+        for hour in (10, 11):
+            at = self.DAY.replace(hour=hour)
+            for part in (0, 1):
+                assert cc.hour_file_path(
+                    tmp_path, "BTC/USD", "trades", at, part=part, partition=False
+                ).exists(), f"hour {hour} part {part} missing"
+
+    def test_row_order_within_an_hour_survives_the_split(self, tmp_path: Path) -> None:
+        # Grouping must be stable: interleaved arrival, per-hour order kept.
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        for i in range(6):
+            ts = self.DAY.replace(hour=10 + i % 2, minute=i)
+            sink.add("BTC/USD", "trades", {"ts": ts.isoformat(), "price": float(i)}, ts)
+        sink.flush_all(self.DAY.replace(hour=13), force=True)
+
+        h10 = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.DAY.replace(hour=10), part=0, partition=False
+        )
+        h11 = cc.hour_file_path(
+            tmp_path, "BTC/USD", "trades", self.DAY.replace(hour=11), part=0, partition=False
+        )
+        assert [r["price"] for r in self._rows_at(h10)] == [0.0, 2.0, 4.0]
+        assert [r["price"] for r in self._rows_at(h11)] == [1.0, 3.0, 5.0]
+
+    def test_rows_written_accounting_covers_every_hour_the_flush_split_into(
+        self, tmp_path: Path
+    ) -> None:
+        sink = cc.PartitionedParquetSink(tmp_path, partition=False)
+        for hour in (8, 9, 10):
+            ts = self.DAY.replace(hour=hour)
+            sink.add("BTC/USD", "trades", {"ts": ts.isoformat(), "price": 1.0}, ts)
+        assert sink.flush("BTC/USD", "trades") == 3
+        assert sink.rows_written == 3
+        assert sink.buffered_rows() == 0
