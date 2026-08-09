@@ -1197,3 +1197,74 @@ def _die_partway(table: object, where: object, *args: object, **kwargs: object) 
     """Write a header and then die — what a kill mid-write actually leaves."""
     Path(str(where)).write_bytes(b"PAR1truncated")
     raise OSError("disk full")
+
+
+class TestRunWsCollectorFilesByEventTime:
+    """The runner must hand the sink the ROW's timestamp, not the arrival time.
+
+    Fixing the sink was only half of it: `run_ws_collector` was passing `now`
+    for every row, so the partition key was still when the frame reached us.
+    On the chatty feeds that is within milliseconds of the event and only
+    leaks at the hour boundary (measured 2026-08-09 13:00 UTC: 1 row in
+    1,359,922 on ticks, 8 in 145,306 on perps — all stamped 12:59:59.x). On a
+    feed that replays history it is completely wrong: Coinbase market_trades
+    put trades stamped 2026-08-07 into a 2026-08-09 hour-13 file.
+
+    A row whose timestamp cannot be read falls back to arrival — a partition
+    key we can defend beats a crash or a guess.
+    """
+
+    @staticmethod
+    def _spec_emitting(ts_value: object) -> cc.VenueSpec:
+        def parse(msg: dict, now: datetime) -> list:
+            if msg.get("type") != "trade":
+                return []
+            return [("BTC/USD", "trades", {"ts": ts_value, "price": msg["price"]})]
+
+        return cc.VenueSpec(
+            name="fake",
+            ws_url="wss://fake.example",
+            subscribe=lambda symbols: [{"type": "subscribe", "symbols": symbols}],
+            parse=parse,
+            heartbeat_timeout_s=0.08,
+        )
+
+    def _run(self, spec: cc.VenueSpec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import json as json_mod
+
+        import websockets
+
+        conn = _FakeWsConnection()
+        conn.queue(json_mod.dumps({"type": "trade", "price": 1.0}))
+        monkeypatch.setattr(websockets, "connect", _FakeConnectFactory(lambda: conn))
+        asyncio.run(
+            cc.run_ws_collector(spec, ["BTC/USD"], tmp_path, duration_s=0.3, partition=False)
+        )
+
+    def test_a_row_stamped_two_days_ago_is_filed_under_that_day(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(self._spec_emitting("2026-08-07T18:52:51.553228Z"), tmp_path, monkeypatch)
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].parent.name == "2026-08-07"
+        assert written[0].name.startswith("trades-18.")
+
+    def test_a_row_with_an_unreadable_timestamp_falls_back_to_arrival(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(self._spec_emitting("not-a-timestamp"), tmp_path, monkeypatch)
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].parent.name == f"{datetime.now(UTC):%Y-%m-%d}"
+
+    def test_a_row_with_no_timestamp_at_all_falls_back_to_arrival(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(self._spec_emitting(None), tmp_path, monkeypatch)
+
+        written = list(tmp_path.rglob("*.parquet"))
+        assert len(written) == 1
+        assert written[0].parent.name == f"{datetime.now(UTC):%Y-%m-%d}"

@@ -39,7 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -443,6 +443,32 @@ class RowThrottle:
         return True
 
 
+def event_ts(row: Mapping[str, Any], arrived: datetime) -> datetime:
+    """When the row says it happened, falling back to when it reached us.
+
+    Every venue's `parse` puts the event time in the row's `ts` field, and
+    that — not the moment the frame arrived — is what decides the row's
+    partition. The two are milliseconds apart on a chatty feed and only leak
+    at the hour boundary, but a feed that replays history diverges completely:
+    Coinbase `market_trades` hands back trades stamped days earlier, and
+    filing those under the arrival hour is how a 2026-08-07 trade ended up in
+    a 2026-08-09 hour-13 file.
+
+    A timestamp we cannot read falls back to arrival rather than raising. A
+    partition key we can defend beats losing the row over a venue's formatting.
+    """
+    raw = row.get("ts")
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return arrived
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return arrived
+
+
 def backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
     return min(base * (2.0**attempt), cap)
 
@@ -585,7 +611,7 @@ async def run_ws_collector(
                                 f"{symbol}/{stream}", loop.time()
                             ):
                                 continue
-                            sink.add(symbol, stream, row, now)
+                            sink.add(symbol, stream, row, event_ts(row, now))
                             counts[symbol] += 1
                         if loop.time() - last_flush >= FLUSH_INTERVAL_S:
                             sink.flush_all(now)
