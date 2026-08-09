@@ -299,12 +299,25 @@ information — so it is **Mike's call and deliberately not changed here.**
 
 1. **Merge `fix/event-time-partitioning`.** Gate green at `4826939`; re-run
    `tk-gate` first, HEAD has moved since.
-2. **Finish the crypto-tree repartition** if it did not complete — it is
-   idempotent, so just re-run per tree. `equities/alpaca` is done and verified.
-   `liquidations/okx`, `trades/okx`, `trades/coinbase`, `books/okx` and
-   `perps/hyperliquid` are done. `books/coinbase` and `ticks` (5.49 GB, the
-   long one) are the remainder.
-3. **Rename the corrupt CAKE_USD file** (§5) and re-run `books/coinbase`.
+2. **Finish the `ticks` history repair — it is PARTIAL.** Everything else is
+   done and verified: `equities/alpaca` (0.00% wrong-hour, 0 duplicates),
+   `liquidations/okx`, `trades/okx`, `trades/coinbase`, `books/okx`,
+   `perps/hyperliquid`, and `books/coinbase` (re-run after the corrupt file
+   was quarantined: 0 skipped).
+
+   `ticks` is roughly 30% applied — 2026-08-08 measures **1.38% wrong-hour,
+   down from 1.87%**. Long whole-tree runs kept being killed, so use the
+   chunked runner, which records progress per symbol and resumes:
+   `scratchpad/repair_ticks_chunked.py` with `ticks_repaired.txt`. Per-symbol
+   scoping is safe — `repartition_archive` never moves a row between symbols,
+   only between day directories inside one — so
+   `repartition_archive.py D:/tradekit-data/ticks/crypto/BTC_USD` is a valid
+   unit of work. Re-measure with the audit script; the target is 0.00%.
+
+   **Expect the row count to fall.** Repairing one day of `ticks` removed
+   ~992,649 byte-identical rows (24,236,349 -> 23,243,700). That is not loss,
+   it is finding 5b(b) being collected: Kraken book is unthrottled and
+   re-writes the same top-10 repeatedly.
 4. **Re-measure burn** and settle retention vs. disk.
 5. **Binance archive backfill** — biggest untapped source, history to 2017,
    currently 0% used. `scripts/backfill_binance_archive.py`, `--dry-run`
