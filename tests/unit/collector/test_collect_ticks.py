@@ -8,6 +8,8 @@ file-path rotation, prune-cutoff selection, and backoff schedule.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -269,3 +271,130 @@ class TestTickSinkFilesByEventTime:
             cc.compact_hour(wanted.parent, stream, self.HOUR_9.hour)
             assert wanted.exists(), f"{stream} row did not reach hour 09"
             assert not path_of(tmp_path, "BTC/USD", self.HOUR_10).exists()
+
+
+class _FakeWs:
+    """Replays queued frames, then blocks so the run's own deadline ends it."""
+
+    def __init__(self, frames: list[str]) -> None:
+        self.frames = list(frames)
+        self.sent: list[str] = []
+
+    async def __aenter__(self) -> _FakeWs:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def send(self, payload: str) -> None:
+        self.sent.append(payload)
+
+    async def recv(self) -> str:
+        if self.frames:
+            return self.frames.pop(0)
+        await asyncio.sleep(3600)  # never resolves inside the test deadline
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _book_frame(pair: str, best_bid: float) -> str:
+    return json.dumps(
+        {
+            "channel": "book",
+            "type": "update",
+            "data": [
+                {
+                    "symbol": pair,
+                    "bids": [{"price": best_bid, "qty": 1.0}],
+                    "asks": [{"price": best_bid + 1.0, "qty": 1.0}],
+                }
+            ],
+        }
+    )
+
+
+def _trade_frame(pair: str, price: float, ts: str) -> str:
+    return json.dumps(
+        {
+            "channel": "trade",
+            "type": "update",
+            "data": [
+                {
+                    "symbol": pair,
+                    "timestamp": ts,
+                    "price": price,
+                    "qty": 1.0,
+                    "side": "buy",
+                    "ord_type": "market",
+                }
+            ],
+        }
+    )
+
+
+class TestKrakenBookIsThrottledLikeEveryOtherVenue:
+    """Kraken book must coalesce to 1 Hz, as Coinbase and OKX books already do.
+
+    `collect_ticks` never had a throttle — it predates collector_core and
+    never inherited the default. Every other book stream goes through
+    `RowThrottle` at BOOK_ROW_INTERVAL_S, so the archive's LARGEST stream was
+    the only one sampled at venue chattiness rather than at a fixed rate,
+    which breaks the "aligned cross-venue timestamps" premise: a 1 Hz stream
+    cannot be joined against an 18 Hz one at better than 1 Hz.
+
+    Measured on 2026-08-08, all 77 symbols: 23,213,832 book rows stored where
+    a 1 Hz throttle keeps 2,347,045 — 9.9x. TAO_USD alone wrote 2,114,430 rows
+    in one day, more than ETH.
+
+    Trades are NOT throttled here and must never be: every print matters.
+    """
+
+    def _run(
+        self, frames: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> dict[str, dict[str, int]]:
+        import websockets
+
+        monkeypatch.setattr(ct, "verify_pairs", lambda pairs, **_: dict.fromkeys(pairs, True))
+        ws = _FakeWs(frames)
+        monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
+        return asyncio.run(ct.run_collector(["BTC/USD"], tmp_path, duration_s=0.4))
+
+    def test_a_burst_of_book_updates_in_one_second_writes_one_row(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Twenty distinct book states arriving back-to-back. Unthrottled that
+        # is twenty rows; at 1 Hz it is one.
+        frames = [_book_frame("BTC/USD", 100.0 + i) for i in range(20)]
+
+        counts = self._run(frames, tmp_path, monkeypatch)
+
+        written = [
+            r
+            for f in tmp_path.rglob("book-*.parquet")
+            for r in __import__("pyarrow.parquet", fromlist=["x"]).read_table(f).to_pylist()
+        ]
+        assert len(written) == 1, f"expected 1 coalesced book row, got {len(written)}"
+        assert counts["BTC/USD"]["book_updates"] == 1
+
+    def test_every_trade_survives_the_throttle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The counter-test. Coalescing the book must not touch trades — a
+        # dropped print is a hole in the tape that cannot be reconstructed.
+        frames = [
+            _trade_frame("BTC/USD", 100.0 + i, f"2026-08-09T15:00:0{i}.000000Z") for i in range(5)
+        ]
+
+        counts = self._run(frames, tmp_path, monkeypatch)
+
+        written = [
+            r
+            for f in tmp_path.rglob("trades-*.parquet")
+            for r in __import__("pyarrow.parquet", fromlist=["x"]).read_table(f).to_pylist()
+        ]
+        assert len(written) == 5
+        assert counts["BTC/USD"]["trades"] == 5
+
+    def test_the_interval_is_the_shared_one_not_a_private_copy(self) -> None:
+        # Divergence here is what split the archive's resolution in the first
+        # place: one venue quietly sampling at a different rate from the rest.
+        assert ct.BOOK_ROW_INTERVAL_S == cc.BOOK_ROW_INTERVAL_S

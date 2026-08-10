@@ -55,7 +55,13 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from collector_core import PartitionedParquetSink, stream_dir, symbol_dirname
+from collector_core import (
+    BOOK_ROW_INTERVAL_S,
+    PartitionedParquetSink,
+    RowThrottle,
+    stream_dir,
+    symbol_dirname,
+)
 
 WS_URL = "wss://ws.kraken.com/v2"
 REST_ASSET_PAIRS_URL = "https://api.kraken.com/0/public/AssetPairs"
@@ -442,6 +448,15 @@ async def run_collector(
     sink = PartitionedParquetSink(base_dir)
     counts: dict[str, dict[str, int]] = {p: {"trades": 0, "book_updates": 0} for p in active}
     books: dict[str, OrderBookState] = {p: OrderBookState() for p in active}
+    # Book rows only. Every other venue's book already coalesces to 1 Hz via
+    # collector_core; this collector predates that core and never inherited
+    # it, so the archive's largest stream was sampled at Kraken's chattiness
+    # instead of at a fixed rate. Measured 2026-08-08 over 77 symbols:
+    # 23,213,832 rows where 1 Hz keeps 2,347,045 — 9.9x, and TAO_USD alone
+    # wrote 2,114,430 rows in a day, more than ETH. A stream sampled faster
+    # than its peers cannot be joined against them at the finer rate anyway,
+    # so the extra rows cost disk and buy nothing the archive can use.
+    throttle = RowThrottle(BOOK_ROW_INTERVAL_S)
     loop = asyncio.get_event_loop()
     deadline = (loop.time() + duration_s) if duration_s is not None else None
     last_flush = loop.time()
@@ -501,6 +516,11 @@ async def run_collector(
                                 book.apply_snapshot(item)
                             else:
                                 book.apply_update(item)
+                            # The book state is updated above regardless —
+                            # the throttle decides only whether this state is
+                            # WRITTEN, never whether the update is applied.
+                            if not throttle.allow(f"{pair}/book", loop.time()):
+                                continue
                             row = book.top_row(ts=now.isoformat(), depth=BOOK_DEPTH)
                             sink.add(pair, "book", row, now)
                             counts[pair]["book_updates"] += 1
