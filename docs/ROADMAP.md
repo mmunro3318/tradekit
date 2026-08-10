@@ -289,18 +289,17 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [ ] Explain why Coinbase 100-row snapshot blocks are persisted despite parse()
       skipping `type: "snapshot"` (verified skipped against real frames; mechanism
       unknown). Instrument the RUNNING collector, not a separate probe.
-- [ ] MIKE'S CALL: Kraken book is unthrottled (collect_ticks has no RowThrottle)
-      while every other venue coalesces book to 1 Hz — the largest stream has a
-      different temporal resolution from its peers, which undercuts the
-      cross-venue-alignment premise. Also `now` is computed per MESSAGE, so rows
-      can share a timestamp (collect_ticks.py:478).
+- [x] Kraken book throttled to 1 Hz to match every other venue (Mike ratified,
+      ASSUMPTIONS 180); history downsampled 342,389,849 -> 14,658,656 rows (95.7%),
+      archive 6.98 -> 3.36 GB. Every closed day verified: no two book rows <1s apart.
 - [x] repartition_archive applied to every tree; all CLOSED days audit 0.00% wrong-hour
-- [ ] Re-run repartition_archive on every tree after 00:00 UTC to sweep 2026-08-09,
-      whose hours 00-14 were written pre-fix. The tool never touches the live day,
-      so this is the normal way that partition finishes.
-- [ ] Decide Kraken book dedup: `--dedupe` is now OFF by default, so the tool no
-      longer silently drops ~23% of that stream. Days repaired before that change
-      DID have it applied, so book density is not uniform until this is settled.
+- [x] repartition_archive swept 2026-08-09 on every tree once the day closed
+- [ ] After 2026-08-10 closes, run repartition_archive AND downsample_book over every
+      tree once more, to sweep that day's rows from before the 00:07 UTC deploy.
+      Neither tool touches the live day, so this is how a partition normally finishes.
+- [x] Kraken book dedup question settled by the 1 Hz decision — downsampling supersedes
+      it, and density is now uniform across the whole tree regardless of which days had
+      `--dedupe` applied earlier.
 - [ ] Alpaca NBBO for IBIT + GLD only (~25 MB/day)
 - [ ] Retention vs. disk — re-measure burn now the archive is deduplicated and compacted
 - [ ] GitHub remote + push (Mike's hands)

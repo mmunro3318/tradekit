@@ -3454,3 +3454,40 @@ here as the law the tests encode.
    unreadable file is skipped whole rather than rewritten around the gap; days
    at or after the cutoff are neither read nor written into. The tool deletes
    source files, so every ambiguity resolves toward leaving the archive alone.
+
+### 180 — book sampling rate is 1 Hz, archive-wide (CTO ratified 2026-08-09, Mike)
+
+`collect_ticks` never had a row throttle, so Kraken book — the largest stream
+in the archive — was recorded at the venue's update rate while every other
+book stream was coalesced to 1 Hz by collector_core. Ratified: **one sampling
+policy for every book stream, 1 Hz**, applied to new data and to history.
+
+1. WHY 1 Hz AND NOT MORE. Coinbase and OKX books are already 1 Hz, so any
+   cross-venue join was capped at 1 Hz regardless — the extra Kraken
+   resolution could only ever be discarded at read time. Uniform sampling is
+   also the honest form of the archive's stated differentiator, "L2 depth
+   with aligned cross-venue timestamps". Accepted cost: intra-second book
+   dynamics on Kraken are gone and are NOT recoverable. That rules out
+   latency-scale work on the historical tape; it does not affect the
+   cross-venue basis question the archive exists to answer.
+
+2. MEASURED, not estimated. 342,389,849 stored book rows became 14,658,656 —
+   95.7% dropped. ETH/USD alone averaged 45.7 book updates per second on
+   weekdays. An earlier estimate of ~90% was taken from 2026-08-08, which was
+   a SATURDAY; weekends are the quiet days here and the sample was not
+   representative. Quote the 95.7%.
+
+3. THE WINDOW SLIDES FROM THE LAST KEPT ROW, matching the live `RowThrottle`,
+   rather than bucketing on a fixed calendar-second grid. A grid would admit
+   a row 0.1s after the previous one whenever it crossed a second boundary,
+   and history would end up sampled differently from new data.
+
+4. TRADES ARE NEVER THROTTLED, on any venue. A coalesced book row costs
+   resolution; a dropped print is a hole in the tape that cannot be
+   reconstructed. `downsample_book` refuses `--stream trades` outright.
+
+5. Recorded gaps of 900-1000 ms are expected and are not a throttle failure:
+   the gate reads the monotonic clock while the row's `ts` is captured at
+   message receipt, so a gate that saw >=1000 ms can record 970 ms. Every
+   venue gates this way. Measured post-deploy: all sub-second gaps fall in
+   900-1000 ms, none below.

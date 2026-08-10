@@ -287,7 +287,11 @@ those rows land in their true day/hour, where they are exact duplicates that
 step: instrument the running collector to log event types and frame counts,
 rather than probing a separate connection.
 
-**(b) Kraken book is unthrottled — ~23% of its rows are byte-identical.**
+**(b) RESOLVED 2026-08-10 — Kraken book now throttled to 1 Hz.** Ratified by
+Mike; see ASSUMPTIONS 180 and §9 below. The description of the problem is kept
+here for the record.
+
+**(b, as found) Kraken book was unthrottled — ~23% of its rows byte-identical.**
 `collect_ticks.py` contains no `RowThrottle` at all. Every other venue goes
 through `run_ws_collector`, which coalesces `book` to 1 Hz
 (`BOOK_ROW_INTERVAL_S`). So the archive's LARGEST stream has a different
@@ -373,3 +377,54 @@ information — so it is **Mike's call and deliberately not changed here.**
   all 8 and `Start-ScheduledTask -TaskName 'TradeKit Collector Watchdog'`.
 - Do not read pytest pass counts from rtk-filtered output; it reported
   "No tests collected" on a green 1314-test suite. Use `tk-gate`.
+
+
+## 9. Kraken book brought to 1 Hz (2026-08-10, Mike ratified)
+
+`collect_ticks` never had a row throttle — it predates collector_core and
+never inherited `throttled_streams={"book"}` — so the archive's largest stream
+was recorded at Kraken's update rate while every other book stream was
+coalesced to 1 Hz. Now uniform, in the collector and in the history.
+
+**Collector.** `RowThrottle(BOOK_ROW_INTERVAL_S)` gates the WRITE only;
+`apply_update` still runs on every message, so the maintained book state is
+unchanged and no update is missed. Trades are untouched and must stay that
+way — pinned by a counter-test.
+
+**History.** `scripts/downsample_book.py`, dry-run by default, book only, tree
+lock shared with `repartition_archive`, days at/after the cutoff untouched.
+It keeps the FIRST row of each window and slides from the last KEPT row, which
+is what the live throttle does; a calendar-second grid would sample history
+differently from new data.
+
+| | rows |
+|---|---|
+| stored | 342,389,849 |
+| kept at 1 Hz | 14,658,656 |
+| **dropped** | **327,731,193 (95.7%)** |
+
+    ticks tree      4.48 GB -> 0.85 GB
+    whole archive   6.98 GB -> 3.36 GB   (52% smaller)
+
+**Verified after the run:**
+- Second pass drops 0 — idempotent.
+- **Every closed day: zero book rows less than 1s apart.** The only sub-1s
+  gaps left are in 2026-08-10, from the 7 minutes before the 00:07 UTC deploy;
+  one more run after that day closes clears them.
+- 0 book rows in the wrong hour — the partition invariant survived the rewrite.
+- Trades untouched: 1,519,608 rows, none removed.
+- Post-deploy live check: all sub-second gaps fall in **900-1000 ms**, none
+  below. That is clock jitter, not throttle failure — the gate reads the
+  monotonic clock while `ts` is captured at message receipt, and every venue
+  gates the same way.
+
+**Correction worth carrying.** I quoted ~10x (89.9%) when proposing this. That
+came from counting distinct seconds on 2026-08-08 — a **Saturday**. Weekends
+are the quiet days: ETH/USD averaged 18.0 book updates/second that day against
+45.7 on weekdays. The real figure is 95.7%. The decision did not change but the
+number quoted for approval was wrong by 2.3x. Do not extrapolate this archive
+from a single day without checking the day of the week.
+
+**Still to do:** after 2026-08-10 closes, run BOTH `repartition_archive` and
+`downsample_book` over every tree once more to sweep that day's pre-deploy
+rows. That is the routine that finishes any partition, not a special case.

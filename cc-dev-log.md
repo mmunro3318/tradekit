@@ -1,3 +1,40 @@
+## 2026-08-10 (Opus — Kraken book to 1 Hz, history synced; archive halved)
+
+- Mike ratified: one book sampling policy archive-wide, 1 Hz (ASSUMPTIONS 180).
+  `collect_ticks` never had a RowThrottle — it predates collector_core and
+  never inherited `throttled_streams={"book"}` — so the largest stream was
+  recorded at Kraken's update rate while Coinbase and OKX were coalesced.
+- COLLECTOR: throttle gates the WRITE only. `apply_update` still runs on every
+  message, so book state is unchanged and no update is missed. Trades are
+  untouched on every venue and pinned by a counter-test — a coalesced book row
+  costs resolution, a dropped print is a hole in the tape.
+- HISTORY: new `scripts/downsample_book.py`. 342,389,849 -> 14,658,656 rows,
+  **95.7% dropped**. ticks 4.48 -> 0.85 GB, whole archive 6.98 -> 3.36 GB.
+- I QUOTED THE WRONG NUMBER FOR APPROVAL. Told Mike ~10x (89.9%); real figure
+  95.7%, ~23x. The estimate counted distinct seconds on 2026-08-08 — a
+  SATURDAY. ETH/USD averages 18.0 book updates/sec at weekends against 45.7 on
+  weekdays. Caught it in the dry run and corrected before executing an
+  irreversible delete, but one day is not a sample. Logged in FRICTION.
+- BUG THE TESTS CAUGHT: the first downsampler sorted by the ts STRING. ISO-8601
+  does not sort lexicographically across mixed fractional precision —
+  "12:00:00Z" sorts AFTER "12:00:00.5Z" because "." < "Z", and isoformat()
+  omits the fraction when it is exactly zero. It was keeping the LATER row of
+  each window and dropping the earlier one. Now sorts by parsed instant.
+- Also fixed en route: `repartition_archive` blew up ~145x through
+  `to_pylist()` on 41-column book tables (8.5 GB RSS, unfinished after 22 min
+  on one symbol-day). Rewritten to slice in Arrow: whole ETH_USD symbol,
+  67.5M rows, 40 seconds. And `--dedupe` is now OPT-IN — it had been silently
+  dropping ~23% of Kraken book, pre-empting the very decision that was open.
+- Both repair tools now share one tree lock. I had launched a second repair
+  while the first was running and both were reading the same 698 MB symbol;
+  nothing was lost only because all reads precede any write.
+- VERIFIED: second downsample pass drops 0 (idempotent); every CLOSED day has
+  zero book rows <1s apart; 0 rows in the wrong hour after the rewrite; trades
+  1,519,608 unchanged. Live post-deploy gaps all fall in 900-1000 ms — clock
+  jitter (gate reads monotonic, ts is captured at message receipt), not
+  throttle failure. Remaining sub-1s rows are 2026-08-10 pre-deploy only.
+- Gate green at every step. 18 commits on fix/event-time-partitioning.
+
 ## 2026-08-09b (Opus — the archive was filing rows by INGEST time; every stream, every day)
 
 - Tree committed first (3 commits: .github assets, the collector sprint,

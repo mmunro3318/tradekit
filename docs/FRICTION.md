@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-10 — estimated a 10x saving from a Saturday, real figure was 23x `measurement,estimation,data`
+- **Symptom:** Told Mike the Kraken book throttle would cut the stream ~10x (89.9%). The actual run dropped 95.7% — 342,389,849 rows to 14,658,656, closer to 23x.
+- **Cause:** The estimate came from counting distinct seconds on 2026-08-08, which was a SATURDAY. Crypto book chatter is markedly lower at weekends: ETH/USD averaged 18.0 book updates per second that day against 45.7 on weekdays. One day is not a sample. The second, smaller error: distinct-calendar-seconds overcounts what a SLIDING 1s window keeps, because a window anchored on the last kept row can skip a calendar second entirely.
+- **Solution:** Cross-check any per-day extrapolation against the day-of-week profile before quoting it, and prefer running the actual tool in dry-run over hand-computing a proxy metric — the dry run costs a minute and reports the real number. The decision was unchanged, but the figure quoted for approval was wrong by 2.3x and had to be corrected before executing an irreversible delete.
+
 ## 2026-08-09 — repartition left empty day dirs and that destroyed the Alpaca cursor `collector,alpaca,cursor,repair-tooling`
 - **Symptom:** After repairing equities/alpaca, the poller went from 'rows=0' (correct, market closed) to writing 3.7 MILLION rows per 5-minute pass across 7 symbols, re-storing the same five days of tape over and over.
 - **Cause:** Two of my own changes combined. repartition_archive moved every row out of RIOT/2026-08-08 into its true day and deleted the files, but left the empty directory. last_stored_cursor took the single newest day directory, found no files in it, and returned None — which the caller reads as 'nothing stored', so start fell back to the 5-day lookback floor. GLD was unaffected because it happened to keep one file in that day, which is why only 7 of 10 symbols showed the symptom and why the log line looked plausible at a glance.
