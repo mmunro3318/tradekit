@@ -37,6 +37,22 @@ $Collectors = @(
 
 if (-not (Test-Path $logRoot)) { New-Item -ItemType Directory -Force $logRoot | Out-Null }
 
+# REFUSE TO RUN WITHOUT THE ARCHIVE DISK. D: is a USB disk (JMicron bridge),
+# and USB enumeration can lag a reboot. collector_core.resolve_data_root()
+# falls back to <repo>\data when D:\tradekit-data is missing and says nothing
+# about it, so a watchdog run that fires before the disk mounts would start
+# all eight collectors writing to C: — no error, no warning, and an archive
+# quietly split across two roots that nobody would notice for days.
+#
+# A gap in collection is recoverable; a split archive is not. Exiting non-zero
+# is deliberate: it makes LastTaskResult non-zero, which is the one signal
+# this project already knows to check.
+if (-not $onD) {
+    Add-Content -Path (Join-Path $logRoot 'watchdog.log') `
+        -Value "$stamp D:\tradekit-data not mounted - refusing to launch collectors"
+    exit 1
+}
+
 function Test-Collector([string]$script) {
     # Match the bare script name so a path-qualified launch still counts.
     $pattern = [regex]::Escape($script)
