@@ -313,4 +313,7 @@ See ASSUMPTIONS 161 (supersedes 33) and
       clearable with `repartition_archive --dedupe`; a real fix needs dedupe-on-write
       (a small recent-id set per symbol). Coinbase's cause is NOT snapshot replay:
       zero reconnects logged, spread across every hour, both copies in the same file
+- [x] Archive README written to D:	radekit-data\README.md, canonical copy in
+      docs/ARCHIVE-README.md (drive layout, path grammar, pipeline flow, known gaps,
+      drive-replacement runbook, post-reboot checks)
 - [ ] GitHub remote + push (Mike's hands)
