@@ -39,3 +39,6 @@ Thumbs.db
 .claude/
 .codex/
 .gitnexus
+
+# HUD output written by a run with the wrong cwd; the real report is docs/hud/
+scripts/docs/

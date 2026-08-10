@@ -428,3 +428,52 @@ from a single day without checking the day of the week.
 **Still to do:** after 2026-08-10 closes, run BOTH `repartition_archive` and
 `downsample_book` over every tree once more to sweep that day's pre-deploy
 rows. That is the routine that finishes any partition, not a special case.
+
+
+## 10. Cold start after a reboot (checked 2026-08-10)
+
+Asked directly: does the pipeline come back on its own after a restart?
+
+**As found: no, not cleanly.** The watchdog task looked healthy by every check
+this project normally runs — State `Ready`, `LastTaskResult: 0`, 8/8 collectors
+up — but it was registered for steady-state babysitting, not cold start.
+
+| | as found | now |
+|---|---|---|
+| triggers | one 15-min repeating TIME trigger | + `AtLogOn`, 2 min delay |
+| `StartWhenAvailable` | False | True |
+| `LogonType` | Interactive | Interactive (unchanged, see below) |
+
+With only a time trigger and `LogonType: Interactive`, **nothing collects
+until `admin` logs in**, and then up to 15 minutes pass before the first run.
+The at-logon trigger closes that gap. Its 2-minute delay is deliberate: D: is
+a USB disk and has to enumerate first.
+
+**The disk guard matters more than the trigger.** D: is a USB disk (JMicron
+bridge) and `collector_core.resolve_data_root()` silently falls back to
+`<repo>/data` when `D:/tradekit-data` is missing. A watchdog run firing before
+USB enumeration would have started all eight collectors writing to C: with no
+error — an archive split across two roots that nothing would surface for days.
+That risk goes UP once the task fires earlier, so the guard ships with the
+trigger: `collector_watchdog.ps1` now logs and exits 1 if the disk is absent.
+Non-zero is deliberate, because `LastTaskResult` is the one signal this
+project already knows to check. Verified both branches — exit 1 with the disk
+absent, exit 0 and 8/8 with it present, collectors untouched either way.
+
+### Still open, both Mike's call
+
+1. **Fully headless restart.** `LogonType: Interactive` means a machine that
+   reboots and sits at the login screen collects nothing. That needs
+   `-LogonType S4U`. Deliberately not changed: it moves the collectors into
+   session 0, which is a session/security decision rather than a bug fix.
+
+2. **`uv` resolves by accident.** The user PATH entry is the literal string
+   `$HOME/.local/bin` (with backslashes) — a PowerShell variable Windows never
+   expands, so the entry is dead. `uv` is found only because a second copy
+   sits in `AppData/Local/hermes/bin/uv.exe`. Works today; breaks silently if
+   hermes is removed or reordered. Fix is `%USERPROFILE%\.local\bin`, but it
+   is Mike's environment.
+
+Unrelated but noticed: the **paper-trading cadence task was never registered**
+— the collector watchdog is the only tradekit task on the box. Still the open
+"Mike's hands" item from the previous sprint, not a regression.

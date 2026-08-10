@@ -302,4 +302,15 @@ See ASSUMPTIONS 161 (supersedes 33) and
       `--dedupe` applied earlier.
 - [ ] Alpaca NBBO for IBIT + GLD only (~25 MB/day)
 - [ ] Retention vs. disk — re-measure burn now the archive is deduplicated and compacted
+- [x] Watchdog cold start: AtLogOn trigger + StartWhenAvailable, and the watchdog now
+      refuses to launch when D:\tradekit-data is not mounted (USB disk; the silent
+      fallback to <repo>\data would have split the archive across two roots)
+- [ ] MIKE'S CALL: fully headless restart needs LogonType S4U — today a reboot that
+      stops at the login screen collects nothing
+- [ ] MIKE'S CALL: user PATH holds the literal '$HOME\.local\bin', which Windows never
+      expands; uv resolves only via a second copy in AppData\Local\hermes\bin
+- [ ] Coinbase + Hyperliquid trade duplicates (1.7% / 0.6%) — exact-duplicate rows,
+      clearable with `repartition_archive --dedupe`; a real fix needs dedupe-on-write
+      (a small recent-id set per symbol). Coinbase's cause is NOT snapshot replay:
+      zero reconnects logged, spread across every hour, both copies in the same file
 - [ ] GitHub remote + push (Mike's hands)
