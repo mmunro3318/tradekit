@@ -53,8 +53,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_HOUR_FILE_RE = re.compile(
+DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HOUR_FILE_RE = re.compile(
     r"^(?P<stream>[A-Za-z0-9_]+)-(?P<hour>\d{2})(?:\.part-\d{4})?\.parquet$"
 )
 
@@ -86,7 +86,7 @@ def _placement(key: str | None, here: tuple[str, int], cutoff: date) -> tuple[st
     worse than leaving them) or when it names a day a live collector still
     owns.
     """
-    if not key or len(key) < 13 or key[10] not in "T " or not _DAY_RE.match(key[:10]):
+    if not key or len(key) < 13 or key[10] not in "T " or not DAY_RE.match(key[:10]):
         return here
     if not key[11:13].isdigit():
         return here
@@ -110,10 +110,10 @@ def _dedupe(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     return out, len(rows) - len(out)
 
 
-def _hour_files(day_dir: Path, stream: str) -> list[Path]:
+def hour_files(day_dir: Path, stream: str) -> list[Path]:
     out = []
     for f in sorted(day_dir.iterdir()):
-        m = _HOUR_FILE_RE.match(f.name)
+        m = HOUR_FILE_RE.match(f.name)
         if m and m.group("stream") == stream:
             out.append(f)
     return out
@@ -144,7 +144,7 @@ def _repartition_unit(
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
-    sources = _hour_files(day_dir, stream)
+    sources = hour_files(day_dir, stream)
     tables: dict[Path, Any] = {}
     for f in sources:
         try:
@@ -159,8 +159,8 @@ def _repartition_unit(
     buckets: dict[tuple[str, int], list[Any]] = {}
     moved = 0
     for f, table in tables.items():
-        m = _HOUR_FILE_RE.match(f.name)
-        assert m is not None  # _hour_files only returns matches
+        m = HOUR_FILE_RE.match(f.name)
+        assert m is not None  # hour_files only returns matches
         here = (day_dir.name, int(m.group("hour")))
         report.rows_read += table.num_rows
         keys = _hour_keys(table)
@@ -236,7 +236,7 @@ def _repartition_unit(
 
 
 def _hour(path: Path) -> int | None:
-    m = _HOUR_FILE_RE.match(path.name)
+    m = HOUR_FILE_RE.match(path.name)
     return int(m.group("hour")) if m else None
 
 
@@ -286,11 +286,11 @@ def repartition_tree(
 def _repartition_tree(root: Path, dry_run: bool, before: date | None, dedupe: bool) -> Report:
     cutoff = before or datetime.now(UTC).date()
     report = Report()
-    for day_dir in sorted(p for p in root.rglob("*") if p.is_dir() and _DAY_RE.match(p.name)):
+    for day_dir in sorted(p for p in root.rglob("*") if p.is_dir() and DAY_RE.match(p.name)):
         if date.fromisoformat(day_dir.name) >= cutoff:
             continue
         streams = {
-            m.group("stream") for f in day_dir.iterdir() if (m := _HOUR_FILE_RE.match(f.name))
+            m.group("stream") for f in day_dir.iterdir() if (m := HOUR_FILE_RE.match(f.name))
         }
         for stream in sorted(streams):
             _repartition_unit(day_dir, stream, cutoff, dry_run, dedupe, report)
