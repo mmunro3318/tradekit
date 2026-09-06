@@ -1311,3 +1311,97 @@ class TestAddPrefersTheRowsOwnTimestamp:
         written = list(tmp_path.rglob("*.parquet"))
         assert len(written) == 1
         assert written[0].name.startswith("book-14.")
+
+
+class TestIterDayDirs:
+    """Day-directory discovery. Replaces a full `rglob("*")` of the archive.
+
+    The old scan enumerated every path under the root — files included — on
+    every pass, so its cost tracked total archive size rather than the amount
+    of work available. These tests pin the two properties that make the
+    bounded scan correct: it finds day dirs at any depth (the layout differs
+    between `equities/` and the class-partitioned trees), and it never
+    descends INTO one.
+    """
+
+    def test_finds_day_dirs_at_differing_depths(self, tmp_path: Path) -> None:
+        shallow = tmp_path / "alpaca" / "IBIT" / "2026-08-20"
+        deep = tmp_path / "ticks" / "crypto" / "BTC_USD" / "2026-08-20"
+        shallow.mkdir(parents=True)
+        deep.mkdir(parents=True)
+
+        assert set(cc.iter_day_dirs(tmp_path)) == {shallow, deep}
+
+    def test_ignores_non_date_directories(self, tmp_path: Path) -> None:
+        (tmp_path / "logs").mkdir()
+        (tmp_path / "ticks" / "crypto" / "BTC_USD").mkdir(parents=True)
+        day = tmp_path / "ticks" / "crypto" / "BTC_USD" / "2026-08-20"
+        day.mkdir()
+
+        assert list(cc.iter_day_dirs(tmp_path)) == [day]
+
+    def test_does_not_descend_into_a_day_dir(self, tmp_path: Path) -> None:
+        day = tmp_path / "ticks" / "BTC_USD" / "2026-08-20"
+        nested = day / "2026-08-21"  # pathological, but must not be yielded
+        nested.mkdir(parents=True)
+
+        assert list(cc.iter_day_dirs(tmp_path)) == [day]
+
+
+class TestIterCompactionUnits:
+    """The (day_dir, stream, hour) work list, scoped by day."""
+
+    def _part(self, day_dir: Path, name: str) -> None:
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / name).write_bytes(b"")
+
+    def test_one_unit_per_stream_hour_regardless_of_part_count(
+        self, tmp_path: Path
+    ) -> None:
+        day = tmp_path / "ticks" / "BTC_USD" / "2026-08-20"
+        self._part(day, "trades-08.part-0000.parquet")
+        self._part(day, "trades-08.part-0001.parquet")
+        self._part(day, "book-08.part-0000.parquet")
+        now = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
+
+        units = list(cc.iter_compaction_units(tmp_path, now))
+
+        assert units == [(day, "book", 8), (day, "trades", 8)]
+
+    def test_skips_the_current_hour_but_keeps_earlier_hours_of_today(
+        self, tmp_path: Path
+    ) -> None:
+        day = tmp_path / "ticks" / "BTC_USD" / "2026-08-21"
+        self._part(day, "trades-08.part-0000.parquet")
+        self._part(day, "trades-09.part-0000.parquet")
+        now = datetime(2026, 8, 21, 9, 30, tzinfo=UTC)
+
+        assert list(cc.iter_compaction_units(tmp_path, now)) == [(day, "trades", 8)]
+
+    def test_same_hour_on_an_earlier_day_is_not_treated_as_current(
+        self, tmp_path: Path
+    ) -> None:
+        day = tmp_path / "ticks" / "BTC_USD" / "2026-08-20"
+        self._part(day, "trades-09.part-0000.parquet")
+        now = datetime(2026, 8, 21, 9, 30, tzinfo=UTC)
+
+        assert list(cc.iter_compaction_units(tmp_path, now)) == [(day, "trades", 9)]
+
+    def test_since_and_until_bound_the_scan_inclusively(self, tmp_path: Path) -> None:
+        now = datetime(2026, 8, 25, 9, 0, tzinfo=UTC)
+        for d in ("2026-08-19", "2026-08-20", "2026-08-21"):
+            self._part(tmp_path / "ticks" / "BTC_USD" / d, "trades-08.part-0000.parquet")
+
+        units = list(
+            cc.iter_compaction_units(tmp_path, now, since="2026-08-20", until="2026-08-21")
+        )
+
+        assert [u[0].name for u in units] == ["2026-08-20", "2026-08-21"]
+
+    def test_ignores_already_compacted_hours(self, tmp_path: Path) -> None:
+        day = tmp_path / "ticks" / "BTC_USD" / "2026-08-20"
+        day.mkdir(parents=True)
+        (day / "trades-08.parquet").write_bytes(b"")  # compacted, no parts left
+        now = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
+
+        assert list(cc.iter_compaction_units(tmp_path, now)) == []

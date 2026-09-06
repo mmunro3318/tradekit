@@ -82,8 +82,25 @@ foreach ($c in $Collectors) {
 # skips the current hour, so it is safe to run alongside live collectors.
 # Without this the archive accumulates enormous numbers of tiny parquet files
 # whose fixed per-file overhead dwarfs the data (measured 6 rows/file on the
-# 232-asset perps stream). Runs synchronously — it is seconds of work.
-if (-not (Test-Collector 'compact_archive.py')) {
+# 232-asset perps stream).
+#
+# PAUSED 2026-08-23 while the sentinel below exists. The pass discovered its
+# work by re-walking the whole archive, so its cost tracked archive size and
+# not backlog: at 263k files, runs that merged NOTHING were taking up to 671 s
+# against this 15-minute schedule, and the day's run count had slipped from 96
+# to 92 — i.e. runs were starting to overrun each other. Compaction is now a
+# manual, bounded, scoped job: scripts\compact_batch.py.
+#
+# Deferring it loses nothing. Part files are self-contained parquet, the sink
+# seeds its part counter from disk so a restart never reuses an index, and
+# compact_hour merges any pre-existing hourly file together with the parts.
+# The cost is purely file count (~2,800 parts/hour), so run compact_batch.py
+# every day or two.
+#
+# TO RESUME AUTOMATIC COMPACTION: delete the sentinel file. No code edit.
+# A replacement drive starts without one, so a fresh archive self-compacts.
+$compactionPaused = Join-Path 'D:\tradekit-data' 'COMPACTION-PAUSED'
+if ((-not (Test-Path $compactionPaused)) -and (-not (Test-Collector 'compact_archive.py'))) {
     $compactLog = Join-Path $logRoot 'compaction.log'
     Start-Process -WindowStyle Hidden -Wait -WorkingDirectory $repo cmd.exe `
         -ArgumentList '/c', "uv run --group collector python scripts\compact_archive.py >> `"$compactLog`" 2>&1"

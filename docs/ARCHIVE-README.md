@@ -69,10 +69,14 @@ deleted without loss.
 - `equities\alpaca\` has **no** `<asset-class>` level. The venue tree is the
   asset class there.
 
-During the current hour you will also see `<stream>-<HH>.part-NNNN.parquet`.
-Those are append-only fragments; `compact_archive.py` merges them into the
-single hourly file once the hour closes. Both forms are valid Parquet and can
-be read directly.
+Alongside the hourly files you will also see `<stream>-<HH>.part-NNNN.parquet`.
+Those are append-only fragments, merged into the single hourly file by
+compaction. **Both forms are valid Parquet and can be read directly** — a part
+file is self-contained, with its own footer.
+
+Since 2026-08-23 compaction is a **manual** job (§6), so parts now persist for
+whole days rather than minutes, and any query over recent data must glob both
+forms. Expect roughly 2,800 parts per hour of backlog.
 
 Example:
 
@@ -123,25 +127,37 @@ Notes that matter when you query this:
    +----------------------------+----------------------------+
    |                            |                            |
 LIVE COLLECTORS           BACKFILLERS                   MAINTENANCE
-(8 processes)             (manual, batch)               (every 15 min)
+(8 processes)             (manual, batch)               (MANUAL since 08-23)
    |                            |                            |
    v                            v                            v
-collector_core.py         separate provenance          compact_archive.py
+collector_core.py         separate provenance          compact_batch.py
 VenueSpec + runner        trees, never merged          merges closed hours
    |                      into the live tree
    v
 PartitionedParquetSink
    |
-   +--> <stream>-<HH>.part-NNNN.parquet      (during the open hour)
+   +--> <stream>-<HH>.part-NNNN.parquet      (until compaction runs)
                     |
-                    +--> compact_archive.py --> <stream>-<HH>.parquet
+                    +--> compact_batch.py --> <stream>-<HH>.parquet
 ```
 
 **Supervision.** One Windows scheduled task, `TradeKit Collector Watchdog`,
 runs `scripts\collector_watchdog.ps1` at logon (2-minute delay) and then every
-15 minutes forever. It relaunches only the collectors that have died, then runs
-compaction. It is idempotent — running it when everything is healthy does
-nothing.
+15 minutes forever. It relaunches only the collectors that have died. It is
+idempotent — running it when everything is healthy does nothing.
+
+**Compaction is no longer automatic.** The watchdog used to run it every 15
+minutes, but that pass discovered its work by re-walking the whole archive, so
+its cost tracked archive size rather than backlog: at ~263k files, runs that
+merged *nothing* were taking up to 671 s against a 900 s schedule and had begun
+to overrun one another. It now runs by hand — see §6 — and is skipped by the
+watchdog while `D:\tradekit-data\COMPACTION-PAUSED` exists. Delete that file to
+restore the automatic pass; a replacement drive starts without one.
+
+Deferring compaction loses nothing. Part files are self-contained parquet, the
+sink seeds its part counter from disk so a restart never reuses an index, and
+`compact_hour` merges any pre-existing hourly file *together with* the parts —
+so compacting late is lossless and idempotent. The only cost is file count.
 
 **Each venue self-filters.** A collector calls the venue's own instrument list
 and silently drops greenlist pairs that venue does not offer. That is why
@@ -240,10 +256,30 @@ all take an exclusive lock on the tree):
 |---|---|
 | `repartition_archive.py` | re-files rows into the day/hour their own `ts` names; `--dedupe` also drops byte-identical rows |
 | `downsample_book.py` | coalesces a book stream to 1 Hz; refuses `--stream trades` outright |
-| `compact_archive.py` | merges closed-hour part files (also run automatically) |
+| `compact_batch.py` | **merges closed-hour part files. This is the routine one — run it every day or two.** |
+| `compact_archive.py` | the old unbounded whole-archive pass. Superseded by `compact_batch.py`; still what the watchdog would run if un-paused |
 
 Neither repair tool ever touches the current UTC day — a live collector owns
 it. That is why a partition finishes the day *after* it is written.
+
+**Routine compaction** (run from `C:\Users\admin\dev\tradekit`):
+
+```powershell
+# what is outstanding? dry run is the default — nothing is modified
+uv run --group collector python scripts\compact_batch.py
+
+# do it
+uv run --group collector python scripts\compact_batch.py --execute
+
+# bounded chunk: stop taking new work after 10 min, then just run it again
+uv run --group collector python scripts\compact_batch.py --execute --max-seconds 600
+```
+
+Scope it with `--days N`, `--since`/`--until`, or `--tree`. It takes an
+exclusive lock, never touches the current UTC hour, and is safe to run
+alongside live collectors. Interrupting it is safe and needs no bookkeeping —
+the work list is derived from the parts still on disk, so a re-run simply
+resumes. Measured 2026-08-23: 667 hours / 808,695 rows / 4,080 parts in 30 s.
 
 ## 7. After a reboot
 

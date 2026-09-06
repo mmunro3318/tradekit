@@ -6,6 +6,16 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-08-23 — the rtk hook reported a pytest collection ERROR as "No tests collected" `rtk,pytest,tooling,red-phase`
+- **Symptom:** During the TDD red phase `uv run pytest tests/unit/collector/test_compact_batch.py -q` printed only `Pytest: No tests collected`. That reads as "your test file has no tests in it" — a naming/discovery problem — when the real cause was an ImportError (the module under test did not exist yet, which is exactly what a red phase looks like). Two calls were spent chasing the wrong failure.
+- **Cause:** The rtk token-optimizing proxy summarizes pytest output. A collection-time ERROR (import failure) and a genuinely empty test file both collapse to the same summary line, and the traceback — the only part that distinguishes them — is discarded.
+- **Solution:** `rtk proxy <cmd>` runs the command unfiltered; `rtk proxy uv run pytest ... -q --no-header` immediately showed `ModuleNotFoundError: No module named 'compact_batch'`. Rule of thumb: the moment a filtered result is ambiguous or contradicts what the code should be doing — and *especially* in a red phase, where failure is the expected outcome and its exact shape is the signal — re-run through `rtk proxy` before theorizing. The same applied to the tk-gate script.
+
+## 2026-08-23 — Windows console codepage mangles non-ASCII in emitted log text `windows,encoding,logging`
+- **Symptom:** A new script's banner printed `DRY RUN � nothing will be modified`. The same corruption is already sitting in the collector logs (`WARN: coinbase: heartbeat timeout � reconnecting`).
+- **Cause:** Em-dashes and other non-ASCII written to stdout get encoded through the console codepage when redirected to a log file, which cannot represent them.
+- **Solution:** Keep EMITTED text (banners, log lines, error messages) ASCII-only; non-ASCII in source comments and docstrings is fine because it is never written out. Fixed in compact_batch.py. The pre-existing collector-log instances are cosmetic and were left alone.
+
 ## 2026-08-10 — the watchdog task had no boot or logon trigger, and uv resolves only by accident `windows,scheduled-task,boot,ops`
 - **Symptom:** Asked whether the pipeline restarts after a reboot. It does not, cleanly: the scheduled task's only trigger was a 15-minute repeating TIME trigger with LogonType=Interactive and StartWhenAvailable=False, so nothing collects until the user logs in, and then up to 15 minutes pass before the first run.
 - **Cause:** The task was registered for steady-state babysitting, not for cold start — an easy thing to miss because it looks healthy in every check you would normally run (State Ready, LastTaskResult 0, 8 collectors up). Two further traps found in the same pass: D: is a USB disk (JMicron bridge) and resolve_data_root() silently falls back to <repo>\data when it is missing, so a run firing before USB enumeration would start all eight collectors writing to C: with no error; and the user PATH entry for uv is the literal string '$HOME\.local\bin', which Windows never expands — uv resolves only because a second copy happens to exist in AppData\Local\hermes\bin.

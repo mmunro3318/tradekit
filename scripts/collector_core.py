@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -162,6 +163,7 @@ def hour_file_path(
 # so every flush overwrites part-0000) broke. Verified: three writes of an
 # "aggTrades" stream left one file with only the last row. No error either
 # time. `_assert_stream_name` below makes the class of bug loud instead.
+_DAY_DIR_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _STREAM_CHARS = r"[A-Za-z0-9_]+"
 _PART_RE = re.compile(rf"^(?P<stream>{_STREAM_CHARS})-(?P<hour>\d{{2}})\.part-\d{{4}}\.parquet$")
 _STREAM_RE = re.compile(rf"^{_STREAM_CHARS}$")
@@ -643,16 +645,57 @@ async def run_ws_collector(
     return counts
 
 
-def compact_closed_hours(base_dir: Path, now: datetime | None = None) -> int:
-    """Compact every hour that is fully in the past. Run from a scheduled task.
+def iter_day_dirs(base_dir: Path) -> Iterable[Path]:
+    """Every YYYY-MM-DD directory under `base_dir`, without descending into one.
 
-    The current hour is skipped so a live collector's parts are never merged
-    out from under it.
+    This walks DIRECTORIES ONLY. The scan it replaces was
+    `base_dir.rglob("*")`, which enumerates and stats every file as well, so
+    its cost tracked the size of the archive rather than the amount of work
+    available: by 2026-08-23 a pass that found nothing to compact still cost
+    up to 671 s against a 15-minute schedule, purely re-walking days that had
+    been compacted weeks earlier and could never have parts again.
+
+    Stopping at a day directory rather than recursing into it also keeps the
+    walk O(directories), since day dirs hold nothing but files.
     """
-    now = now or datetime.now(UTC)
+    stack = [base_dir]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            continue
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            if _DAY_DIR_RE.fullmatch(entry.name):
+                yield Path(entry.path)
+            else:
+                stack.append(Path(entry.path))
+
+
+def iter_compaction_units(
+    base_dir: Path,
+    now: datetime,
+    since: str | None = None,
+    until: str | None = None,
+) -> Iterable[tuple[Path, str, int]]:
+    """Each closed `(day_dir, stream, hour)` that still holds part files.
+
+    `since`/`until` are inclusive YYYY-MM-DD bounds tested against the day
+    directory's own name. ISO dates sort lexicographically, so this is a
+    string compare — and it is applied BEFORE the directory is listed, which
+    is what makes a scoped run cheap: a one-week window never opens a day
+    outside it.
+
+    The current UTC hour is never yielded, so a live collector's parts are
+    never merged out from under it.
+    """
     current = (now.strftime("%Y-%m-%d"), now.hour)
-    merged = 0
-    for day_dir in sorted(p for p in base_dir.rglob("*") if p.is_dir()):
+    for day_dir in sorted(iter_day_dirs(base_dir)):
+        if since is not None and day_dir.name < since:
+            continue
+        if until is not None and day_dir.name > until:
+            continue
         seen: set[tuple[str, int]] = set()
         for f in day_dir.iterdir():
             m = _PART_RE.match(f.name)
@@ -661,7 +704,18 @@ def compact_closed_hours(base_dir: Path, now: datetime | None = None) -> int:
         for stream, hour in sorted(seen):
             if (day_dir.name, hour) == current:
                 continue
-            merged += compact_hour(day_dir, stream, hour)
+            yield day_dir, stream, hour
+
+
+def compact_closed_hours(base_dir: Path, now: datetime | None = None) -> int:
+    """Compact every hour that is fully in the past. Run from a scheduled task.
+
+    The current hour is skipped so a live collector's parts are never merged
+    out from under it.
+    """
+    merged = 0
+    for day_dir, stream, hour in iter_compaction_units(base_dir, now or datetime.now(UTC)):
+        merged += compact_hour(day_dir, stream, hour)
     return merged
 
 
