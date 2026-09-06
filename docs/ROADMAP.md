@@ -270,7 +270,9 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] T1 strategy-aware chain (r21)
 - [x] T2 execute_exit + trigger (r21)
 - [x] T3 run_once + digest + script (r22)
-- [ ] Mike: register the scheduled task (command in scripts/run_cadence.py header)
+- [x] Preview deferral of R-010/R-012 insufficient_context so the funnel can ticket (SPRINT-PREVIEW-DEFER A, r23, ASSUMPTIONS 181)
+- [x] Kraken pair mappings for the 9 archived-but-unmapped pairs (SPRINT-PREVIEW-DEFER B, r23)
+- [ ] Mike: register the scheduled task (command in scripts/run_cadence.py header) — verify LastTaskResult 0
 
 ## Data vacuum (seed: HANDOFF-2026-08-09-data-vacuum-expansion.md)
 - [x] 8 live collector streams on a shared collector_core (2026-08-08/09)

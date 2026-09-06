@@ -3491,3 +3491,49 @@ policy for every book stream, 1 Hz**, applied to new data and to history.
    message receipt, so a gate that saw >=1000 ms can record 970 ms. Every
    venue gates this way. Measured post-deploy: all sub-second gaps fall in
    900-1000 ms, none below.
+
+### 181 — scan-time policy preview defers R-010/R-012 `insufficient_context` (CTO ratified 2026-09-06, Mike: "proceed")
+
+`hud._build.build_state` previews every candidate through the real
+`policy.evaluate` with an `interim-thesis-<sym>` id that has no ledger
+existence yet. R-010 (thesis prerequisites) and R-012 (sizing purity) can
+therefore only ever answer `insufficient_context` at preview, and the old
+`_default_evaluate_policy` treated every `fail` hit as a deny — so no
+`AdvisoryTicket` was ever appended and `cadence.run_once` (entries from
+`state.tickets` only) could never open a paper position. Known since
+2026-07-23 (day-5 script seamed around it), invisible to the suite because
+`test_run_once.py` faked `cadence.build_state` and `test_build_state.py`
+faked `evaluate_policy`. Ratified:
+
+1. DEFERRAL SET IS EXACTLY {R-010, R-012}, and only for a hit with
+   `outcome == "fail"` AND `measured` starting `"insufficient_context:"`. A
+   real R-010/R-012 fail (a measured value) still denies at preview. No
+   other rule defers, ever — R-001 halt, R-002 tier, R-003 balance, R-004,
+   R-005, R-007, R-008, R-009, R-013, R-014, R-015, R-017, R-018 deny at
+   preview exactly as before.
+2. WHY IT IS SAFE: the binding chain (`hud._serve._make_binding_proposal` +
+   `evaluate_policy_binding`; `cadence._run_entries`) re-evaluates both rules
+   against the LEDGERED thesis at `reviewed` and rejects on deny (178.2).
+   Preview answers "would policy allow this order given a proper thesis?";
+   binding answers "does it, for this thesis?". Two phases, both real.
+3. An allow-by-deferral carries the ledgered deny verdict's own
+   `verdict_id` (a real `VerdictIssued` event id, never fabricated) and the
+   rationale `allow (deferred at preview: R-010, R-012 — re-evaluated at
+   binding)`; substrings `deferred at preview` and the rule ids are the pins.
+4. A deny that includes a non-deferrable hit still names every failing hit,
+   deferrable ones included — the audit line is never shortened.
+5. Test doctrine addendum: one test in `test_run_once.py` (T-A5) leaves
+   `cadence.build_state` REAL. Every seam that fakes a whole production stage
+   needs at least one test that does not, or the stage can rot unseen.
+6. `T-A4` (rewritten in review round 23) tests the private
+   `_deferrable_at_preview` predicate directly with hand-built `RuleHit`
+   values — the round showed the two restrictions in (1) had no killing
+   test (dropping the rule-id check let an `advisory:*` account with no
+   balance feed, R-003 `insufficient_context`, render a Confirm ticket;
+   dropping the prefix check let a real R-010 fail defer). A spec-sanctioned
+   exception for this predicate only, not a precedent for testing other hud
+   internals.
+7. `insufficient_context:order_notional` on R-012 is inside the deferral
+   set by construction but unreachable at preview (build_state always
+   proposes a priced limit order); binding re-checks every R-010/R-012
+   field, so the wider-than-strictly-needed scope is accepted (round 23).

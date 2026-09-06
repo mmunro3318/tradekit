@@ -41,8 +41,6 @@ from tradekit.contracts import (
     Bar,
     BarSeries,
     EventFilter,
-    OrderRequest,
-    ProposedAction,
 )
 from tradekit.hud import build_state
 from tradekit.ledger import default_ledger
@@ -231,36 +229,46 @@ class TestTA3NonDeferrableDenyStillNamesTheDeferredHits:
         assert "R-010" in gate.rationale, "A6: the deferred hit must still be named alongside R-005"
 
 
-class TestTA4DefaultEvaluatePolicyDefersAtTheFunctionBoundary:
-    def test_deny_with_only_r010_r012_insufficient_context_returns_allowed_true(self) -> None:
-        """CONTRACT (T-A4, T-A1 at the function boundary): a real
-        `policy.evaluate` verdict whose only failing hits are R-010/R-012
-        `insufficient_context` must make `_default_evaluate_policy` itself
-        return `allowed=True` — no funnel, no bars, no monkeypatch at all;
-        only a real ledger + a hand-built `ProposedAction`."""
+class TestTA4DeferralPredicateIsNarrow:
+    """CONTRACT (T-A4, review round 23 fix — replaces the T-A1 duplicate):
+    the two restrictions that make ASSUMPTIONS 181.1 / pin A2 a NARROW
+    deferral — rule id in exactly {R-010, R-012}, AND measured starting
+    `insufficient_context:` — are pinned here on the predicate itself with
+    hand-built `RuleHit` values (a public `contracts` export, no mock).
+    Round 23 showed both restrictions had no killing test: dropping the
+    rule-id check let an `advisory:*` account with no balance feed (R-003
+    `insufficient_context`) render a Confirm ticket; dropping the prefix
+    check let a REAL R-010 fail defer. Private-function test sanctioned by
+    ASSUMPTIONS 181.6."""
+
+    @pytest.mark.parametrize(
+        ("rule_id", "outcome", "measured", "expected"),
+        [
+            ("R-010", "fail", "insufficient_context:thesis_review_artifact_id", True),
+            ("R-010", "fail", "insufficient_context:thesis_ev_ok", True),
+            ("R-012", "fail", "insufficient_context:recorded_sizing_usd", True),
+            ("R-012", "fail", "insufficient_context:order_notional", True),
+            # a REAL R-010/R-012 fail (measured is a value) never defers (A2)
+            ("R-010", "fail", "False", False),
+            ("R-012", "fail", "0.5", False),
+            ("R-010", "fail", None, False),
+            # a pass is not a deferral either way
+            ("R-010", "pass", "True", False),
+            # no other rule defers, even with the same insufficient_context shape
+            ("R-003", "fail", "insufficient_context:settled_balance_usd", False),
+            ("R-001", "fail", "halted", False),
+            ("R-009", "fail", "insufficient_context:drawdown_pct", False),
+        ],
+    )
+    def test_only_r010_r012_insufficient_context_defers(
+        self, rule_id: str, outcome: str, measured: str | None, expected: bool
+    ) -> None:
         import tradekit.hud._build as hud_build
+        from tradekit.contracts import RuleHit
 
-        _create_default_paper_account()
-        asset = AssetRef(
-            symbol=_SYMBOL, venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
-        )
-        order = OrderRequest(
-            thesis_id=_THESIS_ID,
-            account_ref="paper:alpha",
-            asset=asset,
-            side="buy",
-            order_type="limit",
-            qty=Decimal("0.25"),
-            limit_price=_PRICE,
-        )
-        proposal = ProposedAction(
-            kind="submit_order",
-            account_ref="paper:alpha",
-            requested_by="hud",
-            thesis_id=_THESIS_ID,
-            order=order,
-        )
+        hit = RuleHit(rule_id=rule_id, outcome=outcome, measured=measured, limit=None)  # type: ignore[arg-type]
 
-        decision = hud_build._default_evaluate_policy(proposal)
-
-        assert decision.allowed is True
+        assert hud_build._deferrable_at_preview(hit) is expected, (
+            f"{rule_id}/{outcome}/{measured!r}: deferral must be exactly R-010/R-012 "
+            f"with an insufficient_context measured, expected {expected}"
+        )

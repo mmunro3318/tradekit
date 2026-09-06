@@ -144,3 +144,8 @@ test_hud_cli.py. Rule going forward: test basenames must be unique across
 the whole tests/ tree (or move the tree to importlib mode as an infra task).
 Also re-hit: PreToolUse commit-gate deny blocks the ENTIRE chained Bash
 command — keep `git commit` in its own call.
+
+## 2026-09-06 — reviewer subagent parked on its own background gate and returned no report `subagents,review`
+- **Symptom:** tk-reviewer (round 23, first dispatch) ended its turn with "waiting on the background waiter" and no VERDICT section; ~6 min and 176k tokens spent for nothing. `SendMessage` is not available in this session (ToolSearch finds no such tool), so the agent could not be resumed.
+- **Cause:** the agent ran the full pytest suite with `run_in_background` and treated the pending notification as a reason to stop; a subagent that stops with no live children is finished from the orchestrator's side.
+- **Solution:** every reviewer/implementer dispatch prompt now carries a PROCESS RULE: run all commands in the foreground, deliver the whole report as one final message, never `run_in_background`. Re-dispatched as review-preview-defer-2 with that rule. Also re-hit: the rtk-proxied bare `uv run pytest` swallows the summary line — use `uv run python -m pytest` and the exit code.

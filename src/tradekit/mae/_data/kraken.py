@@ -54,6 +54,18 @@ _SYMBOL_TO_KRAKEN_PAIR: dict[str, str] = {
     "XRP/USD": "XRPUSD",
     "AVAX/USD": "AVAXUSD",
     "AKT/USD": "AKTUSD",
+    # Archived-but-unmapped pairs (SPRINT-PREVIEW-DEFER batch B), verified
+    # against the LIVE /0/public/OHLC endpoint on 2026-09-06 (721 rows each
+    # at interval=60). ZEC is a legacy listing: X/Z result key.
+    "ZEC/USD": "ZECUSD",
+    "TIA/USD": "TIAUSD",
+    "DOT/USD": "DOTUSD",
+    "ADA/USD": "ADAUSD",
+    "SUI/USD": "SUIUSD",
+    "FIL/USD": "FILUSD",
+    "ALGO/USD": "ALGOUSD",
+    "HBAR/USD": "HBARUSD",
+    "POL/USD": "POLUSD",
 }
 _KRAKEN_RESULT_KEY: dict[str, str] = {
     "XBTUSD": "XXBTZUSD",
@@ -68,6 +80,15 @@ _KRAKEN_RESULT_KEY: dict[str, str] = {
     "XRPUSD": "XXRPZUSD",
     "AVAXUSD": "AVAXUSD",
     "AKTUSD": "AKTUSD",
+    "ZECUSD": "XZECZUSD",
+    "TIAUSD": "TIAUSD",
+    "DOTUSD": "DOTUSD",
+    "ADAUSD": "ADAUSD",
+    "SUIUSD": "SUIUSD",
+    "FILUSD": "FILUSD",
+    "ALGOUSD": "ALGOUSD",
+    "HBARUSD": "HBARUSD",
+    "POLUSD": "POLUSD",
 }
 
 # EMPIRICAL FINDING (CTO-verified live 2026-07-19): Kraken's /0/public/OHLC

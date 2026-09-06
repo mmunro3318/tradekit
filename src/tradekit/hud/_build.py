@@ -22,7 +22,7 @@ from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 from typing import Any
 
 import tradekit.mae._runtime as mae_runtime
-from tradekit.contracts import AdvisoryTicket, GateResult, HudState, ScanReportEntry
+from tradekit.contracts import AdvisoryTicket, GateResult, HudState, RuleHit, ScanReportEntry
 from tradekit.contracts._marketdata import BarSeries
 from tradekit.mae._data.errors import ProviderError
 from tradekit.mae._scan_trace import ScanAuditMode
@@ -75,15 +75,45 @@ def _round2(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
 
+# SPRINT-PREVIEW-DEFER A2 (ASSUMPTIONS 181): the scan-time preview proposes
+# against an `interim-thesis-*` id that is not ledgered yet, so R-010
+# (thesis prerequisites) and R-012 (sizing purity) can only ever answer
+# `insufficient_context` here. Both are re-evaluated for real at binding
+# time against the ledgered thesis (178.2), which is why — and only why —
+# those two hits defer at preview. No other rule ever defers.
+_PREVIEW_DEFERRABLE_RULES = frozenset({"R-010", "R-012"})
+
+
+def _deferrable_at_preview(hit: RuleHit) -> bool:
+    return (
+        hit.rule_id in _PREVIEW_DEFERRABLE_RULES
+        and hit.outcome == "fail"
+        and str(hit.measured or "").startswith("insufficient_context:")
+    )
+
+
 def _default_evaluate_policy(proposal: object) -> _PolicyDecision:
     """Real policy evaluation via `tradekit.policy.evaluate` (ASSUMPTIONS
-    157a default). `proposal` is the `ProposedAction` this module built."""
+    157a default). `proposal` is the `ProposedAction` this module built.
+
+    A deny whose failing hits are ALL preview-deferrable (A3) is treated as
+    an allow carrying the ledgered deny verdict's own id (A4 — never a
+    fabricated id); any non-deferrable failing hit denies, and the deny
+    rationale still names every failing hit, deferrable ones included, so
+    the audit line stays complete (A6)."""
     from tradekit import policy as policy_mod
 
     verdict = policy_mod.evaluate(proposal)  # type: ignore[arg-type]
     if verdict.allow:
         return _PolicyDecision(allowed=True, verdict_id=verdict.verdict_id, rationale="allow")
     failing = [hit for hit in verdict.rule_hits if hit.outcome == "fail"]
+    if failing and all(_deferrable_at_preview(hit) for hit in failing):
+        deferred = ", ".join(sorted({hit.rule_id for hit in failing}))
+        return _PolicyDecision(
+            allowed=True,
+            verdict_id=verdict.verdict_id,
+            rationale=f"allow (deferred at preview: {deferred} — re-evaluated at binding)",
+        )
     rationale = "; ".join(f"{hit.rule_id}: {hit.measured} vs {hit.limit}" for hit in failing)
     return _PolicyDecision(
         allowed=False, verdict_id=None, rationale=rationale or "policy denied action"

@@ -525,3 +525,27 @@ implementer diagnosed precisely and refused to code around).
 | red-cadence-t3 | test_run_once.py (8) | 0 | 2 | 0 | B+ | Real-verb end-to-end incl. the sprint-defining AC-4 round trip; missed the failure envelope entirely + two harness defects (clock desync, scale-blind bracket). |
 | green-cadence-t3 | cadence, ledger accessor, hud refactor, script | 1 | 3 | 3 | B− | Clean happy-path composition + two exemplary STOP-and-flag diagnoses; shipped crash-silent unattended failure mode. |
 | fix-cadence-t3 | 8-item fix round | 0 | 0 | 0 | A | Hit an unimplementable pin, proved WHY empirically (R-010/R-012 vacuous-deny), designed the correct alternative, flagged rather than forced — the round's best work. |
+
+## Round 23 — 2026-09-06 — SPRINT-PREVIEW-DEFER (red 20125fa + 749fd21, green+fix this commit)
+
+Reviewer: tk-reviewer (top model), self-ran gate (1421 tests, exit 0) +
+crafted-verdict probes + a real-path M4 probe + 7 mutants. Verdict
+FIX-FIRST on a MED cluster on the TEST side only: the two restrictions
+that make the deferral narrow (rule set exactly {R-010, R-012}; measured
+`insufficient_context:*` only) had no killing test — both mutants survived
+the full suite, and the rule-set widening was reachable via a legitimate
+`advisory:*` default_account_ref. No production defect: every crafted
+verdict, the binding re-evaluation trace (cadence -> evaluate_policy_binding
+-> policy.evaluate -> execute_order's own evaluate), and the deny-verdict-id
+provenance trace all held. Fix round (CTO, in-thread): the duplicate T-A4
+replaced by an 11-case predicate contract test (kills M2 + M4), `Any` ->
+`RuleHit`. Process friction: the first reviewer parked on a background
+pytest and appeared to return nothing; it did deliver on its second
+notification — a redo dispatch was started and killed (docs/FRICTION.md).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-preview-defer | test_build_state_preview_policy.py (4) + T-A5 | 0 | 2 | 1 | B | Real-path, no-mock harness that kills all/any, fabricated-id, and audit-line mutants; T-A5 is the seam-blind-spot guard the sprint needed. Left both A2 restrictions unpinned and T-A4 duplicated T-A1. |
+| red-kraken-pairs | test_kraken.py (+2) | 0 | 0 | 1 | A | Parametrized request+parse pin plus a genuinely two-sided ZEC discriminator; every mapping mutant dies. |
+| green-cto-inthread | hud/_build.py, mae/_data/kraken.py, ASSUMPTIONS 181 | 0 | 0 | 1 | A− | Surgical to the pins; predicate correct under every crafted verdict; `Any` where `RuleHit` was available. |
+| review-preview-defer | round 23 adjudication | — | — | — | A | Found the real gap (unpinned narrowing, reachable) with a real-path probe, not opinion; clean bypass-hunt with cited paths; docked nothing — the background-park was a harness/process issue, now a dispatch rule. |

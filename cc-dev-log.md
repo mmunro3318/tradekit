@@ -17,9 +17,22 @@
   product. Recorded in the report.
 - Toolkit blind spot: 9 archived pairs (ZEC TIA DOT ADA SUI FIL ALGO HBAR POL)
   have no Kraken mapping in mae/_data/kraken.py.
-- NEXT: tk-implement batch for the preview fail-close (policy touch -> review
-  round); Mike registers the cadence task; pair mappings; then let the plans
-  flow through the cadence.
+- SPRINT-PREVIEW-DEFER (docs/specs/SPRINT-PREVIEW-DEFER.md) SHIPPED same
+  session on branch fix/hud-preview-defer: A = `hud._build._default_evaluate_
+  policy` defers R-010/R-012 `insufficient_context` at scan-time preview
+  (binding chain untouched, re-checks both for real); B = 9 Kraken pair
+  mappings (ZEC legacy XZECZUSD), live-verified. Red 20125fa + 749fd21
+  (2 sonnet test-writers, parallel), green in-thread (pinned, mechanical),
+  GATE green (1421 tests), review round 23 FIX-FIRST on tests only (two
+  unpinned narrowings, both mutants survived) -> fix round: T-A4 replaced by
+  an 11-case predicate contract test, `Any` -> `RuleHit`. ASSUMPTIONS 181.
+  T-A5 leaves `cadence.build_state` REAL — the seam blind spot that hid this
+  for six weeks is closed. Friction: reviewer parked on a background pytest
+  (docs/FRICTION.md 2026-09-06).
+- NEXT: Mike registers "TradeKit Paper Cadence" (schtasks command in
+  scripts/run_cadence.py header; check LastTaskResult 0); watch
+  docs/digest/ for the first entries (TAO S1 / LINK S2 / NEAR S2 per the
+  scope report); merge fix/hud-preview-defer + fix/event-time-partitioning.
 
 ## 2026-08-23 (Opus — compaction off the watchdog; manual batched compaction)
 
