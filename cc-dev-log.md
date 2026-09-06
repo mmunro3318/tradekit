@@ -1,3 +1,70 @@
+## 2026-09-06 (Fable — LINK impulse scope; cadence blocker found)
+
+- Mike asked for crypto scope + trade plans after LINK's jump. Report:
+  docs/research/crypto-scope-2026-09-06.md (archive-sourced tape, LINK impulse
+  anatomy across Kraken/Coinbase/OKX liqs/HL funding, n=16 post-impulse event
+  study, funnel audit, sizing, three PAPER plans: TAO S1, LINK S2 pullback,
+  NEAR S2). Collectors healthy (LINK 21:00 hour files landing on time).
+- FINDING (blocker, known 07-23, still open): `hud._build.build_state` runs the
+  scan-time policy preview against an `interim-thesis-*` id, so R-010/R-012
+  return `insufficient_context` and `decision.allowed` is False -> no ticket is
+  ever appended -> `cadence.run_once` (entries from `state.tickets` only) can
+  NEVER open a paper position. Tonight's one real S1 match (TAO, vr 4.99,
+  regime PASS) died there. Cadence task ALSO never registered (ROADMAP:269-273
+  unchecked, no docs/digest/). Paper record: 0 trades series 8, 1 graded ever.
+- Mike offered the ~$50 live Alpaca balance "to experiment". CTO answer: no —
+  T1, live disabled, LINK not on allowed_assets_live; the ladder is the
+  product. Recorded in the report.
+- Toolkit blind spot: 9 archived pairs (ZEC TIA DOT ADA SUI FIL ALGO HBAR POL)
+  have no Kraken mapping in mae/_data/kraken.py.
+- NEXT: tk-implement batch for the preview fail-close (policy touch -> review
+  round); Mike registers the cadence task; pair mappings; then let the plans
+  flow through the cadence.
+
+## 2026-08-23 (Opus — compaction off the watchdog; manual batched compaction)
+
+- HEALTH CHECK FIRST. 8 collectors up continuously since 08-13 19:38 UTC, zero
+  watchdog relaunches in 10 days. 14 consecutive complete days (08-09..08-22),
+  24/24 hours, every crypto tree; symbol counts flat (ticks 76, cb books 52,
+  okx books 51, hl 232). ts-partition invariant §4.1: **0 violations** over 400
+  sampled files / ~1.0M rows. Schemas match the README exactly. Archive
+  52,971 files/4.22 GB (08-10) -> 263,723/17.16 GB. One oddity on the whole
+  drive: the already-known quarantined CAKE_USD file.
+- ROOT CAUSE. `compact_closed_hours` discovered work via `base_dir.rglob("*")`
+  — every path in the archive, files included — every 15 min. Cost tracked
+  ARCHIVE SIZE, not backlog. Runs merging *nothing* hit 671 s against a 900 s
+  schedule; completed runs/day had slipped 96 -> 92, i.e. overruns. The merge
+  was never the problem.
+- FIX: `iter_day_dirs` (directories only, does not descend into a day dir) +
+  `iter_compaction_units` (inclusive YYYY-MM-DD window applied BEFORE listing).
+  `compact_closed_hours` refactored onto them, so one scan path, and its
+  existing tests guard the new code. Full-archive discovery 671 s -> 2.6 s.
+- NEW `scripts/compact_batch.py`: manual, scoped (`--days/--since/--until/--tree`),
+  batched with progress, budgeted (`--max-units/--max-seconds`), **dry-run by
+  default**, exclusive lock. Interrupting needs no bookkeeping — the work list
+  is derived from parts on disk, so a re-run resumes.
+- THE LOCK IS NOT COSMETIC. `compact_hour` merges the existing hourly file
+  TOGETHER WITH the parts, so two interleaved runs can re-add parts on top of
+  already-merged output and **duplicate every row of that hour**. The watchdog
+  guarded this by process name; a hand-run tool needed a real lock.
+- Watchdog compaction now skipped while `D:\tradekit-data\COMPACTION-PAUSED`
+  exists (self-documenting file). Resume = delete it, no code edit; a
+  replacement drive starts without one, so a fresh archive self-compacts.
+- Deferral is lossless, and this was verified rather than assumed: parts are
+  self-contained parquet with their own footers, `_next_part` seeds from disk
+  so a restart never reuses an index, `compact_hour` folds in any pre-existing
+  hourly file. Cost is purely file count: ~2,800 parts/hour (~68k/day).
+- VERIFIED ON THE LIVE ARCHIVE: 667 hours, 4,080 parts -> 0, **808,695 rows
+  before == 808,695 after**, 0 units changed, 29.9 s. GATE: green (d8d27b7).
+- README stale beyond this change (flagged, not fixed): header snapshot still
+  says 08-10/4.22 GB, and §3 "ticks since 07-19" hides that July was an
+  11-symbol pilot — the 77-symbol greenlist starts ~08-08, so BTC ticks do not
+  exist before then. Anyone joining BTC across that boundary gets a silent hole.
+- CRV_USD stopped on Kraken+Coinbase on 08-08 because it left GREENLIST_PAIRS,
+  not because anything broke. Empty dirs are leftovers.
+- NOTE: `iter_symbol_dirs` still uses the old `rglob("*")` and is now a slower
+  duplicate of `iter_day_dirs`. Left alone deliberately (other tools call it).
+
 ## 2026-08-10 (Opus — Kraken book to 1 Hz, history synced; archive halved)
 
 - Mike ratified: one book sampling policy archive-wide, 1 Hz (ASSUMPTIONS 180).
