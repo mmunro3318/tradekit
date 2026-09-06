@@ -310,6 +310,139 @@ def test_bucket_wiring_second_call_waits_for_token(respx_mock) -> None:
     assert all(w > 0 for w in waits), f"every wait must be positive, got {waits}"
 
 
+def _fixture_for_key(result_key: str, rows: list[list]) -> dict:
+    """Generic /0/public/OHLC success body keyed at an arbitrary result key.
+
+    Unlike `_kraken_ohlc_fixture` above (hardcoded to BTC's XXBTZUSD), Batch
+    B's nine archived-but-unmapped symbols each pin a DIFFERENT result key —
+    this mirrors the exact same real Kraken envelope shape, parametrized on
+    key.
+    """
+    return {
+        "error": [],
+        "result": {
+            result_key: rows,
+            "last": rows[-1][0] if rows else 0,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Batch B — nine archived-but-unmapped symbols (SPRINT-PREVIEW-DEFER.md B1/B2,
+# CTO-verified live against /0/public/OHLC on 2026-09-06, 721 rows each at
+# interval=60). These are collected in the archive but the scanner cannot see
+# them until _SYMBOL_TO_KRAKEN_PAIR / _KRAKEN_RESULT_KEY carry the mapping.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("symbol", "request_pair", "result_key"),
+    [
+        ("ZEC/USD", "ZECUSD", "XZECZUSD"),  # legacy X/Z spelling, like BTC/ETH/XRP
+        ("TIA/USD", "TIAUSD", "TIAUSD"),
+        ("DOT/USD", "DOTUSD", "DOTUSD"),
+        ("ADA/USD", "ADAUSD", "ADAUSD"),
+        ("SUI/USD", "SUIUSD", "SUIUSD"),
+        ("FIL/USD", "FILUSD", "FILUSD"),
+        ("ALGO/USD", "ALGOUSD", "ALGOUSD"),
+        ("HBAR/USD", "HBARUSD", "HBARUSD"),
+        ("POL/USD", "POLUSD", "POLUSD"),
+    ],
+)
+def test_batch_b_symbols_map_to_pinned_request_pair_and_result_key(
+    symbol: str, request_pair: str, result_key: str, provider, respx_mock
+) -> None:
+    """BEHAVIOR: each of the nine archived-but-unmapped symbols (Batch B pins,
+    SPRINT-PREVIEW-DEFER.md section 'Batch B pins', CTO-verified live
+    2026-09-06) must issue a request whose `pair` param is the pinned request
+    pair, and must parse a response keyed at the pinned result key into a
+    BarSeries carrying the fixture's bars. Today every one of these symbols is
+    absent from `_SYMBOL_TO_KRAKEN_PAIR`, so `get_bars` raises
+    ProviderRequestError ("unknown symbol ... no Kraken pair mapping
+    configured") before any HTTP call — this test fails on that exception,
+    not on the assertions below, until Batch B's mapping lands."""
+    asset = AssetRef(
+        symbol=symbol, venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
+    )
+    t0 = int(datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp())
+    rows = [
+        _row(t0, "10.0", "10.5", "9.5", "10.2", "10.1", "50.0", 5),
+        _row(t0 + 3600, "10.2", "10.8", "10.0", "10.6", "10.4", "40.0", 4),
+    ]
+    route = respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json=_fixture_for_key(result_key, rows))
+    )
+    start = datetime.fromtimestamp(t0, tz=UTC)
+    end = datetime.fromtimestamp(t0 + 7200, tz=UTC)
+
+    series = provider.get_bars(asset, "1h", start, end)
+
+    assert route.call_count == 1
+    sent_params = route.calls.last.request.url.params
+    assert sent_params["pair"] == request_pair, (
+        f"{symbol}: expected the pinned request pair {request_pair!r}, got "
+        f"{sent_params.get('pair')!r}"
+    )
+    assert len(series.bars) == 2, (
+        f"{symbol}: must parse the pinned result key {result_key!r} into 2 bars, got "
+        f"{len(series.bars)}"
+    )
+
+
+def test_zec_legacy_result_key_discriminates_against_the_naive_modern_spelling(
+    provider, respx_mock
+) -> None:
+    """GOLDEN: ZEC/USD is CTO-verified live (2026-09-06) to echo Kraken's
+    legacy X/Z result-key spelling (XZECZUSD) despite requesting the
+    modern-style pair param ZECUSD — the same trap BTC/ETH/XRP already hit
+    (see the module docstring and `_KRAKEN_RESULT_KEY`'s own comment). The
+    real parser contract (read from `kraken.py`: `body["result"].get(
+    result_key, [])`) never raises on a missing key — it silently returns
+    zero bars. So the discriminating fixture is two-sided: a response keyed
+    with the naive echoed-request spelling ("ZECUSD", what a modern-pair-only
+    implementation would look for) must silently parse to ZERO bars, while
+    the pinned legacy key ("XZECZUSD") must parse the real rows. An
+    implementation that wrongly treats ZEC as a plain modern-echo pair passes
+    the first half of this test and fails the second.
+
+    Today ZEC/USD is entirely absent from `_SYMBOL_TO_KRAKEN_PAIR`, so both
+    calls below raise ProviderRequestError ("unknown symbol 'ZEC/USD'; no
+    Kraken pair mapping configured") on the FIRST call, before either
+    scenario's fixture is ever consulted.
+    """
+    zec = AssetRef(
+        symbol="ZEC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01")
+    )
+    t0 = int(datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp())
+    rows = [_row(t0, "40.0", "41.0", "39.5", "40.5", "40.2", "100.0", 20)]
+    start = datetime.fromtimestamp(t0, tz=UTC)
+    end = start + timedelta(hours=1)
+
+    # Scenario 1: response keyed with the naive "modern echo" spelling — must
+    # NOT silently surface data; the provider must be reading the legacy key.
+    respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json=_fixture_for_key("ZECUSD", rows))
+    )
+    naive_key_series = provider.get_bars(zec, "1h", start, end)
+    assert naive_key_series.bars == [], (
+        "a response keyed 'ZECUSD' (the naive modern-echo spelling) must parse to "
+        "zero bars — the provider must read the pinned legacy key 'XZECZUSD' "
+        f"instead, got {len(naive_key_series.bars)} bars"
+    )
+
+    # Scenario 2: response keyed at the pinned legacy spelling — must parse
+    # the real row.
+    respx_mock.reset()
+    respx_mock.get(KRAKEN_OHLC_URL).mock(
+        return_value=httpx.Response(200, json=_fixture_for_key("XZECZUSD", rows))
+    )
+    legacy_key_series = provider.get_bars(zec, "1h", start, end)
+    assert len(legacy_key_series.bars) == 1, (
+        "a response keyed 'XZECZUSD' (pinned legacy X/Z spelling) must parse to the "
+        f"real row, got {len(legacy_key_series.bars)} bars"
+    )
+
+
 def test_pair_mapping_tables_are_consistent_and_cover_mikes_universe() -> None:
     """P1C smoke catch: scan_markets against SOL/USD died on a missing pair
     mapping — the P1A tables only covered BTC/ETH. Pins (a) every request
