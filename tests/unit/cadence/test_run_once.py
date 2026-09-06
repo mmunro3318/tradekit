@@ -64,6 +64,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -840,4 +841,64 @@ class TestF2EquityDegradesPerSymbol:
         digest_files = list(tmp_path.glob("DIGEST-*.md"))
         content = digest_files[0].read_text(encoding="utf-8")
         assert "SOL/USD" in content, "F2a: the skipped symbol's warning must reach the digest"
+
+
+# ---------------------------------------------------------------------------
+# T-A5 (SPRINT-PREVIEW-DEFER, regression guard for the cadence seam blind
+# spot) -- every test ABOVE fakes `cadence.build_state` to a canned
+# `HudState`; that convention is exactly why the real scan-time policy
+# preview's R-010/R-012 always-deny defect (docs/specs/SPRINT-PREVIEW-
+# DEFER.md) escaped this whole suite. This is the one test in the file that
+# leaves `cadence.build_state` REAL, driving `hud._build.py`'s actual
+# preview-deferral fix through `run_once`'s real funnel call end to end.
+# ---------------------------------------------------------------------------
+
+
+class TestTA5CadenceBuildStateLeftReal:
+    def test_run_once_with_real_build_state_opens_one_paper_position(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BEHAVIOR (T-A5): `cadence.build_state` is left REAL -- no
+        `monkeypatch.setattr(cadence, "build_state", ...)` anywhere in this
+        test. Only the mae bars/clock seams (`_install_seams`, this file's
+        own convention) and two of hud's own sanctioned seams (`scan_setup`/
+        `sizing_info`, gated to ETH/USD -- the one symbol this test wants
+        ticketed out of `hud.DEFAULT_SYMBOLS`' full 11) are patched.
+        `evaluate_policy` is never touched, same as every T-A test.
+
+        Today `_default_evaluate_policy` denies EVERY preview on R-010/R-012
+        `insufficient_context` (the unledgered interim thesis) -- zero
+        tickets -> zero entries -> zero positions (FAILS). After the GREEN
+        fix defers those two hits, exactly one ETH/USD paper position opens
+        -- the same real path production runs, never faked."""
+        _patch_dials(monkeypatch, default_account_ref="paper:alpha")
+        holder = _BarsClockHolder(_flat_bars(_ASSET), _ENTRY_NOW)
+        _install_seams(monkeypatch, holder)
+
+        import tradekit.hud._build as hud_build
+
+        monkeypatch.setattr(
+            hud_build,
+            "scan_setup",
+            lambda symbol: SimpleNamespace(
+                signal_tags=["fake_signal"] if symbol == "ETH/USD" else []
+            ),
+        )
+        monkeypatch.setattr(
+            hud_build,
+            "sizing_info",
+            lambda symbol, limit_price, equity_usd: SimpleNamespace(
+                qty=Decimal("0.25"),
+                stop_distance_usd=Decimal("10"),
+                r_multiple_target=Decimal("2"),
+            ),
+        )
+
+        run_once(digest_dir=tmp_path)
+
+        positions = broker.get("paper:alpha").positions()
+        assert [p.symbol for p in positions] == ["ETH/USD"], (
+            "T-A5: cadence.build_state left REAL must still open exactly one paper "
+            "position once the preview-deferral fix lands"
+        )
 
