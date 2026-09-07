@@ -29,10 +29,31 @@
   T-A5 leaves `cadence.build_state` REAL — the seam blind spot that hid this
   for six weeks is closed. Friction: reviewer parked on a background pytest
   (docs/FRICTION.md 2026-09-06).
-- NEXT: Mike registers "TradeKit Paper Cadence" (schtasks command in
-  scripts/run_cadence.py header; check LastTaskResult 0); watch
-  docs/digest/ for the first entries (TAO S1 / LINK S2 / NEAR S2 per the
-  scope report); merge fix/hud-preview-defer + fix/event-time-partitioning.
+- 2026-09-07 07:xx UTC: Mike registered the cadence task (SUCCESS). First two
+  hourly digests = drought with `killed_by=sizing` on every ARMED symbol.
+  Root cause: the production ledger had NO `paper:alpha` account (zero
+  AccountCreated events, ever) — `broker.get` auto-vivified a $0 shell,
+  `mae._sizing.atr_position` raised "equity must be positive", sizing gate
+  killed silently. Created it: `tk account create-paper` principal $500.00
+  (= paper_starting_equity_usd). Manual `run_cadence.py` at 07:24 UTC ->
+  **FIRST PAPER TRADE OF THE RECORD: TAO/USD s1_momentum, 0.15765 TAO @
+  266.00 ($41.94), sl 235.58 / tp 330.73, thesis 01M1XC37T40K9WN939XR8CBA02
+  approved.** Settled cash $457.96.
+- Two spec tensions surfaced by the same run (CTO pins needed, NOT improvised):
+  (T1) R-005 vs min-ATR sizing: size = equity*1%/stop_pct, so any asset with
+  2*ATR14 < 10% of price sizes ABOVE the 10% paper cap and is denied at
+  preview — LINK $50.73 vs $50.00 (73 cents), SOL $53.78, ETH would be $65.
+  Only high-vol names (TAO 11.9%, NEAR 12.9%) can ever enter. Direction:
+  cap-aware clip inside mae.size_position so R-012 purity holds.
+  (T2) R-012 notional drift: sizing prices at the DAILY close, the ticket at
+  the 1h close; AKT drifted 3.39% intraday vs the 1% tolerance -> thesis
+  drafted then correctly REJECTED at binding. The known entry-fill-price
+  ambiguity. Direction: size at the ticket's price, or widen the tolerance
+  with a ratified number. (T3) cadence must WARN when equity <= 0 / account
+  missing — two digests said "sizing" and nothing else.
+- NEXT: spec T1+T2+T3 (tk-spec -> tk-implement; T1/T2 are policy/mae
+  money-path -> review round); merge fix/hud-preview-defer +
+  fix/event-time-partitioning (tk-ship); watch docs/digest/ hourly.
 
 ## 2026-08-23 (Opus — compaction off the watchdog; manual batched compaction)
 

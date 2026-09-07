@@ -124,3 +124,16 @@ B3. `hud.DEFAULT_SYMBOLS` is NOT changed in this batch (the 11-pair
   (optional) `tests/unit/cadence/test_run_once.py`, `tests/ASSUMPTIONS.md`.
 - B: `src/tradekit/mae/_data/kraken.py`, `tests/unit/mae_data/test_kraken*.py`.
 Disjoint -> may run in parallel.
+
+## Open tensions found by the first live cadence run (2026-09-07, unpinned)
+
+- T1 R-005 vs min-ATR sizing: `size = equity * risk_pct / stop_pct`; when
+  `2*ATR14 < 10%` of price the size exceeds `max_position_pct_paper` and the
+  preview denies (LINK $50.73 vs $50.00; SOL $53.78; ETH ~$65). Only names
+  with stop_pct >= 10% can enter. Candidate pin: clip inside
+  `mae.size_position` to `max_position_pct * equity` (keeps R-012 purity).
+- T2 R-012 notional drift: sizing uses the daily close, the ticket the 1h
+  close; AKT drifted 3.39% vs the 1% tolerance and was rejected at binding.
+  Candidate pin: size at the ticket's limit price, or a ratified tolerance.
+- T3 cadence silence on `equity <= 0` / missing account: two digests
+  reported `killed_by=sizing` with no warning. Pin: a loud digest warning.
