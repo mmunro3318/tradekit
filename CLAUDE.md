@@ -107,6 +107,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
+**2026-09-08 — PAPER RECORD RUNNING; two seeds (READ BOTH FIRST):**
+`docs/handoff/HANDOFF-2026-09-08-paper-record-sizing-cap.md` (dev: T1 cap-aware
+sizing / T2 R-012 drift / T3 loud cadence — the next tk-spec) and
+`docs/handoff/HANDOFF-2026-09-08-navigator-artifact.md` (Mike's visual project
+board — starts at tk-brainstorm on a branch he forks). Hourly task "TradeKit Paper
+Cadence" trades the CHECKED-OUT tree; first paper trade TAO s1 open since 09-07.
+`docs/digest/` is appended hourly (expect it dirty; commit at seams). Preview
+deferral = ASSUMPTIONS 181; do not widen. Everything below is history.
+
 **DATA-VACUUM EXPANSION 2026-08-08/09 — seed: `docs/handoff/HANDOFF-2026-08-09-data-vacuum-expansion.md`
 (READ IT FIRST; it carries the pipeline architecture, verified venue-access facts, and the
 mistake log).** Greenlist 11 -> 87 pairs; 3 -> 8 live collector streams (Kraken ticks, Coinbase

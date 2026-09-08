@@ -1,3 +1,20 @@
+## 2026-09-08 (Fable — ship + session seam)
+
+- tk-ship: fresh gate green (1421 tests, ruff, mypy); no broker/policy files
+  in the delta (hud change reviewed r23); 9 long-standing PARKED unknowns
+  (bridge-read/UIA/HUD-orderbook/wound-scale) re-parked with Mike's "proceed"
+  — untouched by this delta. `main` fast-forwarded to `fix/hud-preview-defer`
+  (which already contained `fix/event-time-partitioning`); pushed to origin.
+- Hourly digests now tracked in docs/digest/ (committed at seams).
+- Two seeds written: HANDOFF-2026-09-08-paper-record-sizing-cap.md (dev) and
+  HANDOFF-2026-09-08-navigator-artifact.md (Mike's visual project board —
+  his ask: scope + vision + drift + loops on one living artifact; he liked
+  the desk note). CLAUDE.md Current focus points at both.
+- Mike context (binding for planning): sessions move faster than he can
+  track; task-switching cost is high; he is job-hunting to fund Alpaca; prop
+  account idle; wants fewer wasted tokens -> the navigator is the fix, and
+  every future session should update it at ship time.
+
 ## 2026-09-06 (Fable — LINK impulse scope; cadence blocker found)
 
 - Mike asked for crypto scope + trade plans after LINK's jump. Report:
