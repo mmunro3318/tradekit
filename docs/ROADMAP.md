@@ -281,9 +281,11 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [ ] T4: `thesis.submit` sizes at the contract's reference price with the paper cap
 - [ ] T5: cadence — reference price kept on the market entry, dial sizing basis, loud dead-account skip
 - [ ] T6: ASSUMPTIONS 182 + docs + review grade
-- [ ] Mike: re-register BOTH scheduled tasks (collector watchdog, TradeKit Paper Cadence) with
+- [x] Mike: re-register BOTH scheduled tasks (collector watchdog, TradeKit Paper Cadence) with
       `-LogonType S4U` so they fire from a logged-out desktop (2026-09-10 reboot cost 6h25m on all 8
-      streams + 7 cadence runs; both tasks are `Interactive only`)
+      streams + 7 cadence runs; both tasks were `Interactive only`). Done 2026-09-10 02:44 PDT via
+      `scripts/register_tasks_s4u.ps1` (elevated); watchdog LastTaskResult 0 under S4U; cadence
+      action now the absolute `uv.exe` path with an explicit working directory.
 
 ## Data vacuum (seed: HANDOFF-2026-08-09-data-vacuum-expansion.md)
 - [x] 8 live collector streams on a shared collector_core (2026-08-08/09)

@@ -19,16 +19,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 import backfill_ticks as bt
 
 
-def _mk_hour(base: Path, pair_dir: str, day: str, hh: int) -> None:
-    d = base / pair_dir / day
+def _mk_hour(base: Path, pair: str, day: str, hh: int) -> None:
+    # Directory derived from the writer's own layout helper (asset-class
+    # partitioned), not a private flat join — see bt.present_trade_hours.
+    day_dt = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC)
+    d = bt.ct.trade_file_path(base, pair, day_dt).parent
     d.mkdir(parents=True, exist_ok=True)
     (d / f"trades-{hh:02d}.parquet").touch()
 
 
 class TestGapDetection:
     def test_present_trade_hours_reads_tree(self, tmp_path: Path) -> None:
-        _mk_hour(tmp_path, "ETH_USD", "2026-07-19", 13)
-        _mk_hour(tmp_path, "ETH_USD", "2026-07-20", 0)
+        _mk_hour(tmp_path, "ETH/USD", "2026-07-19", 13)
+        _mk_hour(tmp_path, "ETH/USD", "2026-07-20", 0)
         hours = bt.present_trade_hours(tmp_path, "ETH/USD")
         assert hours == {
             datetime(2026, 7, 19, 13, tzinfo=UTC),
@@ -36,10 +39,11 @@ class TestGapDetection:
         }
 
     def test_present_ignores_book_files_and_junk_dirs(self, tmp_path: Path) -> None:
-        d = tmp_path / "ETH_USD" / "2026-07-19"
+        day_dt = datetime(2026, 7, 19, tzinfo=UTC)
+        d = bt.ct.trade_file_path(tmp_path, "ETH/USD", day_dt).parent
         d.mkdir(parents=True)
         (d / "book-05.parquet").touch()
-        (tmp_path / "ETH_USD" / "not-a-date").mkdir()
+        (d.parent / "not-a-date").mkdir()
         assert bt.present_trade_hours(tmp_path, "ETH/USD") == set()
 
     def test_missing_hours_between_first_and_now(self) -> None:
@@ -163,8 +167,8 @@ class TestSkipExistingHour:
 
 class TestInventoryReport:
     def test_inventory_reports_gaps(self, tmp_path: Path, capsys) -> None:
-        _mk_hour(tmp_path, "ETH_USD", "2026-07-19", 13)
-        _mk_hour(tmp_path, "ETH_USD", "2026-07-19", 16)
+        _mk_hour(tmp_path, "ETH/USD", "2026-07-19", 13)
+        _mk_hour(tmp_path, "ETH/USD", "2026-07-19", 16)
         now = datetime(2026, 7, 19, 18, tzinfo=UTC)
         report = bt.inventory(tmp_path, pairs=["ETH/USD"], now=now)
         assert report["ETH/USD"]["missing"] == [
@@ -185,8 +189,8 @@ class TestInventoryReport:
 
 
 def test_missing_hours_span_multiple_days(tmp_path: Path) -> None:
-    _mk_hour(tmp_path, "AKT_USD", "2026-07-19", 23)
-    _mk_hour(tmp_path, "AKT_USD", "2026-07-21", 1)
+    _mk_hour(tmp_path, "AKT/USD", "2026-07-19", 23)
+    _mk_hour(tmp_path, "AKT/USD", "2026-07-21", 1)
     present = bt.present_trade_hours(tmp_path, "AKT/USD")
     miss = bt.missing_hours(present, datetime(2026, 7, 21, 2, tzinfo=UTC))
     assert len(miss) == 25
@@ -201,8 +205,8 @@ class TestBookAnchoredInventory:
     that anchor to now counts as missing."""
 
     def test_earliest_book_hour_found_across_days(self, tmp_path):
-        d1 = tmp_path / "PAXG_USD" / "2026-07-21"
-        d2 = tmp_path / "PAXG_USD" / "2026-07-20"
+        d1 = bt.ct.book_file_path(tmp_path, "PAXG/USD", datetime(2026, 7, 21, tzinfo=UTC)).parent
+        d2 = bt.ct.book_file_path(tmp_path, "PAXG/USD", datetime(2026, 7, 20, tzinfo=UTC)).parent
         d1.mkdir(parents=True)
         d2.mkdir(parents=True)
         (d1 / "book-03.parquet").touch()
@@ -212,11 +216,13 @@ class TestBookAnchoredInventory:
         )
 
     def test_earliest_book_hour_none_without_book_files(self, tmp_path):
-        (tmp_path / "PAXG_USD" / "2026-07-20").mkdir(parents=True)
+        bt.ct.book_file_path(
+            tmp_path, "PAXG/USD", datetime(2026, 7, 20, tzinfo=UTC)
+        ).parent.mkdir(parents=True)
         assert bt.earliest_book_hour(tmp_path, "PAXG/USD") is None
 
     def test_inventory_book_anchored_pair_reports_all_hours_missing(self, tmp_path, capsys):
-        d = tmp_path / "PAXG_USD" / "2026-07-25"
+        d = bt.ct.book_file_path(tmp_path, "PAXG/USD", datetime(2026, 7, 25, tzinfo=UTC)).parent
         d.mkdir(parents=True)
         (d / "book-10.parquet").touch()
         now = datetime(2026, 7, 25, 14, 30, tzinfo=UTC)

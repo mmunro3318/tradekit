@@ -26,6 +26,24 @@ their own scheduled relaunch.)
 (watchdog pattern — same per-process-relaunch convention as the book
 harvesters; `schtasks` re-launches this script every hour regardless of
 whether the previous run exited 0, 1, or 2.)
+
+2026-09-10 (post-reboot audit, docs/research/data-health-2026-09-10-reboot.md):
+the registration above yields `Logon Mode: Interactive only`, so the task
+cannot fire while the machine sits at the login screen — a Windows Update
+reboot cost seven hourly runs and 6h25m of every collector stream. The
+durable form is an S4U principal (runs logged-out, no stored password) with
+the ABSOLUTE `uv` path, because a user-PATH `uv` is not guaranteed without
+a loaded profile (docs/FRICTION.md 2026-08-10). Mike's hands, PowerShell:
+
+    $p = New-ScheduledTaskPrincipal -UserId "admin" -LogonType S4U -RunLevel Limited
+    $a = New-ScheduledTaskAction `
+        -Execute "C:\\Users\\admin\\AppData\\Local\\hermes\\bin\\uv.exe" `
+        -Argument "run python scripts\\run_cadence.py" `
+        -WorkingDirectory "C:\\Users\\admin\\dev\\tradekit"
+    Set-ScheduledTask -TaskName "TradeKit Paper Cadence" -Principal $p -Action $a
+
+Verify after the next top of the hour: `(Get-ScheduledTaskInfo "TradeKit
+Paper Cadence").LastTaskResult` is 0. A "Ready" state proves nothing.
 """
 
 from __future__ import annotations

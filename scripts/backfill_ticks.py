@@ -21,6 +21,7 @@ Run modes (from repo root):
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time as _time
 from datetime import UTC, datetime, timedelta
@@ -42,6 +43,21 @@ RATE_LIMIT_BACKOFF_S = 10.0
 _SIDE = {"b": "buy", "s": "sell"}
 _ORD_TYPE = {"m": "market", "l": "limit"}
 
+# A present hour is either the compacted file or one of its pre-compaction
+# append-only fragments (see docs/ARCHIVE-README.md "path grammar"); both
+# are valid, self-contained parquet. Anchored on the whole stem so e.g. a
+# quarantined "trades-05.parquet.corrupt-no-footer" (stem
+# "trades-05.parquet") or a ".tmp" file never matches.
+_HOUR_STEM_RE = {
+    "trades": re.compile(r"^trades-(\d{2})(?:\.part-\d+)?$"),
+    "book": re.compile(r"^book-(\d{2})(?:\.part-\d+)?$"),
+}
+
+# Any fixed UTC datetime works here: passed to ct.stream_dir only to pick a
+# day segment, which callers immediately strip with `.parent` to recover
+# the pair directory (asset-class partitioned or not, per collector_core).
+_LAYOUT_PROBE_TS = datetime(1970, 1, 1, tzinfo=UTC)
+
 
 # --------------------------------------------------------------------------
 # Pure logic — no network, exercised directly by unit tests.
@@ -52,9 +68,31 @@ def floor_hour(ts: datetime) -> datetime:
     return ts.replace(minute=0, second=0, microsecond=0)
 
 
+def _present_hours_in_dir(date_dir: Path, stream: str) -> set[int]:
+    """Hours (0-23) that have any present-form file for `stream`
+    ("trades" or "book") in one day directory — compacted or fragment."""
+    pattern = _HOUR_STEM_RE[stream]
+    hours: set[int] = set()
+    for f in date_dir.glob(f"{stream}-*.parquet"):
+        m = pattern.match(f.stem)
+        if m:
+            hours.add(int(m.group(1)))
+    return hours
+
+
+def hour_is_present(date_dir: Path, stream: str, hh: int) -> bool:
+    """True when hour `hh` of `stream` already has a present-form file
+    (compacted or fragment) in `date_dir`."""
+    return hh in _present_hours_in_dir(date_dir, stream)
+
+
 def present_trade_hours(base_dir: Path, pair: str) -> set[datetime]:
-    """Hours (UTC datetimes, floored) that have a trades-<HH>.parquet file."""
-    pair_dir = base_dir / pair.replace("/", "_")
+    """Hours (UTC datetimes, floored) that have a present-form trades file."""
+    # Same layout helper the writer uses (ct.trade_file_path -> stream_dir),
+    # never a private path join — readers and writer must never disagree
+    # about where a pair lives. The ts only selects a day segment, stripped
+    # by .parent; any fixed UTC datetime works.
+    pair_dir = ct.stream_dir(base_dir, pair, _LAYOUT_PROBE_TS).parent
     hours: set[datetime] = set()
     if not pair_dir.is_dir():
         return hours
@@ -65,21 +103,17 @@ def present_trade_hours(base_dir: Path, pair: str) -> set[datetime]:
             day = datetime.strptime(date_dir.name, "%Y-%m-%d").replace(tzinfo=UTC)
         except ValueError:
             continue
-        for f in date_dir.glob("trades-*.parquet"):
-            try:
-                hh = int(f.stem.split("-", 1)[1])
-            except ValueError:
-                continue
+        for hh in _present_hours_in_dir(date_dir, "trades"):
             hours.add(day + timedelta(hours=hh))
     return hours
 
 
 def earliest_book_hour(base_dir: Path, pair: str) -> datetime | None:
-    """Earliest book-<HH>.parquet hour for a pair, or None. Anchor fallback
+    """Earliest present-form book hour for a pair, or None. Anchor fallback
     (CTO adjudication 2026-07-26) for pairs that collected book data but
     never any trades: their trade backfill starts where book collection
     proves the collector was first alive for the pair."""
-    pair_dir = base_dir / pair.replace("/", "_")
+    pair_dir = ct.stream_dir(base_dir, pair, _LAYOUT_PROBE_TS).parent
     earliest: datetime | None = None
     if not pair_dir.is_dir():
         return None
@@ -90,11 +124,7 @@ def earliest_book_hour(base_dir: Path, pair: str) -> datetime | None:
             day = datetime.strptime(date_dir.name, "%Y-%m-%d").replace(tzinfo=UTC)
         except ValueError:
             continue
-        for f in date_dir.glob("book-*.parquet"):
-            try:
-                hh = int(f.stem.split("-", 1)[1])
-            except ValueError:
-                continue
+        for hh in _present_hours_in_dir(date_dir, "book"):
             hour = day + timedelta(hours=hh)
             if earliest is None or hour < earliest:
                 earliest = hour
@@ -169,7 +199,7 @@ def write_hour(base_dir: Path, pair: str, hour: datetime, rows: list[dict[str, A
     import pyarrow.parquet as pq
 
     path = ct.trade_file_path(base_dir, pair, hour)
-    if path.exists():
+    if path.parent.is_dir() and hour_is_present(path.parent, "trades", hour.hour):
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(rows), path)
