@@ -201,12 +201,17 @@ Two fixtures, named so tests can cite them:
   `recommended_size_usd == 50.0`, `atr_position_size_usd ==
   pytest.approx(125.0)` (uncapped audit value kept), `max_position_usd ==
   50.0`, `"capped_by_max_position" in warnings`.
-- **AC-4** (exact-arithmetic boundary) GIVEN F-TIGHT WHEN
-  `price=Decimal("3")`, `max_position_usd=Decimal("50")` THEN
-  `Decimal(str(recommended_units)) == Decimal("16.66666666")` and
-  `Decimal(str(recommended_units)) * Decimal("3") <= Decimal("50")`. Repeat
-  for `price=Decimal("266.00")` and `price=Decimal("0.00007")`: the product
-  of the 8dp units and the price never exceeds the cap.
+- **AC-4** (exact-arithmetic boundary; corrected 2026-09-10 — the first
+  draft used prices 3 and 0.00007 under F-TIGHT, where `1.25 * price` is
+  under the cap and the clip must NOT fire; RED-A caught it, ASSUMPTIONS
+  182.8) GIVEN F-TIGHT and `max_position_usd=Decimal("50")`: WHEN
+  `price=Decimal("300")` THEN `Decimal(str(recommended_units)) ==
+  Decimal("0.16666666")`; WHEN `price=Decimal("266.00")` THEN
+  `Decimal("0.18796992")`. GIVEN **F-MICRO** (open=close=0.00007,
+  high=0.000071, low=0.000069 — uncapped size ~$87.50) WHEN
+  `price=Decimal("0.00007")` THEN `Decimal("714285.71428571")`. In every
+  case `Decimal(str(recommended_units)) * price <= Decimal("50")` and
+  `"capped_by_max_position" in warnings`.
 - **AC-5** GIVEN F-WIDE WHEN `max_position_usd=Decimal("50")` (cap not
   binding: $13.125) THEN output equals AC-1's except `max_position_usd ==
   50.0`; no warning.

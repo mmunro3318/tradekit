@@ -3537,3 +3537,67 @@ faked `evaluate_policy`. Ratified:
    set by construction but unreachable at preview (build_state always
    proposes a priced limit order); binding re-checks every R-010/R-012
    field, so the wider-than-strictly-needed scope is accepted (round 23).
+
+### 182 — one sizing basis for the paper funnel: ticket price, dial equity, dial cap (CTO ratified 2026-09-10, Mike: "proceed"; SPEC-sizing-cap)
+
+The paper funnel sizes every candidate twice — `hud._build.build_state` at
+scan time (the ticket) and `thesis._submit.build_submit_payloads` at submit
+(the `SizingComputed` record R-012 compares against) — and until this batch
+the two calls used different inputs: live equity vs the dial, and the 1h
+close vs the daily close. R-012's deviation is exactly
+`|E_live/E_dial * p_1h/p_daily - 1|`, measured 0.011-0.117 on the 2026-09-09
+digests against a 0.01 tolerance; and R-005 denied anything whose `2*ATR14`
+was under 10% of price because sizing never knew the cap existed. Ratified:
+
+1. BOTH `mae.size_position` call sites pass the same three inputs:
+   `price` = the ticket's limit price (`build_state`'s 1h close; carried on
+   the contract as `entry.limit_price` even for a market entry), `equity` =
+   `PolicyDials.paper_starting_equity_usd`, `max_position_usd` =
+   `PolicyDials.paper_max_position_usd` (`max_position_pct_paper *
+   paper_starting_equity_usd`, the same product R-005's paper leg computes).
+   The dial is already the policy side's equity basis (62, `_paper_equity`);
+   the scan preview was the odd one out. `cadence.run_once` sizes at the dial
+   and keeps the live figure (cash + marks) for the digest and the dead-
+   account check only.
+2. The clip lives in `mae.size_position`, in exact arithmetic: `units =
+   (cap / price).quantize(1e-8, ROUND_DOWN)`, `size = units * price`, so the
+   ticket notional can never exceed the cap by a float hair and R-005's
+   `notional <= limit` holds by construction. `atr_position_size_usd` and
+   `kelly_position_size_usd` keep their uncapped values (audit trail);
+   `warnings` carries `capped_by_max_position`; the dict echoes
+   `max_position_usd`. TD-11 purity holds — a price and a cap are market/
+   policy facts, not P&L history — and `mae` still imports nothing from
+   `policy` (the dial comes in as a Decimal argument).
+3. The cap is passed for `paper:` account refs ONLY. R-005's live leg is
+   `5% * principal`, a different basis that lives in the ledger; when P4
+   probation needs it, it arrives the same way (a Decimal argument derived
+   outside `mae`), never by `mae` reading policy state.
+4. `thesis.submit` sizes at `entry.limit_price` when the contract carries one
+   (limit or market entry), else at the snapshot's daily close — so every
+   pre-existing contract shape sizes exactly as before. `MarketSnapshotTaken.
+   last_close` stays the daily close (snapshot semantics untouched), and
+   `broker._pipeline._entry_price` still executes a market entry at that
+   daily close (round-18 pin untouched): the executed qty is
+   `recorded_size / daily_close`, which satisfies R-012 there by
+   construction.
+5. FORWARD PIN: when `pnl_daily` finally feeds `_paper_equity` (62), the
+   sizing basis moves with it on BOTH sides (`cadence.run_once`'s
+   `sizing_equity_usd` and `thesis._submit`), or R-012 reopens.
+6. R-007 counts `ActionProposed(submit_order)` events, denied ones included
+   (`_trades_today_count`). On 2026-09-09 the hourly binding rejections
+   alone reached 20-22 by 15:00 UTC and locked the paper account for the
+   day. That is a consequence of (1)'s defect, not a rule defect: R-007 is
+   NOT changed (conservative for live; never weaken an R-rule). Revisit only
+   if denied-at-binding drafts reappear after this lands.
+7. `cadence.run_once` is loud on a dead account: live equity `<= 0` (no
+   `AccountCreated` for the default ref, or cash exhausted) appends a digest
+   warning naming the ref and `tk account create-paper`, and skips entries
+   for that run (exits still evaluate; the digest still writes). Before this
+   batch the same condition surfaced as a silent `killed_by=sizing`.
+8. AC-4's first draft named prices 3 and 0.00007 under F-TIGHT as clip
+   boundaries; RED-A showed `atr_units = risk_usd / stop_distance` is
+   price-independent (1.25 there), so those notionals ($3.75, $0.0000875)
+   never reach the cap and the clip — conditional on `recommended_size_usd
+   > max_position_usd`, per AC-5 — must not fire. The clip is CONDITIONAL;
+   the boundary cases moved to prices where it binds (300, 266.00 under
+   F-TIGHT; 0.00007 under a sub-cent F-MICRO fixture).
