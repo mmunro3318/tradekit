@@ -272,7 +272,18 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] T3 run_once + digest + script (r22)
 - [x] Preview deferral of R-010/R-012 insufficient_context so the funnel can ticket (SPRINT-PREVIEW-DEFER A, r23, ASSUMPTIONS 181)
 - [x] Kraken pair mappings for the 9 archived-but-unmapped pairs (SPRINT-PREVIEW-DEFER B, r23)
-- [ ] Mike: register the scheduled task (command in scripts/run_cadence.py header) — verify LastTaskResult 0
+- [x] Mike: register the scheduled task (command in scripts/run_cadence.py header) — verify LastTaskResult 0 (done 2026-09-07; first trade TAO s1 07:24 UTC)
+
+### Sizing cap (SPEC-sizing-cap.md, TASKS-sizing-cap.md, branch feature/sizing-cap)
+- [ ] T1: `mae.size_position` gains `price` + `max_position_usd` (exact-arithmetic clip)
+- [ ] T2: `PolicyDials.paper_max_position_usd` (the one derivation of R-005's paper cap)
+- [ ] T3: hud sizing seam sizes at the ticket price with the paper cap
+- [ ] T4: `thesis.submit` sizes at the contract's reference price with the paper cap
+- [ ] T5: cadence — reference price kept on the market entry, dial sizing basis, loud dead-account skip
+- [ ] T6: ASSUMPTIONS 182 + docs + review grade
+- [ ] Mike: re-register BOTH scheduled tasks (collector watchdog, TradeKit Paper Cadence) with
+      `-LogonType S4U` so they fire from a logged-out desktop (2026-09-10 reboot cost 6h25m on all 8
+      streams + 7 cadence runs; both tasks are `Interactive only`)
 
 ## Data vacuum (seed: HANDOFF-2026-08-09-data-vacuum-expansion.md)
 - [x] 8 live collector streams on a shared collector_core (2026-08-08/09)
@@ -281,7 +292,13 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] Nanosecond-safe Alpaca resume cursor (was re-storing the tape's final second forever)
 - [x] Retire the three private per-venue ParquetSinks (flush-time bug + read-modify-write)
 - [x] scripts/repartition_archive.py + repair equities/alpaca (0.00% wrong-hour, 0 duplicates)
-- [ ] Merge `fix/event-time-partitioning`
+- [x] Merge `fix/event-time-partitioning` (contained in main via fix/hud-preview-defer, 2026-09-08)
+- [ ] Backfill Kraken trades for the 2026-09-10 00:03–06:28 UTC reboot blackout
+      (`scripts/backfill_ticks.py`, dry-run first; the only recoverable stream — books on every
+      venue and Coinbase/OKX/Hyperliquid/Alpaca trades for that window are gone)
+- [ ] Write the three tools `tk-data-health` depends on and that do not exist:
+      `scripts/health_snapshot.ps1`, `scripts/coverage.py`, `scripts/audit_tree.py`
+      (see docs/research/data-health-2026-09-10-reboot.md §7)
 - [ ] Recover or write off `books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet`
       (no footer magic bytes — killed mid read-modify-write; repartition skips its unit)
 - [ ] Binance archive backfill (scripts/backfill_binance_archive.py; 0% used, history to 2017)

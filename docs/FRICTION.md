@@ -149,3 +149,13 @@ command — keep `git commit` in its own call.
 - **Symptom:** tk-reviewer (round 23, first dispatch) ended its turn with "waiting on the background waiter" and no VERDICT section; ~6 min and 176k tokens spent for nothing. `SendMessage` is not available in this session (ToolSearch finds no such tool), so the agent could not be resumed.
 - **Cause:** the agent ran the full pytest suite with `run_in_background` and treated the pending notification as a reason to stop; a subagent that stops with no live children is finished from the orchestrator's side.
 - **Solution:** every reviewer/implementer dispatch prompt now carries a PROCESS RULE: run all commands in the foreground, deliver the whole report as one final message, never `run_in_background`. Re-dispatched as review-preview-defer-2 with that rule. Also re-hit: the rtk-proxied bare `uv run pytest` swallows the summary line — use `uv run python -m pytest` and the exit code.
+
+## 2026-09-10 — a fresh worktree's `uv sync` skips the `collector` dependency group; commit hook goes red on collection `uv,worktree,deps`
+- **Symptom:** first commit in `.worktrees/sizing-cap` blocked by commit_gate.py: `ModuleNotFoundError: No module named 'pyarrow'` collecting `tests/unit/collector/test_downsample_book.py`. The main tree's venv had it.
+- **Cause:** `pyarrow`/`websockets` live in the optional `[dependency-groups] collector`; plain `uv sync` installs only `dev`. The main tree got the group at some point by hand; the lockfile does not make it default.
+- **Solution:** `uv sync --all-groups` in every new worktree (pywinauto in `bridge` installs fine on win32). Consider `[tool.uv] default-groups = ["dev", "collector"]` so the gate is reproducible from a clean checkout.
+
+## 2026-09-10 — `tk-data-health` names three repo scripts that were never written `skills,data-health,tooling`
+- **Symptom:** the post-reboot archive audit (docs/research/data-health-2026-09-10-reboot.md) found `scripts/health_snapshot.ps1`, `scripts/coverage.py`, `scripts/audit_tree.py` absent; the skill and its ARCHIVE-MAP cite all three as the workflow's steps 1-3. The agent improvised read-only PowerShell + an ad hoc pyarrow spot-check instead.
+- **Cause:** the skill was written from the data-vacuum sprint's intended tooling, not from what shipped.
+- **Solution:** NOT SOLVED — ROADMAP item under Data vacuum to write the three tools; until then the skill's steps 1-3 are manual. Also: the ARCHIVE-MAP's "known-open" S4U item was the exact cause of this reboot's 6h25m loss.
