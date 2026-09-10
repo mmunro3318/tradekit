@@ -107,14 +107,21 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-**2026-09-08 — PAPER RECORD RUNNING; two seeds (READ BOTH FIRST):**
-`docs/handoff/HANDOFF-2026-09-08-paper-record-sizing-cap.md` (dev: T1 cap-aware
-sizing / T2 R-012 drift / T3 loud cadence — the next tk-spec) and
-`docs/handoff/HANDOFF-2026-09-08-navigator-artifact.md` (Mike's visual project
-board — starts at tk-brainstorm on a branch he forks). Hourly task "TradeKit Paper
-Cadence" trades the CHECKED-OUT tree; first paper trade TAO s1 open since 09-07.
-`docs/digest/` is appended hourly (expect it dirty; commit at seams). Preview
-deferral = ASSUMPTIONS 181; do not widen. Everything below is history.
+**2026-09-10 — SIZING CAP + R-007 SHIPPED; seed:
+`docs/handoff/HANDOFF-2026-09-10-paper-record-r007-unlocked.md` (READ FIRST).**
+One sizing basis (ASSUMPTIONS 182: ticket price, dial equity, dial cap, strategy
+scale — all INTO `mae.size_position`); R-007 counts entry `OrderSubmitted`, not
+proposals (previews were locking the paper account daily). Hourly task "TradeKit
+Paper Cadence" trades the CHECKED-OUT tree (`main`), now S4U. Feature work lives
+in `.worktrees/<name>` (gitignored; `uv sync --all-groups`). First job next
+session: read the post-merge digests. Sibling seed for Mike's board:
+`docs/handoff/HANDOFF-2026-09-08-navigator-artifact.md`. `docs/digest/` is
+appended hourly (expect it dirty; commit at seams). Preview deferral =
+ASSUMPTIONS 181; do not widen. Everything below is history.
+
+**2026-09-08 — PAPER RECORD RUNNING (history):** seeds
+`docs/handoff/HANDOFF-2026-09-08-paper-record-sizing-cap.md` (superseded by the
+09-10 seed) and `-navigator-artifact.md`. First paper trade TAO s1 open since 09-07.
 
 **DATA-VACUUM EXPANSION 2026-08-08/09 — seed: `docs/handoff/HANDOFF-2026-08-09-data-vacuum-expansion.md`
 (READ IT FIRST; it carries the pipeline architecture, verified venue-access facts, and the

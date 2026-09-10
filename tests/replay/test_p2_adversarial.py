@@ -414,7 +414,14 @@ def test_revenge_sizing_2x_denied_by_r012_control_within_tolerance_passes(
     """Gaming story: after a loss, submit an order 2x the size its own sizing
     model computed to 'make it back'. Gate: R-012 sizing-purity denies any
     order deviating > 1% from the recorded SizingComputed output. Positive
-    control: an order matching the recorded size clears R-012."""
+    control: an order matching the recorded size clears R-012.
+
+    ASSUMPTIONS 182.4: `thesis.submit` now sizes at `entry.limit_price`
+    (60000.00 on the shared `thesis_kwargs` fixture) instead of the daily
+    close. Pinned here to the fixture's own daily close (100) so the honest
+    recorded size is exactly 25.00 again — 2x = 50.00 sits `<=` the paper
+    cap ($50), so R-005 stays clear and R-012 alone is the whole defense."""
+    thesis_kwargs["entry"]["limit_price"] = "100.00"
     tid = _honest_submitted(thesis_kwargs, monkeypatch, make_event)
     recorded = _recorded_sizing_usd(tid)  # real mae.size_position output = 25.00
     _pin_policy_clock(monkeypatch)

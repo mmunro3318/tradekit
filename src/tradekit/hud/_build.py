@@ -134,14 +134,41 @@ def _default_open_position_symbols() -> set[str]:
     return {row.symbol for row in ledger.models.active_theses_with_symbol() if row.symbol}
 
 
-def _default_sizing_info(symbol: str, limit_price: Decimal, equity_usd: Decimal) -> SizingInfo:
+def _default_sizing_info(
+    symbol: str,
+    limit_price: Decimal,
+    equity_usd: Decimal,
+    *,
+    size_scale: Decimal = Decimal("1"),
+) -> SizingInfo:
     """Real min-ATR/quarter-Kelly sizing (ASSUMPTIONS 159a): one
     `mae.size_position` call powers both the quantity and the ATR-bracket
     inputs. Quantity is quantized to 8dp ROUND_DOWN — conservative, never
-    oversize."""
-    from tradekit import mae
+    oversize.
 
-    result = mae.size_position(symbol, account_equity_usd=equity_usd)
+    ASSUMPTIONS 182 (SPEC-sizing-cap P3): sizes off the ticket's own
+    `limit_price` and clips to `PolicyDials.paper_max_position_usd` for
+    `paper:` account refs, so the scan-time preview matches the binding
+    `SizingComputed` record `thesis._submit` will later write.
+
+    `size_scale` (review round 24 F1, ASSUMPTIONS 182.10, SPEC-sizing-cap
+    P3'): the claiming `StrategyDef`'s own restricted-size fraction,
+    forwarded straight into `mae.size_position` so the clip-then-scale
+    happens exactly once, inside sizing — `build_state` no longer
+    multiplies `sizing.qty` by it after the fact (that double-application
+    site is what died every S4 draft at binding on R-012)."""
+    from tradekit import mae
+    from tradekit.policy._dials import PolicyDials
+
+    dials = PolicyDials.load()
+    cap = dials.paper_max_position_usd if dials.default_account_ref.startswith("paper:") else None
+    result = mae.size_position(
+        symbol,
+        account_equity_usd=equity_usd,
+        price=limit_price,
+        max_position_usd=cap,
+        size_scale=size_scale,
+    )
     qty = Decimal(str(result["recommended_units"])).quantize(
         Decimal("0.00000001"), rounding=ROUND_DOWN
     )
@@ -592,8 +619,19 @@ def build_state(
             rationale=f"setup confirmed ({strategy_key})" if strategy_key else "setup confirmed",
         )
 
+        # review round 24 F1 (ASSUMPTIONS 182.10, SPEC-sizing-cap P3'): the
+        # claiming def must be known BEFORE sizing, not after — `size_scale`
+        # now goes INTO `sizing_info`/`mae.size_position` so the clip and the
+        # scale happen inside the one call whose output is recorded, instead
+        # of `qty = sizing.qty * strategy_def.size_scale` scaling a value
+        # `thesis.submit` never saw scaled.
+        from tradekit import mae
+
+        strategy_def = mae.STRATEGY_BY_KEY.get(strategy_key) if strategy_key else None
+        size_scale = strategy_def.size_scale if strategy_def is not None else Decimal("1")
+
         try:
-            sizing = sizing_info(symbol, limit_price, equity_usd)
+            sizing = sizing_info(symbol, limit_price, equity_usd, size_scale=size_scale)
         except Exception as exc:
             sizing = SizingInfo(
                 qty=Decimal("0"),
@@ -637,17 +675,16 @@ def build_state(
         )
 
         # SPEC-cadence T1-AC-1: the claiming def (if any) drives the
-        # bracket's r_multiple and the sized qty; no def (strategy_key ""
-        # or an unknown key) falls back to sizing's own r_multiple_target
-        # and unscaled qty -- byte-identical to pre-batch behavior.
-        from tradekit import mae
-
-        strategy_def = mae.STRATEGY_BY_KEY.get(strategy_key) if strategy_key else None
+        # bracket's r_multiple; no def (strategy_key "" or an unknown key)
+        # falls back to sizing's own r_multiple_target -- byte-identical to
+        # pre-batch behavior. review round 24 F1: `qty` is `sizing.qty`
+        # verbatim now -- the scale already happened INSIDE `sizing_info`
+        # (above), so multiplying here again would double-apply it.
         if strategy_def is not None and strategy_def.r_multiple_override is not None:
             r_multiple_target = strategy_def.r_multiple_override
         else:
             r_multiple_target = sizing.r_multiple_target
-        qty = sizing.qty * strategy_def.size_scale if strategy_def is not None else sizing.qty
+        qty = sizing.qty
 
         fields = _build_ticket_fields(
             symbol,

@@ -76,6 +76,7 @@ from tradekit import broker, policy, thesis
 # `CadenceAccountRefused` exist -- correct RED collection error.
 from tradekit.cadence import CadenceAccountRefused, run_once
 from tradekit.contracts import (
+    AccountConfig,
     AdvisoryTicket,
     AssetRef,
     Bar,
@@ -173,6 +174,16 @@ def _fake_dials(**overrides: Any) -> PolicyDials:
 
 def _patch_dials(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
     monkeypatch.setattr(PolicyDials, "load", classmethod(lambda cls: _fake_dials(**overrides)))
+
+
+def _create_paper_account() -> None:
+    """ASSUMPTIONS 182.7: a $0 auto-vivified shell now skips entries loudly;
+    earn the account through the real verb."""
+    broker.create_paper_account(
+        AccountConfig(
+            account_ref="paper:alpha", principal_usd=Decimal("500.00"), max_trades_per_day=0
+        )
+    )
 
 
 def _ticket(
@@ -385,6 +396,9 @@ class TestT3AC2FunnelOnlyAndDrought:
         state = _hud_state((_ticket("ETH/USD"),))
         monkeypatch.setattr(cadence, "build_state", lambda *a, **kw: state)
 
+        # ASSUMPTIONS 182.7: a $0 auto-vivified shell now skips entries loudly;
+        # earn the account through the real verb
+        _create_paper_account()
         run_once(digest_dir=tmp_path)
 
         assert _thesis_drafted_count("ETH/USD") == 1
@@ -554,6 +568,9 @@ class TestT3AC4RoundTrip:
         entry_state = _hud_state((_ticket("ETH/USD", tp_price="110", sl_price="90"),))
         monkeypatch.setattr(cadence, "build_state", lambda *a, **kw: entry_state)
 
+        # ASSUMPTIONS 182.7: a $0 auto-vivified shell now skips entries loudly;
+        # earn the account through the real verb
+        _create_paper_account()
         run_once(digest_dir=tmp_path)  # entry run
 
         positions = broker.get("paper:alpha").positions()
@@ -721,6 +738,9 @@ class TestF3F5TwoPhasePolicyDeniesBeforeMinting:
         state = _hud_state((_ticket("ETH/USD"),))
         monkeypatch.setattr(cadence, "build_state", lambda *a, **kw: state)
 
+        # ASSUMPTIONS 182.7: a $0 auto-vivified shell now skips entries loudly;
+        # earn the account through the real verb
+        _create_paper_account()
         run_once(digest_dir=tmp_path)
 
         assert broker.get("paper:alpha").positions() == [], (
@@ -761,7 +781,21 @@ class TestF2EquityDegradesPerSymbol:
         down) skips only that symbol's mark (equity understated is the
         conservative direction) while the run still completes and the
         healthy symbol's mark is still counted; a digest warning names the
-        skipped symbol."""
+        skipped symbol.
+
+        AC-28 (review round 24 F6, ASSUMPTIONS 182.7): restores the direct
+        healthy-mark check the F2a red/green pass dropped -- `cadence.
+        _paper_equity_usd` (P6's own guard reads this SAME function's
+        return) is called directly here and its `equity_usd` is asserted to
+        equal `settled_cash + healthy_qty * healthy_close` exactly, and its
+        `warnings` list is asserted to name ONLY the failed symbol
+        (SOL/USD), never the healthy one (ETH/USD) -- the digest-text check
+        below only proves SOL/USD's warning REACHES the digest, not that
+        ETH/USD's mark is arithmetically correct or that its OWN warning
+        stays silent. A module-private read (`cadence._paper_equity_usd`)
+        is sanctioned here per the dispatch brief: it is the exact seam
+        P6's dead-account guard depends on, not an implementation detail
+        this test invents on its own."""
         _patch_dials(monkeypatch, default_account_ref="paper:alpha")
 
         class _MixedBarsClock:
@@ -817,10 +851,6 @@ class TestF2EquityDegradesPerSymbol:
         _seed_position("SOL/USD")
         holder.fail = True  # the outage only applies to the run under test
 
-        cash = broker.get("paper:alpha").account().settled_cash_usd
-        positions = {p.symbol: p.qty for p in broker.get("paper:alpha").positions()}
-        expected_equity = cash + positions["ETH/USD"] * Decimal("100")
-
         from tradekit import cadence
 
         captured: dict[str, Any] = {}
@@ -833,14 +863,33 @@ class TestF2EquityDegradesPerSymbol:
 
         run_once(digest_dir=tmp_path)  # must complete, not raise
 
-        assert captured["equity_usd"] == expected_equity, (
-            "F2a: equity must be cash + only the HEALTHY symbol's mark -- SOL/USD's "
-            "ProviderError must not take the whole equity calc down"
+        # ASSUMPTIONS 182.1: build_state's equity_usd kwarg is now the DIAL
+        # (P6), not the live cash+marks figure -- the per-symbol containment
+        # this test is actually about is observed through the digest warning
+        # below, not through this kwarg.
+        assert captured["equity_usd"] == PolicyDials.load().paper_starting_equity_usd, (
+            "F2a: build_state now sizes off the dial equity, not the live figure"
         )
 
         digest_files = list(tmp_path.glob("DIGEST-*.md"))
         content = digest_files[0].read_text(encoding="utf-8")
         assert "SOL/USD" in content, "F2a: the skipped symbol's warning must reach the digest"
+
+        # AC-28: the direct healthy-mark check (see docstring).
+        equity, equity_warnings = cadence._paper_equity_usd("paper:alpha")
+        account = broker.get("paper:alpha").account()
+        eth_position = next(
+            p for p in broker.get("paper:alpha").positions() if p.symbol == "ETH/USD"
+        )
+        assert equity == account.settled_cash_usd + eth_position.qty * Decimal("100"), (
+            "AC-28: equity must be exactly settled cash plus the healthy symbol's own mark"
+        )
+        assert any("SOL/USD" in w for w in equity_warnings), (
+            "AC-28: the failed symbol must be named in _paper_equity_usd's own warnings"
+        )
+        assert not any("ETH/USD" in w for w in equity_warnings), (
+            "AC-28: the healthy symbol must never appear in the warnings list"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -887,13 +936,16 @@ class TestTA5CadenceBuildStateLeftReal:
         monkeypatch.setattr(
             hud_build,
             "sizing_info",
-            lambda symbol, limit_price, equity_usd: SimpleNamespace(
+            lambda symbol, limit_price, equity_usd, **kwargs: SimpleNamespace(
                 qty=Decimal("0.25"),
                 stop_distance_usd=Decimal("10"),
                 r_multiple_target=Decimal("2"),
             ),
         )
 
+        # ASSUMPTIONS 182.7: a $0 auto-vivified shell now skips entries loudly;
+        # earn the account through the real verb
+        _create_paper_account()
         run_once(digest_dir=tmp_path)
 
         positions = broker.get("paper:alpha").positions()

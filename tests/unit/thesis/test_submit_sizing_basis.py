@@ -201,3 +201,73 @@ class TestAC14LimitEntryClipsToThePaperCap:
         assert "capped_by_max_position" in sizing["sizing"]["warnings"], (
             "AC-14: the audit trail must record the clip"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-23 -- P4' (review round 24 F1, ASSUMPTIONS 182.10): thesis.submit
+# resolves the contract's own strategy_tag and forwards its size_scale.
+# ---------------------------------------------------------------------------
+
+
+class TestAC23StrategyTagScalesTheBindingSizing:
+    def test_s4_reversion_tag_limit_entry_at_100_scales_to_half_the_capped_size(
+        self, monkeypatch: pytest.MonkeyPatch, thesis_kwargs: dict
+    ) -> None:
+        """BEHAVIOR (AC-23, cites SPEC-sizing-cap.md section 6 P4'): F-TIGHT
+        daily bars, a `paper:alpha` limit entry at 100, `strategy_tag=
+        "s4_reversion"` (a real `mae.STRATEGY_BY_KEY` key whose real
+        `size_scale=Decimal("0.5")`). Uncapped size would be $125, clips to
+        $50 (AC-14's own pin), THEN scales to $25.0 -- must FAIL before the
+        F1 fix: `build_submit_payloads` never read `contract["strategy_tag"]`
+        at all, so every entry sized as if `size_scale=1` (unscaled $50)."""
+        _install_bars_seam(monkeypatch, _F_TIGHT_BARS)
+        contract = dict(thesis_kwargs)
+        contract["account_ref"] = "paper:alpha"
+        contract["strategy_tag"] = "s4_reversion"
+        contract["entry"] = {
+            "order_type": "limit",
+            "limit_price": "100",
+            "valid_until": "2026-01-20T00:00:00Z",
+        }
+
+        thesis_id = thesis.draft(contract)
+        thesis.submit(thesis_id)
+
+        sizing = _sizing_computed(thesis_id)
+        assert sizing["sizing"]["recommended_size_usd"] == 25.0
+        assert sizing["sizing"]["size_scale"] == 0.5
+
+
+# ---------------------------------------------------------------------------
+# AC-24 -- P4' regression pin: an UNCLAIMED/unknown strategy_tag stays
+# unscaled (size_scale=1, today's behavior, byte-identical).
+# ---------------------------------------------------------------------------
+
+
+class TestAC24UnclaimedStrategyTagStaysUnscaled:
+    def test_advisory_kraken_limit_entry_at_100_f_tight_is_unscaled(
+        self, monkeypatch: pytest.MonkeyPatch, thesis_kwargs: dict
+    ) -> None:
+        """BEHAVIOR (AC-24, kills mutant M6, cites SPEC-sizing-cap.md
+        section 6): an `advisory:kraken` contract (non-`paper:`, so no cap
+        either) whose `strategy_tag` ("momo-breakout-v1", `thesis_kwargs`'s
+        own default) matches NO `mae.STRATEGY_BY_KEY` entry -> `size_scale`
+        resolves to `1` (no-op) and `max_position_usd` stays `None` (F-TIGHT
+        at price 100: uncapped 1.25 units * $100 = $125,
+        pytest.approx(125.0)). No `capped_by_max_position` warning."""
+        _install_bars_seam(monkeypatch, _F_TIGHT_BARS)
+        contract = dict(thesis_kwargs)
+        contract["account_ref"] = "advisory:kraken"
+        contract["entry"] = {
+            "order_type": "limit",
+            "limit_price": "100",
+            "valid_until": "2026-01-20T00:00:00Z",
+        }
+
+        thesis_id = thesis.draft(contract)
+        thesis.submit(thesis_id)
+
+        sizing = _sizing_computed(thesis_id)
+        assert sizing["sizing"]["recommended_size_usd"] == pytest.approx(125.0)
+        assert sizing["sizing"]["max_position_usd"] is None
+        assert "capped_by_max_position" not in sizing["sizing"]["warnings"]

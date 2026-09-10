@@ -117,7 +117,7 @@ def _install_funnel_seams(
     monkeypatch.setattr(
         hud_build,
         "sizing_info",
-        lambda symbol, limit_price, equity_usd: _FakeSizing(
+        lambda symbol, limit_price, equity_usd, **kwargs: _FakeSizing(
             qty=qty, stop_distance_usd=Decimal("10"), r_multiple_target=Decimal("2")
         ),
     )

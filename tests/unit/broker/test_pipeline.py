@@ -486,8 +486,13 @@ def test_execute_order_for_a_limit_entry_thesis_rests_with_no_fill(
         make_event,
         entry={
             "order_type": "limit",
-            # Far below every fixture bar's low (95) — never trades through.
-            "limit_price": "1.00",
+            # ASSUMPTIONS 182.4: sizing now follows the entry price, so a
+            # fictional "1.00" collapses the notional under R-008's $10
+            # floor. 85.50 = 90% of every fixture bar's low (95, quantized
+            # to the contract's 0.01 tick size) — still strictly below every
+            # fixture low (never trades through) while keeping
+            # units * price >= $10.
+            "limit_price": "85.50",
             "valid_until": "2026-02-01T00:00:00Z",
         },
     )
@@ -497,7 +502,7 @@ def test_execute_order_for_a_limit_entry_thesis_rests_with_no_fill(
     assert ack.status == "accepted"
     order_submitted = _events_of_type(thesis_id, "OrderSubmitted")[0]
     assert order_submitted.payload["order_type"] == "limit"
-    assert Decimal(str(order_submitted.payload["limit_price"])) == Decimal("1.00")
+    assert Decimal(str(order_submitted.payload["limit_price"])) == Decimal("85.50")
 
     status = broker.get(thesis_kwargs["account_ref"]).order_status(ack.order_id)
     assert status.status == "open", "a resting limit order's single poll must report open"

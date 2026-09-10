@@ -26,9 +26,10 @@ equity = `PolicyDials.paper_starting_equity_usd`, cap =
 exact arithmetic, so the ticket notional equals the recorded `SizingComputed`
 notional and never exceeds R-005's own limit. The policy side already uses the
 dial for both R-005's cap and R-003 (`policy._context._paper_equity`,
-ASSUMPTIONS 62); the scan preview was the odd one out. T4 disappears as a
-consequence (no rejected drafts -> no dead proposals); R-007 itself is not
-touched. T3 becomes a loud digest warning that also skips entries.
+ASSUMPTIONS 62); the scan preview was the odd one out. ~~T4 disappears as a
+consequence~~ — WRONG, corrected in §6: every scan-time preview ledgers a
+proposal R-007 counted; P8 makes R-007 count entry orders. T3 becomes a
+loud digest warning that also skips entries.
 
 ## Out of scope (explicit)
 
@@ -351,3 +352,100 @@ pass on `main`).
   the live cap from the same property pattern (`live_max_position_usd`
   needs the principal, which lives in the ledger -> a broker-side derivation
   then).
+
+## 6. Round-24 addendum (2026-09-10) — two more pins after the first review
+
+Review round 24 (FIX-FIRST) found the invariant in §1 false on one reachable
+path and the T4 root cause misattributed:
+
+- **F1 `size_scale`.** `hud._build` multiplies the ticket qty by the claiming
+  strategy's `size_scale` AFTER sizing (`_S4_REVERSION.size_scale = 0.5`);
+  `thesis.submit` records the unscaled size. Probe: every S4 draft dies at
+  binding with `R-012: 0.5`. Pre-existing, but §1 claimed it closed.
+- **F2 R-007.** Every scan-time preview ledgers `ActionProposed(submit_order,
+  paper:alpha)` (`policy.evaluate` always appends; 181.3 depends on the
+  ledgered verdict) and `_trades_today_count` counts proposals. Probe: 20
+  previews with zero entries lock the 21st on `R-007: 21 vs 20`. With three
+  armed symbols an hour the paper account self-locks by ~07:00 UTC every
+  day. §1's "T4 disappears as a consequence" was wrong.
+
+### P7 `mae.size_position(..., size_scale: Decimal = Decimal("1"))`
+- Keyword-only, third of the new group. Must satisfy `0 < size_scale <= 1`;
+  otherwise `ValueError` whose message contains `"size_scale"` (a scale above
+  1 is a risk knob, not a strategy knob).
+- Applied AFTER the cap clip, only when `size_scale != 1`, in Decimal:
+  `units_dec = clipped units if the clip fired else Decimal(str(recommended_units))`;
+  `scaled = (units_dec * size_scale).quantize(Decimal("0.00000001"), ROUND_DOWN)`;
+  `recommended_units = float(scaled)`; `recommended_size_usd = float(scaled * price_dec)`.
+  `size_scale == 1` leaves every output byte-identical (AC-2 stays true).
+- Output gains exactly one more key: `"size_scale": float(size_scale)`.
+- `atr_position_size_usd` / `kelly_position_size_usd` stay unscaled.
+
+### P3' hud — the scale rides the sizing seam, not the ticket
+- Seam signature becomes `sizing_info(symbol: str, limit_price: Decimal,
+  equity_usd: Decimal, *, size_scale: Decimal = Decimal("1")) -> SizingInfo`.
+  `build_state` resolves `strategy_def = mae.STRATEGY_BY_KEY.get(strategy_key)`
+  BEFORE sizing and passes `size_scale=strategy_def.size_scale` (or
+  `Decimal("1")` when no def). The post-sizing multiply at the ticket
+  (`qty = sizing.qty * strategy_def.size_scale`) is deleted: `qty = sizing.qty`.
+- Existing test fakes of the seam accept the new kwarg (`**kwargs`); that is
+  a seam-signature evolution, not a behavior change (memory: fakes accept
+  any call convention).
+
+### P4' thesis — same scale from the same registry
+- `strategy_def = mae.STRATEGY_BY_KEY.get(str(contract.get("strategy_tag") or ""))`;
+  `size_scale = strategy_def.size_scale if strategy_def is not None else Decimal("1")`;
+  passed to `mae.size_position`. `"hud-ack-manual"` and unknown tags -> 1.
+
+### P8 `policy._context._trades_today_count` — trades, not proposals
+- Counts `OrderSubmitted` events with `payload["account_ref"] == account_ref`
+  whose `ts_utc` falls on `now`'s UTC calendar date AND whose `thesis_id`
+  has no EARLIER `OrderSubmitted` event anywhere in the ledger — i.e. entry
+  orders only. Exits never count (they reduce risk and must never be
+  throttled), previews and binding evaluations never count (no order was
+  submitted), broker-refused submits never count (no `OrderSubmitted`).
+- Rule `_check_r007` is untouched; only the context assembly changes. The
+  existing R-007 tests drive the rule through hand-built contexts
+  (`test_rules.py`) and needed no migration (round 25).
+- Known-open, NOT this batch: R-007 still evaluates exit orders at all; with
+  entries-only counting it cannot block an exit in practice (limit 20 paper),
+  but the honest fix is an exit exemption inside the rule — a future pin.
+
+### ACs
+- **AC-20** (P7 contract) F-TIGHT, price 100, cap 50, `size_scale=Decimal("0.5")`
+  -> `recommended_units == 0.25`, `recommended_size_usd == 25.0`,
+  `size_scale == 0.5`, warning `capped_by_max_position` still present,
+  `atr_position_size_usd == approx(125.0)`. `size_scale=Decimal("1")` -> output
+  identical to AC-3's. `Decimal("0")`, `Decimal("1.5")` -> `ValueError` naming
+  `size_scale`. F-WIDE price 105, no cap, scale 0.5 -> units 0.0625, size 6.5625.
+- **AC-21** — struck (round 25): AC-25 drives the same S4 ticket through the
+  real `build_state` inside `run_once` and kills M11/M15/M16; a hud-only twin
+  would be a DUPLICATE.
+- **AC-22** (P3, the capped-and-drifted shape — kills M4) F-TIGHT, 1h close
+  105 -> one ticket, `quantity == Decimal("0.47619047")`, `quantity *
+  limit_price <= 50`, policy gate passed. (Daily-close sizing would give
+  0.5 * 105 = $52.50 -> R-005 deny -> zero tickets.)
+- **AC-23** (P4') `paper:alpha` contract, `strategy_tag="s4_reversion"`,
+  limit entry 100, F-TIGHT -> `SizingComputed.recommended_size_usd == 25.0`,
+  `sizing["size_scale"] == 0.5`.
+- **AC-24** (P4 gate — kills M6) `advisory:kraken` contract, limit 100,
+  F-TIGHT -> `recommended_size_usd == approx(125.0)`, `max_position_usd is
+  None`, no clip warning.
+- **AC-25** (P7+P8 end-to-end) `run_once`, `scan_setup` arming
+  `s4_reversion`, F-TIGHT, 1h 100, account 500 -> position opens with `qty
+  == Decimal("0.25")`, no `entry denied by policy`, `SizingComputed` 25.0.
+- **AC-26** (P8) real ledger: 20 scan-time previews on the UTC day (drive
+  `build_state` 20 times against a symbol the funnel tickets) then a real
+  `policy.evaluate(submit_order)` -> the R-007 hit has `measured == "0"`
+  and `outcome == "pass"`. Then seed one entry through the real pipeline
+  (or one `OrderSubmitted` event via the pipeline's own producer) ->
+  `measured == "1"`. An exit `OrderSubmitted` for the same thesis on the
+  same day -> still `"1"`.
+- **AC-27** (P2 discriminates — kills M10) `PolicyDials(paper_starting_
+  equity_usd=1000, max_position_pct_paper=0.10).paper_max_position_usd ==
+  Decimal("100.0")`; `(500, 0.05) -> Decimal("25.00")`; and the real R-005
+  `RuleHit.limit` under dials patched to equity 1000 parses to `100.0`.
+- **AC-28** (F6) `cadence._paper_equity_usd("paper:alpha")` with one
+  position's mark raising `ProviderError` and a second healthy position ->
+  equity == settled cash + the healthy mark; warnings name only the failed
+  symbol.

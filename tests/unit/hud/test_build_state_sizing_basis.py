@@ -263,3 +263,37 @@ class TestAC11DefaultAccountRefGatesTheCap:
 
         assert result.qty == Decimal("0.5"), "AC-11: the paper cap must clip qty to 0.5"
         assert result.stop_distance_usd == Decimal("4")
+
+
+# ---------------------------------------------------------------------------
+# AC-22 -- review round 24 M4 killer: F-TIGHT preview's exact clipped qty
+# ---------------------------------------------------------------------------
+
+
+class TestAC22FTightPreviewExactClippedQuantity:
+    def test_f_tight_daily_1h_close_105_yields_the_exact_clipped_quantity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BEHAVIOR (AC-22, kills mutant M4, cites SPEC-sizing-cap.md
+        section 6): F-TIGHT daily bars (ATR14=2, stop_distance=4) + 1h bars
+        closing at 105 -- a price where the uncapped notional ($131.25 =
+        1.25 units * $105) still exceeds the $50 paper cap, but the CLIP
+        (never a round number) exposes any mutant that quantizes/rounds
+        instead of truncating: units = floor8dp(50/105) = 0.47619047
+        (50/105 = 10/21 = 0.476190476190... repeating, ROUND_DOWN at 8dp
+        truncates the trailing 6 to 0.47619047, never rounds up to
+        0.47619048). One ticket; `quantity == Decimal("0.47619047")`;
+        `quantity * limit_price <= 50` (never overshoots by a float/rounding
+        hair); the `policy_verdict` gate passes."""
+        _create_default_paper_account()
+        _install_funnel_seams(monkeypatch, daily=_F_TIGHT_DAILY, hourly_close=Decimal("105"))
+
+        state = build_state([_SYMBOL], captured_at=_CAPTURED_AT, equity_usd=Decimal("500"))
+
+        assert len(state.tickets) == 1
+        ticket = state.tickets[0]
+        assert ticket.quantity == Decimal("0.47619047")
+        assert ticket.quantity * ticket.limit_price <= Decimal("50")
+
+        gate = _policy_verdict_gate(state)
+        assert gate.passed is True

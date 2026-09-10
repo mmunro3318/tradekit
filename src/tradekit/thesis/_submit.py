@@ -59,7 +59,21 @@ def build_submit_payloads(
     append, in order. Raises `ValueError` on EV-tolerance failure (or on an
     empty bar series); propagates whatever `mae.size_position`/
     `_mae_runtime.get_closed_bars` raise for genuine market-data problems.
-    Either way, the caller has appended nothing when this raises."""
+    Either way, the caller has appended nothing when this raises.
+
+    ASSUMPTIONS 182 (SPEC-sizing-cap P4): sizes off `entry.limit_price` when
+    the contract carries one (falling back to the snapshot's daily close
+    otherwise) and clips to `PolicyDials.paper_max_position_usd` for
+    `paper:` account refs — the same price/equity/cap basis `hud._build`'s
+    scan-time preview now uses, so R-012 compares like with like.
+
+    review round 24 F1 (ASSUMPTIONS 182.10, SPEC-sizing-cap P4'): also
+    resolves the contract's own `strategy_tag` against `mae.STRATEGY_BY_KEY`
+    and forwards its `size_scale` (1 for no match/no tag) into `mae.
+    size_position` — the SAME def `hud._build`'s preview claimed, so a
+    restricted-size strategy (e.g. S4) records the scaled notional here too,
+    instead of the ticket's own post-hoc multiply drifting from what gets
+    ledgered."""
     ev_recomputed, ev_stated = _validate_ev(contract["ev_block"], thesis_id)
 
     asset = contract["asset"]
@@ -79,8 +93,24 @@ def build_submit_payloads(
         source=bars.source,
     )
 
-    paper_starting_equity_usd = PolicyDials.load().paper_starting_equity_usd
-    sizing = mae.size_position(symbol, account_equity_usd=paper_starting_equity_usd)
+    entry = contract["entry"]
+    reference_price = (
+        Decimal(str(entry["limit_price"])) if entry.get("limit_price") is not None else last_close
+    )
+    account_ref = str(contract["account_ref"])
+    dials = PolicyDials.load()
+    paper_starting_equity_usd = dials.paper_starting_equity_usd
+    cap = dials.paper_max_position_usd if account_ref.startswith("paper:") else None
+    strategy_tag = str(contract.get("strategy_tag") or "")
+    strategy_def = mae.STRATEGY_BY_KEY.get(strategy_tag) if strategy_tag else None
+    size_scale = strategy_def.size_scale if strategy_def is not None else Decimal("1")
+    sizing = mae.size_position(
+        symbol,
+        account_equity_usd=paper_starting_equity_usd,
+        price=reference_price,
+        max_position_usd=cap,
+        size_scale=size_scale,
+    )
     sizing_payload = SizingComputedPayload(
         thesis_id=thesis_id,
         symbol=symbol,

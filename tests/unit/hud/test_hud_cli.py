@@ -98,7 +98,7 @@ def _patch_allow_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         hud_build,
         "sizing_info",
-        lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
+        lambda symbol, limit_price, equity_usd, **kwargs: _FakeSizingInfo(
             qty=Decimal("12"),
             stop_distance_usd=Decimal("0.24900"),
             r_multiple_target=Decimal("2"),
@@ -129,7 +129,7 @@ def _patch_refuse_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         hud_build,
         "sizing_info",
-        lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
+        lambda symbol, limit_price, equity_usd, **kwargs: _FakeSizingInfo(
             qty=Decimal("12"),
             stop_distance_usd=Decimal("0.24900"),
             r_multiple_target=Decimal("2"),

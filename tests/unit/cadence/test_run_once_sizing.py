@@ -360,3 +360,54 @@ class TestAC19LiveAccountDoesNotTriggerDeadAccountWarning:
 
         content = _digest_content(tmp_path)
         assert "no AccountCreated" not in content
+
+
+# ---------------------------------------------------------------------------
+# AC-25 -- end-to-end, review round 24 F1: a claimed strategy's size_scale
+# survives preview -> binding without dying at R-012.
+# ---------------------------------------------------------------------------
+
+
+class TestAC25ClaimedStrategyScalesEndToEnd:
+    def test_s4_reversion_claim_opens_a_half_size_position(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SEAM/BEHAVIOR (AC-25, cites SPEC-sizing-cap.md section 6, the
+        review's own F1 test): F-TIGHT daily bars + 1h close 100,
+        `scan_setup` arming `s4_reversion` (a real `mae.STRATEGY_BY_KEY` key,
+        `size_scale=Decimal("0.5")`) for the one symbol under test. Uncapped
+        $125 clips to $50 (AC-16's own T1 reproduction), THEN scales to
+        $25/0.25 units -- must FAIL before the F1 fix: `build_state` used to
+        multiply `sizing.qty` by `size_scale` AFTER calling `sizing_info`,
+        while `thesis.submit` never scaled at all, so the ticket's own
+        0.25-unit qty (or the deny path) never matched `thesis.submit`'s
+        unscaled $50 SizingComputed record -> R-012 denied every S4 draft at
+        binding ('entry denied by policy'). After the fix both call sites
+        scale identically: one paper position opens, qty 0.25, no denial,
+        and the ledgered SizingComputed is $25.0."""
+        _patch_dials(monkeypatch, default_account_ref="paper:alpha")
+        _install_cadence_seams(monkeypatch, daily=_F_TIGHT_DAILY, hourly_close=Decimal("100"))
+        monkeypatch.setattr(
+            "tradekit.hud._build.scan_setup",
+            lambda symbol: SimpleNamespace(
+                signal_tags=["at_support"] if symbol == _SYMBOL else [],
+                strategy_key="s4_reversion" if symbol == _SYMBOL else "",
+            ),
+        )
+        _create_paper_account(Decimal("500"))
+
+        run_once(digest_dir=tmp_path)
+
+        positions = broker.get("paper:alpha").positions()
+        assert len(positions) == 1, "AC-25: the scaled ticket must clip, scale, and still open"
+        assert positions[0].symbol == _SYMBOL
+        assert positions[0].qty == Decimal("0.25")
+
+        content = _digest_content(tmp_path)
+        assert "entry denied by policy" not in content, (
+            "AC-25: preview and binding must scale identically -- R-012 must not deny"
+        )
+
+        sizing = _sizing_computed_for(_SYMBOL)
+        assert sizing["sizing"]["recommended_size_usd"] == 25.0
+        assert sizing["sizing"]["size_scale"] == 0.5

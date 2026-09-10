@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from tradekit.contracts import StrategyMetrics, TradeRecord
@@ -130,13 +130,49 @@ def size_position(
     kelly_win_rate: float | None = None,
     kelly_payoff_ratio: float | None = None,
     kelly_fraction: float = 0.25,
+    *,
+    price: Decimal | None = None,
+    max_position_usd: Decimal | None = None,
+    size_scale: Decimal = Decimal("1"),
 ) -> dict[str, Any]:
     """min(ATR-normalized, quarter-Kelly) sizing; purity per TD-11 — the
-    signature can never grow P&L-history inputs."""
+    signature can never grow P&L-history inputs.
+
+    `price`/`max_position_usd` (ASSUMPTIONS 182, SPEC-sizing-cap P1): the
+    paper funnel's two sizing call sites now share one price (the ticket's
+    limit price) and one cap (`PolicyDials.paper_max_position_usd`) so the
+    scan-time preview and the binding `SizingComputed` record never drift.
+    `price=None` keeps today's last-daily-close basis; `max_position_usd`
+    clips `recommended_size_usd`/`recommended_units` in exact Decimal
+    arithmetic so the clipped notional never exceeds the cap by a float
+    hair — `atr_position_size_usd`/`kelly_position_size_usd` keep their
+    uncapped values as an audit trail.
+
+    `size_scale` (review round 24 F1, ASSUMPTIONS 182.10, SPEC-sizing-cap
+    P7): a strategy's own restricted-size fraction (e.g. S4's half-size
+    restriction, `StrategyDef.size_scale`), applied AFTER the cap clip in
+    exact Decimal arithmetic so the caller-visible `recommended_units`/
+    `recommended_size_usd` are the ACTUAL ticket size — the defect this
+    fixes is `hud._build`/`thesis._submit` applying the scale themselves
+    AFTER calling this function, so the ticket's recorded qty and the
+    unscaled `SizingComputed` notional disagreed and every scaled strategy
+    died at binding on R-012. `1` (default) is a no-op, byte-identical to
+    every pre-existing caller. Must be `> 0` and `<= 1` — a caller bug to
+    pass anything else (amplifying size is never a "scale down")."""
     if (kelly_win_rate is None) != (kelly_payoff_ratio is None):
         raise ValueError(
             "kelly_win_rate and kelly_payoff_ratio must both be provided or both be "
             "None — half an edge spec is a caller bug, not a degraded mode"
+        )
+    if max_position_usd is not None and max_position_usd <= 0:
+        raise ValueError(
+            "max_position_usd must be positive — a non-positive cap sizes nothing "
+            "and is a caller bug"
+        )
+    if not (Decimal("0") < size_scale <= Decimal("1")):
+        raise ValueError(
+            "size_scale must be > 0 and <= 1 — a strategy's own restricted-size "
+            "fraction, never an amplifier, and is a caller bug otherwise"
         )
 
     bars = _runtime.get_daily_bars(symbol, lookback_days=30)
@@ -144,7 +180,7 @@ def size_position(
     highs = [float(b.high) for b in bars.bars]
     lows = [float(b.low) for b in bars.bars]
 
-    current_price = closes[-1]
+    current_price = float(price) if price is not None else closes[-1]
     atr_values = volatility.atr(highs, lows, closes, period=14)
     non_none_atr = [v for v in atr_values if v is not None]
     if not non_none_atr:
@@ -156,12 +192,13 @@ def size_position(
 
     warnings: list[str] = []
 
+    price_dec = price if price is not None else Decimal(str(current_price))
     atr_result = _sizing.atr_position(
         equity_usd=account_equity_usd,
         risk_pct=risk_pct_per_trade,
         atr=Decimal(str(atr_14)),
         multiplier=atr_multiplier,
-        price=Decimal(str(current_price)),
+        price=price_dec,
     )
     atr_position_size_usd = float(atr_result["size_usd"])
     atr_units = float(atr_result["units"])
@@ -186,6 +223,24 @@ def size_position(
 
     recommended_units = recommended_size_usd / current_price if current_price else 0.0
 
+    if max_position_usd is not None and recommended_size_usd > float(max_position_usd):
+        clipped_units = (max_position_usd / price_dec).quantize(
+            Decimal("0.00000001"), rounding=ROUND_DOWN
+        )
+        recommended_units = float(clipped_units)
+        recommended_size_usd = float(clipped_units * price_dec)
+        warnings.append("capped_by_max_position")
+
+    if size_scale != Decimal("1"):
+        # P7: scale the UNITS in Decimal and re-quantize to 8dp ROUND_DOWN so
+        # the caller's own 8dp quantize is a no-op and the recorded notional
+        # is exactly units * price — the same exactness the cap clip keeps.
+        scaled_units = (Decimal(str(recommended_units)) * size_scale).quantize(
+            Decimal("0.00000001"), rounding=ROUND_DOWN
+        )
+        recommended_units = float(scaled_units)
+        recommended_size_usd = float(scaled_units * price_dec)
+
     return {
         "symbol": symbol,
         "current_price": current_price,
@@ -201,6 +256,8 @@ def size_position(
         "recommended_units": recommended_units,
         "risk_usd": risk_usd,
         "r_multiple_target": 2.0,
+        "max_position_usd": float(max_position_usd) if max_position_usd is not None else None,
+        "size_scale": float(size_scale),
         "warnings": warnings,
     }
 

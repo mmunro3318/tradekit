@@ -275,12 +275,14 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] Mike: register the scheduled task (command in scripts/run_cadence.py header) — verify LastTaskResult 0 (done 2026-09-07; first trade TAO s1 07:24 UTC)
 
 ### Sizing cap (SPEC-sizing-cap.md, TASKS-sizing-cap.md, branch feature/sizing-cap)
-- [ ] T1: `mae.size_position` gains `price` + `max_position_usd` (exact-arithmetic clip)
-- [ ] T2: `PolicyDials.paper_max_position_usd` (the one derivation of R-005's paper cap)
-- [ ] T3: hud sizing seam sizes at the ticket price with the paper cap
-- [ ] T4: `thesis.submit` sizes at the contract's reference price with the paper cap
-- [ ] T5: cadence — reference price kept on the market entry, dial sizing basis, loud dead-account skip
-- [ ] T6: ASSUMPTIONS 182 + docs + review grade
+- [x] T1: `mae.size_position` gains `price` + `max_position_usd` (exact-arithmetic clip) + `size_scale` (r24 P7)
+- [x] T2: `PolicyDials.paper_max_position_usd` (the one derivation of R-005's paper cap)
+- [x] T3: hud sizing seam sizes at the ticket price with the paper cap; `size_scale` rides the seam (r24 P3')
+- [x] T4: `thesis.submit` sizes at the contract's reference price with the paper cap and the strategy's scale (r24 P4')
+- [x] T5: cadence — reference price kept on the market entry, dial sizing basis, loud dead-account skip
+- [x] T6: ASSUMPTIONS 182.1-12 + docs + review rounds 24 (FIX-FIRST) / 25 (SHIP)
+- [x] T7 (r24 F2): R-007 counts entry `OrderSubmitted` events, not proposals — scan-time previews were locking the paper account daily (ASSUMPTIONS 182.6, P8)
+- [ ] Known-open: side/position-aware exit exemption inside `_check_r007` (182.6, r25 finding 5)
 - [x] Mike: re-register BOTH scheduled tasks (collector watchdog, TradeKit Paper Cadence) with
       `-LogonType S4U` so they fire from a logged-out desktop (2026-09-10 reboot cost 6h25m on all 8
       streams + 7 cadence runs; both tasks were `Interactive only`). Done 2026-09-10 02:44 PDT via

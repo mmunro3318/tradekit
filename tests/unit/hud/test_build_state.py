@@ -132,7 +132,15 @@ def _patch_setup_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
     ``tradekit.hud._build.sizing_info`` returns the AC-11 golden sizing
     (qty 12, stop_distance_usd 0.24900, r_multiple_target 2) — driving the
     funnel to the AC-11 golden ticket (buy LINK/USD limit 8.30000
-    tp 8.79800 sl 8.05100 qty 12)."""
+    tp 8.79800 sl 8.05100 qty 12).
+
+    review round 24 F1 (ASSUMPTIONS 182.10, SPEC-sizing-cap P3'): `qty` is
+    scaled by the caller's own `size_scale` kwarg here, mirroring what the
+    real `mae.size_position` now does internally — `build_state` no longer
+    multiplies by `strategy_def.size_scale` itself after calling
+    `sizing_info`, so a fake that ignored the kwarg would silently return
+    the golden's unscaled 12 for every claiming strategy, including S4's
+    real half-size restriction (TestT1AC1StrategyAwareBracketAndSizing)."""
     import tradekit.hud._build as hud_build
     import tradekit.mae._runtime as mae_runtime
 
@@ -145,8 +153,8 @@ def _patch_setup_sufficient(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         hud_build,
         "sizing_info",
-        lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
-            qty=Decimal("12"),
+        lambda symbol, limit_price, equity_usd, size_scale=Decimal("1"), **kwargs: _FakeSizingInfo(
+            qty=Decimal("12") * size_scale,
             stop_distance_usd=Decimal("0.24900"),
             r_multiple_target=Decimal("2"),
         ),
@@ -362,7 +370,7 @@ class TestSizingGateZeroQtyYieldsWaitNoTicket:
         monkeypatch.setattr(
             hud_build,
             "sizing_info",
-            lambda symbol, limit_price, equity_usd: _FakeSizingInfo(
+            lambda symbol, limit_price, equity_usd, **kwargs: _FakeSizingInfo(
                 qty=Decimal("0"),
                 stop_distance_usd=Decimal("0.24900"),
                 r_multiple_target=Decimal("2"),
@@ -448,7 +456,7 @@ class TestProviderErrorsInSetupAndSizingDegradeToWait:
 
         _patch_setup_sufficient(monkeypatch)
 
-        def _boom(symbol: str, limit_price, equity_usd):
+        def _boom(symbol: str, limit_price, equity_usd, **kwargs):
             raise ValueError("insufficient daily bars for ATR")
 
         monkeypatch.setattr(hud_build, "sizing_info", _boom)

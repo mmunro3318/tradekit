@@ -50,6 +50,7 @@ import pytest
 from tradekit import mae, thesis
 from tradekit.contracts import AssetRef, Bar, BarSeries, EventFilter
 from tradekit.ledger import default_ledger
+from tradekit.policy._dials import PolicyDials
 
 _ASSET = AssetRef(symbol="BTC/USD", venue="kraken", asset_class="crypto", tick_size=Decimal("0.01"))
 _BAR_START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -145,14 +146,21 @@ def test_submit_snapshot_payload_fields(thesis_kwargs) -> None:
 
 
 def test_submit_sizing_payload_matches_size_position_output_verbatim(thesis_kwargs) -> None:
+    """ASSUMPTIONS 182: submit() now sizes at the contract's entry.limit_price
+    and clips to the paper cap, mirroring P4 exactly — the recorded
+    SizingComputed.sizing is still size_position's REAL output, verbatim."""
     thesis_id = thesis.draft(thesis_kwargs)
     thesis.submit(thesis_id)
 
     # Same monkeypatched bars, called directly — this is R-012's whole point:
     # SizingComputed must equal mae.size_position's REAL output, not a
     # re-derivation of it.
+    dials = PolicyDials.load()
     expected = mae.size_position(
-        thesis_kwargs["asset"]["symbol"], account_equity_usd=_PAPER_STARTING_EQUITY_USD
+        thesis_kwargs["asset"]["symbol"],
+        account_equity_usd=dials.paper_starting_equity_usd,
+        price=Decimal(str(thesis_kwargs["entry"]["limit_price"])),
+        max_position_usd=dials.paper_max_position_usd,
     )
 
     sizing_event = _thesis_events("SizingComputed", thesis_id)[0]

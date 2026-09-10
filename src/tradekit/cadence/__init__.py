@@ -156,7 +156,10 @@ def _confirm_entry(
     `approved` and so never accumulates as the "approved orphan" review
     round 22 found. Reuses `_build_contract` for the heavy lifting
     (EV/bracket/strategy-tag derivation) and `_append_event` for the
-    ReviewCompleted append; only the `entry` sub-dict is overridden."""
+    ReviewCompleted append; only the `entry` sub-dict is overridden — it
+    now keeps `limit_price` (ASSUMPTIONS 182, SPEC-sizing-cap P5) so
+    `thesis.submit`'s binding sizing call reads the same reference price
+    the preview ticket did, instead of drifting to the daily close."""
     contract = hud_serve._build_contract(ticket_dict, strategy_def)
     # F6 (review round 22, belt-and-braces): `_build_contract` re-loads
     # `PolicyDials` itself (a TOCTOU window against `run_once`'s own guard
@@ -166,6 +169,7 @@ def _confirm_entry(
         raise CadenceAccountRefused(str(contract["account_ref"]))
     contract["entry"] = {
         "order_type": "market",
+        "limit_price": contract["entry"]["limit_price"],
         "valid_until": contract["entry"]["valid_until"],
     }
     thesis_id: str = thesis.draft(contract)
@@ -441,7 +445,14 @@ def run_once(*, digest_dir: Path = Path("docs/digest")) -> None:
     past the guard": both the top-level guard above AND `_submit_entry`'s
     own belt-and-braces re-check (F6) raise it as a structural refusal, not
     a run failure — it propagates without a digest entry, matching the
-    guard's own pre-digest contract."""
+    guard's own pre-digest contract.
+
+    ASSUMPTIONS 182 (SPEC-sizing-cap P6): the preview sizes off the DIAL
+    equity (`PolicyDials.paper_starting_equity_usd`), not the live
+    cash+marks figure — `_paper_equity_usd` is still read (and kept) for
+    the digest and for the dead-account check below, which appends a loud
+    warning and skips `_run_entries` entirely when the live account has no
+    `AccountCreated`/cash (T3)."""
     dials = PolicyDials.load()
     account_ref = dials.default_account_ref
     if not account_ref.startswith("paper:"):
@@ -456,15 +467,25 @@ def run_once(*, digest_dir: Path = Path("docs/digest")) -> None:
         # cadence run does it itself.
         ledger.rebuild()
         equity_usd, equity_warnings = _paper_equity_usd(account_ref)
+        sizing_equity_usd = dials.paper_starting_equity_usd
 
-        state = build_state(list(DEFAULT_SYMBOLS), captured_at=now, equity_usd=equity_usd)
+        state = build_state(list(DEFAULT_SYMBOLS), captured_at=now, equity_usd=sizing_equity_usd)
 
         open_symbols = {position.symbol for position in broker.get(account_ref).positions()}
         active = ledger.models.active_theses_with_symbol()
         active_symbols = {row.symbol for row in active if row.symbol}
         skip_symbols = open_symbols | active_symbols
 
-        entries, entry_warnings = _run_entries(ledger, state, skip_symbols)
+        entries: list[dict[str, Any]]
+        entry_warnings: list[str]
+        if equity_usd <= 0:
+            equity_warnings.append(
+                f"{account_ref}: equity ${equity_usd} <= 0 — no AccountCreated on the ledger "
+                "or cash exhausted; entries skipped this run (create it: tk account create-paper)"
+            )
+            entries, entry_warnings = [], []
+        else:
+            entries, entry_warnings = _run_entries(ledger, state, skip_symbols)
         exits, exit_warnings = _run_exits(ledger, active, now, open_symbols)
 
         # This run's own entries/exits just moved the theses projection out

@@ -294,15 +294,45 @@ def _paper_equity(ledger: Ledger, dials: PolicyDials, account_ref: str) -> Decim
 
 
 def _trades_today_count(ledger: Ledger, account_ref: str, now: datetime) -> int:
-    """Count of this account's own `submit_order` `ActionProposed` events
-    on `now`'s UTC calendar day — a real (possibly-zero) count, never a
-    guess; a fresh ledger with no prior proposals today is genuinely `0`."""
+    """Count of this account's ENTRY orders submitted on `now`'s UTC
+    calendar day (review round 24 F2, ASSUMPTIONS 182.6/10, SPEC-sizing-cap
+    P8) — a real (possibly-zero) count, never a guess; a fresh ledger with
+    no prior submissions today is genuinely `0`.
+
+    WHY this moved off `ActionProposed`: a scan-time preview (`hud._build.
+    build_state`) proposes-and-evaluates every symbol every run, ledgering
+    a real `ActionProposed(submit_order)` win or lose, and a denied BINDING
+    attempt does too — neither ever reaches a broker. Counting proposals
+    therefore counted previews and dead drafts as if they were trades;
+    round 24's own probe measured twenty scan-time previews alone driving
+    this count to 20, then a real submit_order evaluate reading
+    `R-007: 21 vs 20` and locking the paper account for the rest of the
+    day, with zero orders ever actually submitted. `OrderSubmitted` is only
+    ever appended by a `BrokerPort.submit` adapter (`broker/_paper.py`,
+    `broker/_alpaca.py`), i.e. after a policy ALLOW reached the broker —
+    the real definition of "a trade today".
+
+    An `OrderSubmitted` event counts only when it is the FIRST one ever
+    ledgered for its `thesis_id` — an ENTRY. `broker.execute_exit` submits
+    a SECOND `OrderSubmitted` for the same thesis to flatten it; exits must
+    never be throttled by this rule (the spec's own out-of-scope note: R-007
+    itself, `_check_r007` in `policy/_rules.py`, is NOT touched — only
+    where this count's events come from). `ledger.query` returns events in
+    ledger seq (global append) order, so the first occurrence of a
+    `thesis_id` in the `OrderSubmitted` stream IS its entry, with no
+    separate timestamp-tie-breaking needed."""
     today = now.date()
+    seen_thesis_ids: set[str] = set()
     count = 0
-    for event in ledger.query(EventFilter(types=["ActionProposed"])):
+    for event in ledger.query(EventFilter(types=["OrderSubmitted"])):
+        thesis_id = event.payload.get("thesis_id")
+        is_entry = thesis_id not in seen_thesis_ids
+        if thesis_id is not None:
+            seen_thesis_ids.add(thesis_id)
+        if not is_entry:
+            continue
         if (
             event.payload.get("account_ref") == account_ref
-            and event.payload.get("kind") == "submit_order"
             and event.ts_utc.astimezone(UTC).date() == today
         ):
             count += 1

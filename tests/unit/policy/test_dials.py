@@ -212,40 +212,61 @@ def test_resolve_account_dial_returns_none_when_both_layers_are_none() -> None:
 
 
 def test_paper_max_position_usd_is_the_product_of_pct_and_equity(monkeypatch) -> None:
-    """CONTRACT (AC-7, P2): default dials -> $50.00 (0.10 * $500, SPEC §3's
-    own dial-defaults table). A non-default combination
-    (equity=1000, pct=0.05) -> $50.00 too — proves the property is a
-    PRODUCT derivation, not a hardcoded constant."""
+    """CONTRACT (AC-7/AC-27, P2; review round 24 M10 fix, ASSUMPTIONS
+    182.11): default dials -> $50.00 (0.10 * $500, SPEC §3's own
+    dial-defaults table). Two non-default combinations, `(1000, 0.10) ->
+    $100.0` and `(500, 0.05) -> $25.00`, prove the property is a PRODUCT
+    derivation, not a hardcoded constant — the original draft's second case
+    (equity=1000, pct=0.05 -> $50.00) also multiplied to $50, the SAME
+    figure as the default-dials case, so a mutant that hardcoded
+    `Decimal("50.00")` regardless of input would have survived it."""
     monkeypatch.delenv("TK_CONFIG_PATH", raising=False)
     dials = PolicyDials.load()
     assert dials.paper_max_position_usd == Decimal("50.00")
 
-    other = PolicyDials(
-        paper_starting_equity_usd=Decimal("1000"), max_position_pct_paper=Decimal("0.05")
+    doubled_equity = PolicyDials(
+        paper_starting_equity_usd=Decimal("1000"), max_position_pct_paper=Decimal("0.10")
     )
-    assert other.paper_max_position_usd == Decimal("50.00")
+    assert doubled_equity.paper_max_position_usd == Decimal("100.0")
+
+    halved_pct = PolicyDials(
+        paper_starting_equity_usd=Decimal("500"), max_position_pct_paper=Decimal("0.05")
+    )
+    assert halved_pct.paper_max_position_usd == Decimal("25.00")
 
 
 def test_r005_paper_rule_hit_limit_equals_the_dials_paper_max_position_usd(monkeypatch) -> None:
-    """BEHAVIOR (AC-8, real engine — no monkeypatch under `tradekit.policy`):
-    a real `paper:alpha` account (via the real `broker.create_paper_account`
-    verb) plus a real `policy.evaluate(submit_order)` call -> the R-005
-    `RuleHit.limit` (a rendered Decimal string, `_check_r005`'s own
-    `max_position_pct_paper * ctx.account_equity_usd`, `src/tradekit/
-    policy/_rules.py` line ~170) must parse to EXACTLY
-    `PolicyDials.load().paper_max_position_usd` (P2). `ctx.account_equity_usd`
-    for a fresh account with no `ThesisGraded` history is
-    `dials.paper_starting_equity_usd` unchanged (`policy._context.assemble`
-    / `_paper_equity`, verified in `_context.py` line ~341), so the two
-    sides of this equality are the same dial product by construction — this
-    test pins that R-005 and P2 never drift apart, without touching
+    """BEHAVIOR (AC-8/AC-27, real engine — no monkeypatch under
+    `tradekit.policy`): a real `paper:alpha` account (via the real
+    `broker.create_paper_account` verb) plus a real
+    `policy.evaluate(submit_order)` call -> the R-005 `RuleHit.limit` (a
+    rendered Decimal string, `_check_r005`'s own `max_position_pct_paper *
+    ctx.account_equity_usd`, `src/tradekit/policy/_rules.py` line ~170)
+    must parse to EXACTLY `PolicyDials.load().paper_max_position_usd` (P2).
+    `ctx.account_equity_usd` for a fresh account with no `ThesisGraded`
+    history is `dials.paper_starting_equity_usd` unchanged (`policy._context.
+    assemble`/`_paper_equity`, verified in `_context.py` line ~341), so the
+    two sides of this equality are the same dial product by construction —
+    this test pins that R-005 and P2 never drift apart, without touching
     `policy/_rules.py` itself (SPEC's out-of-scope list).
+
+    review round 24 M10 fix (ASSUMPTIONS 182.11): `PolicyDials.load` is
+    patched here (classmethod lambda, mirroring `test_run_once.py::
+    _patch_dials`) to `paper_starting_equity_usd=Decimal("1000")` so the
+    real cap is `$100.0`, not the default `$50.00` — at the DEFAULT dials,
+    a mutant that hardcoded R-005's paper limit to `Decimal("50.00")`
+    instead of deriving it would have survived this test undetected.
 
     `thesis_id` is a fake/unledgered string on purpose — R-010/R-012 will
     deny with `insufficient_context`, which is fine per the dispatch brief;
     only the R-005 hit is read here, and R-005 is unconditionally consulted
     for any `submit_order` proposal regardless of R-010/R-012's outcome."""
     monkeypatch.delenv("TK_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(
+        PolicyDials,
+        "load",
+        classmethod(lambda cls: PolicyDials(paper_starting_equity_usd=Decimal("1000"))),
+    )
 
     from tradekit import broker, policy
     from tradekit.contracts import AccountConfig, AssetRef, OrderRequest, ProposedAction

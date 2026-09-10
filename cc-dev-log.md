@@ -1,3 +1,47 @@
+## 2026-09-10 (Fable — reboot audit; SPEC-sizing-cap shipped; R-007 root cause)
+
+- Windows Update forced three chained reboots 00:01-00:03 UTC (ignored a 2-day
+  deferral); both scheduled tasks were `Interactive only` -> machine sat at the
+  login screen until Mike logged in 06:28 UTC. 6h25m lost on all 8 collector
+  streams + 7 cadence runs; only Kraken trades recoverable. Report:
+  docs/research/data-health-2026-09-10-reboot.md (sonnet, read-only). FIX:
+  both tasks now S4U via scripts/register_tasks_s4u.ps1 (Mike, elevated);
+  cadence action = absolute uv.exe + working dir; 10:00 UTC run proved it.
+- backfill_ticks.py had two defects that would have DUPLICATED history: hour
+  parse `int("18.part-0000")` (fragments invisible) and readers walking the
+  retired flat layout while the writer used stream_dir. Fixed test-first
+  (457ac39); real dry run after: BTC/USD have 783 / miss 15.
+- tk-data-health's three scripts (health_snapshot/coverage/audit_tree) do not
+  exist — FRICTION + ROADMAP. Worktree `uv sync` skips the collector group —
+  FRICTION (`--all-groups`).
+- SPEC-sizing-cap (docs/specs/SPEC-sizing-cap.md, TASKS, ASSUMPTIONS 182.1-12)
+  on branch feature/sizing-cap in .worktrees/sizing-cap (main stays checked out
+  for the hourly task). One sizing basis: ticket price + dial equity + dial cap,
+  clip in exact Decimal inside mae.size_position; thesis.submit sizes at the
+  contract's limit_price; cadence keeps limit_price on the market entry, sizes
+  at the dial, and is loud + skips entries on a dead account. RED-A/RED-B
+  (sonnet, parallel), GREEN (sonnet), fix round for 8 stale tests (CTO-ruled,
+  182.9). RED-A caught my AC-4 fixture slip (182.8).
+- Review round 24 (top model, 10 mutants, real-path probes) FIX-FIRST: (F1)
+  S4's size_scale multiplied onto the ticket after sizing -> every S4 draft
+  would still die at binding; (F2) EVERY scan-time preview ledgers an
+  ActionProposed that R-007 counted -> 20 previews lock the paper account
+  daily with zero trades — the REAL T4 cause (my 182.6 attribution was wrong).
+  Fixes: P7 size_scale through size_position (post-clip, 8dp), P3'/P4' both
+  call sites, P8 R-007 counts entry OrderSubmitted only (exits never), AC-20..28,
+  M4/M6/M10 killers. Round 25 = scoped re-review before the green commit.
+- Digest fact: NEAR denied at binding every hour today on R-012 (4.6-5.3%) —
+  exactly the defect this ships. TAO still open (horizon 09-14).
+- Mike: prop account has NO idle timeout (his earlier belief was wrong).
+  Proposal on the table: new `paper:prop` account at $5,000 (prop scale) once
+  TAO closes; the cap issue is scale-invariant, so $5k is for realism, not
+  for actionability. Need the prop eval's drawdown rules for R-017/R-018.
+- Process: the r24 fix implementer burned ~300k tokens reverting production
+  code to "prove red" then re-applying it, then chasing the rtk-swallowed
+  pytest summary; Mike stopped it — I verified the tree myself (gate green).
+  Dispatch rule added (memory): tests FIRST, never revert to reproduce red;
+  never chase the summary line — exit code only.
+
 ## 2026-09-08 (Fable — ship + session seam)
 
 - tk-ship: fresh gate green (1421 tests, ruff, mypy); no broker/policy files

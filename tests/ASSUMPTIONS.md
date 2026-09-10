@@ -3583,12 +3583,22 @@ was under 10% of price because sizing never knew the cap existed. Ratified:
 5. FORWARD PIN: when `pnl_daily` finally feeds `_paper_equity` (62), the
    sizing basis moves with it on BOTH sides (`cadence.run_once`'s
    `sizing_equity_usd` and `thesis._submit`), or R-012 reopens.
-6. R-007 counts `ActionProposed(submit_order)` events, denied ones included
-   (`_trades_today_count`). On 2026-09-09 the hourly binding rejections
-   alone reached 20-22 by 15:00 UTC and locked the paper account for the
-   day. That is a consequence of (1)'s defect, not a rule defect: R-007 is
-   NOT changed (conservative for live; never weaken an R-rule). Revisit only
-   if denied-at-binding drafts reappear after this lands.
+6. R-007's `trades_today_count` used to count `ActionProposed(submit_order)`
+   events, and `policy.evaluate` ledgers one for EVERY scan-time preview
+   (181.3 needs the ledgered verdict). Review round 24 probed it: twenty
+   previews with zero entries lock the 21st on `R-007: 21 vs 20`; three
+   armed symbols an hour locked the paper account by ~07:00 UTC daily — the
+   real T4 cause, not the binding rejections. Ratified: `trades_today_count`
+   = entry `OrderSubmitted` events for the account on the UTC day (an
+   order's first submission for its thesis). Previews, binding evaluations
+   and broker-refused submits are not trades; exits reduce risk and never
+   count. `_check_r007` itself is unchanged (SPEC-sizing-cap §6 P8).
+   Known-open (round 25): R-007 still evaluates exit orders at all, and
+   "first `OrderSubmitted` for the thesis" makes any LATER order on a thesis
+   invisible to the count — unreachable through the verbs (`execute_order`
+   is one-shot at `approved`, `execute_exit` sells the net position), so the
+   honest future pin is a side/position-aware exit exemption inside
+   `_check_r007`, not a dedupe in context assembly.
 7. `cadence.run_once` is loud on a dead account: live equity `<= 0` (no
    `AccountCreated` for the default ref, or cash exhausted) appends a digest
    warning naming the ref and `tk account create-paper`, and skips entries
@@ -3601,3 +3611,34 @@ was under 10% of price because sizing never knew the cap existed. Ratified:
    > max_position_usd`, per AC-5 — must not fire. The clip is CONDITIONAL;
    the boundary cases moved to prices where it binds (300, 266.00 under
    F-TIGHT; 0.00007 under a sub-cent F-MICRO fixture).
+9. Eight pre-existing tests went red on the green pass because they encoded
+   the retired basis, not because the change was wrong (CTO-adjudicated,
+   review round 24 re-checks each): `test_submit`'s verbatim-sizing test
+   now mirrors P4's call (price = the contract's limit price, cap = the
+   dial); four `test_run_once` tests plus its F2 equity test earn
+   `paper:alpha` through the real `create_paper_account` verb instead of
+   relying on the $0 shell (item 7) and assert the dial as the preview's
+   sizing basis (item 1); `test_pipeline`'s resting-limit test moves its
+   fictional `1.00` limit to a price below every fixture low that still
+   clears R-008 (sizing now follows the entry price, item 4); the
+   `test_p2_adversarial` revenge test sizes its honest order at the
+   fixture's daily close so the doubled order lands on exactly $50 and
+   `{"R-012"}` stays the whole verdict — the R-rule assertion is unchanged.
+10. `size_scale` (a strategy fact: `_S4_REVERSION.size_scale = 0.5`) was
+    multiplied onto the ticket qty AFTER sizing while `thesis.submit`
+    recorded the unscaled size — every S4 draft died at binding with
+    `R-012: 0.5` (round 24, F1). Ratified: the scale is a third keyword-only
+    input to `mae.size_position`, applied after the cap clip in exact
+    Decimal, passed by both call sites from `mae.STRATEGY_BY_KEY` (§6 P7,
+    P3', P4'). The seam `hud._build.sizing_info` grows a keyword-only
+    `size_scale`; test fakes accept it via `**kwargs`.
+11. Float bound on item 2 (round 24, F7): the 8dp clipped units survive the
+    `float -> Decimal(str())` round-trip on the hud side only up to 15
+    significant digits, i.e. price >= ~1e-7 at a $50 cap (7e-8 overshoots by
+    one 8dp ulp and R-005 denies at preview). No greenlist pair is within
+    two orders of magnitude of that; recorded so a sub-1e-7 listing is a
+    known trap, not a surprise.
+12. The dead-account guard (item 7) runs after `build_state`, so a dead
+    account still walks the providers and ledgers one preview proposal per
+    armed symbol. With item 6 those proposals no longer count for R-007;
+    the cost is provider calls only. Left as is (round 24, F8).

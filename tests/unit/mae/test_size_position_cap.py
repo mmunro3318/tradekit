@@ -159,7 +159,6 @@ def test_ac2_no_price_is_a_regression_pin_plus_the_new_echoed_key(
     assert result["atr_position_size_usd"] == pytest.approx(12.5)
     assert result["recommended_size_usd"] == pytest.approx(12.5)
     assert result["recommended_units"] == pytest.approx(0.125)
-    assert "max_position_usd" in result, "P1's one new output key must be present"
     assert result["max_position_usd"] is None, "no cap passed -> the echoed cap is None"
 
 
@@ -191,9 +190,11 @@ def test_ac3_cap_binds_clips_units_and_size_audit_trail_stays_uncapped(
 
 
 # ---------------------------------------------------------------------------
-# AC-4 — exact-arithmetic boundary (GOLDEN). price=266.00 is self-consistent
-# under any reading; price=3 / price=0.00007 carry ASSUMPTIONS-FLAG 1 (see
-# module docstring) — asserted here under the CONDITIONAL-clip reading.
+# AC-4 — exact-arithmetic boundary (GOLDEN): 266.00 and 300 under F-TIGHT,
+# 0.00007 under F-MICRO — the three prices where the cap genuinely binds
+# (ASSUMPTIONS 182.8; the first draft's price=3/0.00007-under-F-TIGHT
+# boundaries were retired because the cap never binds there, see module
+# docstring).
 # ---------------------------------------------------------------------------
 
 
@@ -326,3 +327,119 @@ def test_ac6b_non_positive_price_raises_value_error(
 
     with pytest.raises(ValueError):
         size_position(_SYMBOL, Decimal("500"), price=Decimal("0"))
+
+
+# ---------------------------------------------------------------------------
+# AC-20 — P7 (review round 24 F1, ASSUMPTIONS 182.10): `size_scale`, a
+# strategy's own restricted-size fraction, applied AFTER the cap clip in
+# exact Decimal arithmetic. The defect this fixes: `hud._build`/`thesis.
+# _submit` used to multiply the ALREADY-RETURNED qty by
+# `StrategyDef.size_scale` themselves, so the two call sites' own
+# multiplications could drift (one applying it, one forgetting to) and the
+# recorded `SizingComputed` notional never matched the scaled ticket ->
+# every S4 draft (size_scale=0.5) died at binding on R-012. Moving the
+# scale INSIDE `size_position` makes it the single source of truth for
+# both call sites.
+# ---------------------------------------------------------------------------
+
+
+def test_ac20a_default_size_scale_is_a_byte_identical_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CONTRACT (AC-20a, P7 regression pin): omitting `size_scale` (default
+    `Decimal("1")`) must match AC-1's own uncapped F-WIDE numbers exactly,
+    plus the new echoed `size_scale: 1.0` key — every pre-existing caller
+    (`strategy_key=""`/no claiming def) is unaffected."""
+    monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", _f_wide_bars)
+
+    result = size_position(_SYMBOL, Decimal("500"), price=Decimal("105"))
+
+    assert result["recommended_units"] == pytest.approx(0.125)
+    assert result["recommended_size_usd"] == pytest.approx(13.125)
+    assert result["size_scale"] == 1.0
+
+
+def test_ac20b_size_scale_applies_after_the_cap_clip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CONTRACT (AC-20b, P7's own trigger case — mirrors S4's real
+    `size_scale=Decimal("0.5")`): F-TIGHT at price=100 with
+    `max_position_usd=50` clips to 0.5 units / $50.0 (AC-3's own pin)
+    FIRST, THEN `size_scale=0.5` halves the CLIPPED values to 0.25 units /
+    $25.0 — never 1.25*0.5=0.625 units (which would be scale-before-clip,
+    the wrong order) and never re-deriving from the uncapped $125."""
+    monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", _f_tight_bars)
+
+    result = size_position(
+        _SYMBOL,
+        Decimal("500"),
+        price=Decimal("100"),
+        max_position_usd=Decimal("50"),
+        size_scale=Decimal("0.5"),
+    )
+
+    assert result["recommended_units"] == 0.25
+    assert result["recommended_size_usd"] == 25.0
+    assert result["atr_position_size_usd"] == pytest.approx(125.0), (
+        "AC-20b: the audit trail stays the fully-uncapped, fully-unscaled value"
+    )
+    assert result["max_position_usd"] == 50.0
+    assert result["size_scale"] == 0.5
+    assert "capped_by_max_position" in result["warnings"]
+
+
+def test_ac20c_size_scale_applies_even_when_the_cap_never_binds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CONTRACT (AC-20c): F-WIDE at price=105, NO cap passed at all —
+    `size_scale=0.5` still halves the uncapped AC-1 numbers exactly
+    (0.125 -> 0.0625 units, $13.125 -> $6.5625), proving the scale is
+    unconditional (unlike the clip, which only fires when it binds)."""
+    monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", _f_wide_bars)
+
+    result = size_position(
+        _SYMBOL, Decimal("500"), price=Decimal("105"), size_scale=Decimal("0.5")
+    )
+
+    assert result["recommended_units"] == pytest.approx(0.0625)
+    assert result["recommended_size_usd"] == pytest.approx(6.5625)
+    assert result["max_position_usd"] is None
+    assert result["size_scale"] == 0.5
+    assert "capped_by_max_position" not in result["warnings"]
+
+
+@pytest.mark.parametrize("bad_scale", [Decimal("0"), Decimal("-0.5"), Decimal("1.01")])
+def test_ac20d_size_scale_outside_0_1_raises_value_error(
+    monkeypatch: pytest.MonkeyPatch, bad_scale: Decimal
+) -> None:
+    """CONTRACT (AC-20d): `size_scale` must be `> 0` and `<= 1` — zero,
+    negative, and >1 (an amplifier, never a caller's intent) are all caller
+    bugs -> `ValueError` naming the offending parameter."""
+    monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", _f_tight_bars)
+
+    with pytest.raises(ValueError, match="size_scale"):
+        size_position(_SYMBOL, Decimal("500"), price=Decimal("100"), size_scale=bad_scale)
+
+
+def test_ac20e_scaled_units_are_requantized_to_8dp_round_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CONTRACT (P7, review round 25 M12 killer): the scale step re-quantizes
+    UNITS to 8dp ROUND_DOWN and derives the size from them. F-TIGHT, price
+    105, cap 50: clip 50/105 -> 0.47619047; *0.5 = 0.238095235 (9dp) ->
+    0.23809523; size = exactly 0.23809523 * 105 = 24.99999915. Scaling the
+    float outputs without the quantize leaves 0.238095235 / 24.999999675 —
+    an unexecutable 9dp unit count and a record that is no longer
+    units * price."""
+    monkeypatch.setattr("tradekit.mae._runtime.get_daily_bars", _f_tight_bars)
+
+    result = size_position(
+        _SYMBOL,
+        Decimal("500"),
+        price=Decimal("105"),
+        max_position_usd=Decimal("50"),
+        size_scale=Decimal("0.5"),
+    )
+
+    assert result["recommended_units"] == 0.23809523
+    assert result["recommended_size_usd"] == 24.99999915

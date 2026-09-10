@@ -197,6 +197,13 @@ class PolicyDials(BaseSettings):
         re-resolving the path on every call — never cache at import time."""
         return cls()
 
+    @property
+    def paper_max_position_usd(self) -> Decimal:
+        """R-005's paper limit basis (`max_position_pct_paper * paper_starting_
+        equity_usd`) exposed for the two `mae.size_position` call sites so the
+        cap they clip to is the cap R-005 will measure against (ASSUMPTIONS 182)."""
+        return self.max_position_pct_paper * self.paper_starting_equity_usd
+
 
 def canonical_dump(dials: PolicyDials) -> dict[str, Any]:
     """JSON-stable dict of every dial value (`Decimal`/`datetime` rendered

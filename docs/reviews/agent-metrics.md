@@ -549,3 +549,49 @@ notification — a redo dispatch was started and killed (docs/FRICTION.md).
 | red-kraken-pairs | test_kraken.py (+2) | 0 | 0 | 1 | A | Parametrized request+parse pin plus a genuinely two-sided ZEC discriminator; every mapping mutant dies. |
 | green-cto-inthread | hud/_build.py, mae/_data/kraken.py, ASSUMPTIONS 181 | 0 | 0 | 1 | A− | Surgical to the pins; predicate correct under every crafted verdict; `Any` where `RuleHit` was available. |
 | review-preview-defer | round 23 adjudication | — | — | — | A | Found the real gap (unpinned narrowing, reachable) with a real-path probe, not opinion; clean bypass-hunt with cited paths; docked nothing — the background-park was a harness/process issue, now a dispatch rule. |
+
+## Round 24 — 2026-09-10 — SPEC-sizing-cap (red b882ece + cd0f29f, green + fix in the following commits)
+
+Reviewer: tk-reviewer (top model), foreground, 10 hand-applied mutants
+against 88 tests with byte-exact restore, plus three real-`run_once` probes.
+Verdict FIX-FIRST on two MAJOR production findings and three surviving
+mutants. F1: `size_scale` (S4 = 0.5) multiplied onto the ticket AFTER
+sizing while `thesis.submit` recorded the unscaled size — every S4 draft
+would die at binding (`R-012: 0.5`); the spec's "every path" invariant was
+false for one of three strategies. F2: every scan-time preview ledgers an
+`ActionProposed` that R-007 counted — 20 previews with zero entries lock
+the paper account (`R-007: 21 vs 20`); ASSUMPTIONS 182.6 had recorded a
+false cause. M4 (hud sizes at the daily close) survived because no capped
+fixture drifted the 1h price; M6 (thesis ignores the paper gate) and M10
+(hardcoded $50) survived because no fixture differed from the default.
+Exact-Decimal clip verified correct down to price ~1e-7 (bound recorded,
+182.11). Fix round: P7/P3'/P4' (size_scale through `size_position`), P8
+(R-007 counts entry `OrderSubmitted`), AC-20..28 (spec §6).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| red-a-sizing | test_size_position_cap.py (10) + test_dials.py (+2) | 0 | 1 | 1 | B− | The AC-4 GOLDEN trio is the batch's best work — sole killers of M1/M2 — and it caught the spec's own fixture slip (182.8). Transcribed AC-7's non-discriminating 50==50 pair without noticing (M10 survived). |
+| red-b-funnel | test_build_state_sizing_basis.py (4), test_submit_sizing_basis.py (3), test_run_once_sizing.py (5) | 0 | 2 | 1 | B | Real-funnel harnesses; AC-17 alone kills four mutants. Never built the capped-and-drifted fixture (M4 survived — P3's defining pin unpinned) nor a non-paper thesis case (M6). |
+| green-sizing-cap | mae, dials, hud, thesis, cadence (100+/13-) | 0 | 1 | 2 | A− | Pins verbatim; exact-Decimal clip correct at every probed magnitude; purity intact; surgical. Did not raise the `size_scale` multiply sitting on the very qty the delta was equalising. |
+| fix-stale-tests | 8 migrated tests, 182.8/182.9 | 0 | 2 | 0 | B | Seven of eight migrations preserve intent with correct arithmetic (85.50; the 100.00 revenge pin). F2's migration dropped the healthy-mark assertion silently; 182.6 recorded a false cause (CTO's text, CTO's miss). |
+| review-sizing-cap | round 24 adjudication | — | — | — | A | Two real production findings from real-path probes, not opinion (the R-007 probe overturned the CTO's own T4 attribution); hands-on mutant table with verified restores; every finding carries a killing test body. |
+
+## Round 25 — 2026-09-10 — SPEC-sizing-cap round-24 fix delta (scoped re-review)
+
+Reviewer: tk-reviewer (top model), foreground, 9 mutants with sha256-verified
+restores, a real-pipeline probe proving AC-26's exit leg is non-vacuous
+(entry + exit `OrderSubmitted` on one thesis). Verdict SHIP: all findings
+LOW. M4'/M6'/M10' (round-24 survivors) now die; M12 (scale without the 8dp
+quantize) survives with no behavioral reach — CTO added AC-20e in-thread.
+Spec hygiene: AC-21 struck (duplicate of AC-25), a migration sentence about
+tests that never existed struck. Process note for the record: the fix
+implementer was stopped by Mike at ~300k tokens after it reverted production
+edits to "prove red", re-applied them, then chased the rtk-swallowed pytest
+summary; the CTO verified the tree directly (gate green). Dispatch rules
+updated (memory: tradekit-working-rules).
+
+| Agent | Scope | HIGH | MED | LOW | Grade | Note |
+|---|---|---|---|---|---|---|
+| fix-r24 (stopped; graded on its diff) | P7/P3'/P4'/P8, AC-20..28, 9 seam fakes | 0 | 0 | 3 | B+ | Correct and surgical; every new test killed its target mutant; AC-26 drives the real pipeline. Omitted P7's spec-explicit quantize, shipped no AC-21, and burned ~300k tokens on revert-to-prove-red + summary-line chasing. |
+| cto-quantize-edit | mae/__init__.py scale block | 0 | 0 | 0 | A | Restores P7's exactness (0.23809523 / 24.99999915, hud quantize a no-op, R-012 deviation 0). |
+| review-r25 | round 25 scoped adjudication | — | — | — | A | Held scope, proved AC-26 non-vacuous with a probe instead of trusting the name, found the phantom AC-21 and the phantom migration sentence, graded the killed agent on its diff. |
