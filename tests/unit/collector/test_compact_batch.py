@@ -12,6 +12,8 @@ The compaction itself is injected, so none of this touches parquet.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -164,6 +166,40 @@ class TestArchiveLock:
             pass
 
         assert not (tmp_path / cb.LOCK_NAME).exists()
+
+    def test_lock_left_by_a_dead_process_is_taken_over(self, tmp_path: Path) -> None:
+        """A reboot mid-run must not wedge every later unattended run.
+
+        The scheduled task cannot pass --force (that would also break a lock
+        held by a LIVE manual run), so the lock itself has to recognise a
+        holder that no longer exists.
+        """
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        assert dead.wait() == 0
+        (tmp_path / cb.LOCK_NAME).write_text(f"pid={dead.pid} started=2026-09-15T00:00:00\n")
+        del dead
+
+        with cb.archive_lock(tmp_path):
+            assert f"pid={os.getpid()}" in (tmp_path / cb.LOCK_NAME).read_text()
+
+        assert not (tmp_path / cb.LOCK_NAME).exists()
+
+    def test_lock_held_by_a_live_process_is_respected(self, tmp_path: Path) -> None:
+        (tmp_path / cb.LOCK_NAME).write_text(f"pid={os.getpid()} started=now\n")
+
+        with pytest.raises(cb.LockHeld):
+            with cb.archive_lock(tmp_path):
+                pass
+
+        assert (tmp_path / cb.LOCK_NAME).exists()
+
+    def test_lock_without_a_readable_pid_is_respected(self, tmp_path: Path) -> None:
+        """Unknown holder = assume alive. Duplicated rows cost more than a skipped run."""
+        (tmp_path / cb.LOCK_NAME).write_text("garbage\n")
+
+        with pytest.raises(cb.LockHeld):
+            with cb.archive_lock(tmp_path):
+                pass
 
 
 class TestDryRunLeavesNoTrace:
