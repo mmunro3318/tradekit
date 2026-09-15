@@ -95,7 +95,7 @@ foreach ($c in $Collectors) {
 # seeds its part counter from disk so a restart never reuses an index, and
 # compact_hour merges any pre-existing hourly file together with the parts.
 # The cost is purely file count (~2,800 parts/hour). Since 2026-09-15 the
-# daily scheduled task `TradeKit Compaction` (scriptsegister_compaction_task.ps1)
+# daily scheduled task `TradeKit Compaction` (scripts\register_compaction_task.ps1)
 # runs a bounded compact_batch.py pass; the sentinel below stays so THIS
 # unbounded pass never comes back. Do not delete it to "automate" compaction.
 # A replacement drive starts without one: recreate it before the first
