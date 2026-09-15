@@ -297,6 +297,11 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [x] Retire the three private per-venue ParquetSinks (flush-time bug + read-modify-write)
 - [x] scripts/repartition_archive.py + repair equities/alpaca (0.00% wrong-hour, 0 duplicates)
 - [x] Merge `fix/event-time-partitioning` (contained in main via fix/hud-preview-defer, 2026-09-08)
+- [x] Compaction automated (2026-09-15): `scripts/register_compaction_task.ps1` registers the
+      daily S4U task `TradeKit Compaction` (bounded `compact_batch.py --days 3 --max-seconds 1800`);
+      `compact_batch.py` takes over a lock whose holder pid is dead so a reboot mid-pass
+      cannot wedge the schedule. Backlog catch-up run 2026-09-15 (Mike's go). MIKE: run the
+      register script elevated (header has the command).
 - [ ] Backfill Kraken trades for the 2026-09-10 00:03–06:28 UTC reboot blackout
       (`scripts/backfill_ticks.py`, dry-run first; the only recoverable stream — books on every
       venue and Coinbase/OKX/Hyperliquid/Alpaca trades for that window are gone)

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -69,10 +70,19 @@ def archive_lock(root: Path, *, force: bool = False) -> Iterator[Path]:
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
-        raise LockHeld(
-            f"{path} exists - another compaction run is in progress. "
-            "If you are certain none is, re-run with --force."
-        ) from None
+        # A holder that no longer exists (reboot or kill mid-pass) must not
+        # wedge every later unattended run; --force is not an option for a
+        # scheduled task because it would also break a LIVE manual run's lock.
+        # A holder we cannot identify is assumed alive: a skipped run costs
+        # nothing, a duplicated hour costs data.
+        if not _lock_holder_is_dead(path):
+            raise LockHeld(
+                f"{path} exists - another compaction run is in progress. "
+                "If you are certain none is, re-run with --force."
+            ) from None
+        print(f"taking over {path}: its holder is no longer running", flush=True)
+        path.unlink(missing_ok=True)
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
         os.write(fd, f"pid={os.getpid()} started={datetime.now(UTC).isoformat()}\n".encode())
     finally:
@@ -81,6 +91,36 @@ def archive_lock(root: Path, *, force: bool = False) -> Iterator[Path]:
         yield path
     finally:
         path.unlink(missing_ok=True)
+
+
+def _lock_holder_is_dead(path: Path) -> bool:
+    match = re.search(r"pid=(\d+)", path.read_text(errors="replace"))
+    return match is not None and not _pid_alive(int(match.group(1)))
+
+
+def _pid_alive(pid: int) -> bool:
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    # os.kill(pid, 0) on Windows is TerminateProcess, so probe via the API.
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    query_limited = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+    handle = kernel32.OpenProcess(query_limited, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: exists, not ours
+    try:
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        return code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 @dataclass
@@ -190,7 +230,11 @@ def main() -> int:
     # console codepage that mangles non-ASCII (see the "heartbeat timeout ?"
     # entries the collectors already leave behind).
     mode = "EXECUTE" if args.execute else "DRY RUN - nothing will be modified (use --execute)"
-    print(f"root={root}  trees={len(trees)}  window={scope}\n{mode}", flush=True)
+    # Timestamped so unattended runs read chronologically in compaction.log.
+    print(
+        f"{now:%Y-%m-%dT%H:%M:%SZ} root={root}  trees={len(trees)}  window={scope}\n{mode}",
+        flush=True,
+    )
 
     # A dry run modifies nothing, so it takes no lock — writing a lock file
     # into the archive would contradict the banner it just printed, and it has

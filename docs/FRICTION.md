@@ -6,6 +6,11 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-09-15 — Bash-tool heredoc turns a doubled backslash-n into a real newline `tooling,bash,heredoc`
+- **Symptom:** python - <<'PYEOF' writing test source with a doubled-backslash n inside a quoted string produced a literal newline in the written file (unterminated f-string); happened three times in one session
+- **Cause:** the Bash tool (or its rtk rewrite hook) un-escapes doubled backslash sequences before the shell sees the heredoc, even with a quoted delimiter; a doubled backslash-d survived, only backslash-n was converted
+- **Solution:** use the Edit/Write tools for any source that must contain a backslash-n escape; keep heredoc-driven python edits to text with no backslash escapes
+
 ## 2026-08-23 — the rtk hook reported a pytest collection ERROR as "No tests collected" `rtk,pytest,tooling,red-phase`
 - **Symptom:** During the TDD red phase `uv run pytest tests/unit/collector/test_compact_batch.py -q` printed only `Pytest: No tests collected`. That reads as "your test file has no tests in it" — a naming/discovery problem — when the real cause was an ImportError (the module under test did not exist yet, which is exactly what a red phase looks like). Two calls were spent chasing the wrong failure.
 - **Cause:** The rtk token-optimizing proxy summarizes pytest output. A collection-time ERROR (import failure) and a genuinely empty test file both collapse to the same summary line, and the traceback — the only part that distinguishes them — is discarded.

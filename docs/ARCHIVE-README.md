@@ -74,9 +74,9 @@ Those are append-only fragments, merged into the single hourly file by
 compaction. **Both forms are valid Parquet and can be read directly** — a part
 file is self-contained, with its own footer.
 
-Since 2026-08-23 compaction is a **manual** job (§6), so parts now persist for
-whole days rather than minutes, and any query over recent data must glob both
-forms. Expect roughly 2,800 parts per hour of backlog.
+Compaction runs **once a day** (§6), so parts persist for up to a day rather
+than minutes, and any query over recent data must glob both forms. Expect
+roughly 2,800 parts per hour of backlog.
 
 Example:
 
@@ -150,9 +150,12 @@ idempotent — running it when everything is healthy does nothing.
 minutes, but that pass discovered its work by re-walking the whole archive, so
 its cost tracked archive size rather than backlog: at ~263k files, runs that
 merged *nothing* were taking up to 671 s against a 900 s schedule and had begun
-to overrun one another. It now runs by hand — see §6 — and is skipped by the
-watchdog while `D:\tradekit-data\COMPACTION-PAUSED` exists. Delete that file to
-restore the automatic pass; a replacement drive starts without one.
+to overrun one another. Since 2026-09-15 a second scheduled task, `TradeKit
+Compaction`, runs a bounded `compact_batch.py` pass daily at 02:30 local
+(registered by `scripts\register_compaction_task.ps1`, elevated, S4U). The
+watchdog's old pass stays disabled by `D:\tradekit-data\COMPACTION-PAUSED`;
+**leave that file in place** — deleting it brings the overrunning pass back.
+A replacement drive starts without one: recreate it, then register the task.
 
 Deferring compaction loses nothing. Part files are self-contained parquet, the
 sink seeds its part counter from disk so a restart never reuses an index, and
@@ -256,13 +259,23 @@ all take an exclusive lock on the tree):
 |---|---|
 | `repartition_archive.py` | re-files rows into the day/hour their own `ts` names; `--dedupe` also drops byte-identical rows |
 | `downsample_book.py` | coalesces a book stream to 1 Hz; refuses `--stream trades` outright |
-| `compact_batch.py` | **merges closed-hour part files. This is the routine one — run it every day or two.** |
+| `compact_batch.py` | **merges closed-hour part files. This is the routine one — the `TradeKit Compaction` task runs it daily; run it by hand for a catch-up.** |
 | `compact_archive.py` | the old unbounded whole-archive pass. Superseded by `compact_batch.py`; still what the watchdog would run if un-paused |
 
 Neither repair tool ever touches the current UTC day — a live collector owns
 it. That is why a partition finishes the day *after* it is written.
 
-**Routine compaction** (run from `C:\Users\admin\dev\tradekit`):
+**Routine compaction** is the scheduled task `TradeKit Compaction` (daily
+02:30 local, `--days 3 --execute --max-seconds 1800`, output appended to
+`logs\compaction.log`). Check it the same way as the watchdog:
+
+```powershell
+Get-ScheduledTaskInfo -TaskName 'TradeKit Compaction' |
+    Select-Object LastRunTime, LastTaskResult      # 0 = good; 3 = lock held by another run
+Get-Content 'D:\tradekit-data\logs\compaction.log' -Tail 4
+```
+
+By hand (run from `C:\Users\admin\dev\tradekit`), e.g. for a catch-up:
 
 ```powershell
 # what is outstanding? dry run is the default — nothing is modified
@@ -279,7 +292,9 @@ Scope it with `--days N`, `--since`/`--until`, or `--tree`. It takes an
 exclusive lock, never touches the current UTC hour, and is safe to run
 alongside live collectors. Interrupting it is safe and needs no bookkeeping —
 the work list is derived from the parts still on disk, so a re-run simply
-resumes. Measured 2026-08-23: 667 hours / 808,695 rows / 4,080 parts in 30 s.
+resumes, and a lock left by a run that died (reboot) is recognised by its dead
+pid and taken over. Measured 2026-08-23: 667 hours / 808,695 rows / 4,080
+parts in 30 s.
 
 ## 7. After a reboot
 

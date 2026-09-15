@@ -94,11 +94,12 @@ foreach ($c in $Collectors) {
 # Deferring it loses nothing. Part files are self-contained parquet, the sink
 # seeds its part counter from disk so a restart never reuses an index, and
 # compact_hour merges any pre-existing hourly file together with the parts.
-# The cost is purely file count (~2,800 parts/hour), so run compact_batch.py
-# every day or two.
-#
-# TO RESUME AUTOMATIC COMPACTION: delete the sentinel file. No code edit.
-# A replacement drive starts without one, so a fresh archive self-compacts.
+# The cost is purely file count (~2,800 parts/hour). Since 2026-09-15 the
+# daily scheduled task `TradeKit Compaction` (scriptsegister_compaction_task.ps1)
+# runs a bounded compact_batch.py pass; the sentinel below stays so THIS
+# unbounded pass never comes back. Do not delete it to "automate" compaction.
+# A replacement drive starts without one: recreate it before the first
+# watchdog run, then register the task.
 $compactionPaused = Join-Path 'D:\tradekit-data' 'COMPACTION-PAUSED'
 if ((-not (Test-Path $compactionPaused)) -and (-not (Test-Collector 'compact_archive.py'))) {
     $compactLog = Join-Path $logRoot 'compaction.log'

@@ -1,3 +1,27 @@
+## 2026-09-15 (Fable — post-merge digests clean; compaction automated; catch-up)
+
+- Second Windows Update reboot; S4U tasks recovered unattended in 12 min (Mike
+  confirmed). Mike researching a real update-deferral fix.
+- Post-merge digests 09-11..09-15 read: sizing-cap fix WORKS. 10 entries in
+  four days (EIGEN, SOL, ETH, LINK, AKT, XRP, AVAX, NEAR, RENDER, TAO), zero
+  R-012 binding denials, zero R-007 self-locks. 3 stop exits at ~-$5 each
+  (TAO -5.13, LINK -4.99, RENDER -5.07) = 1% risk on the $500 dial, as
+  designed. Graded 1 -> 3; T2 still needs 30 non-void.
+- Compaction automated (Mike's decision 2): scripts/register_compaction_task.ps1
+  (S4U, daily 02:30 local, StartWhenAvailable, bounded pass, log redirect via
+  cmd.exe like the watchdog). Pre-req shipped test-first: compact_batch.py
+  archive_lock recognises a DEAD holder pid (ctypes OpenProcess on Windows;
+  os.kill(pid,0) is TerminateProcess there) and takes the lock over; live or
+  unreadable holders still block. Banner now timestamped for the shared log.
+  COMPACTION-PAUSED stays (watchdog comment + README + skill runbook repointed).
+- Backlog catch-up launched detached (per-day passes 08-20..today then a
+  bounded sweep; scratchpad compaction_catchup.ps1, pid 32416, appends to
+  logs/compaction.log). Days through 08-25 had nothing outstanding.
+- Friction: Bash-tool heredoc un-escapes a doubled backslash-n into a real
+  newline (three strikes) — use Edit/Write for source with escapes.
+- Decision 1 (paper:prop at $5k) arrived as "asd" — treated as not decided;
+  TAO s1 closed 09-11 at stop (-5.13), so the account is free for it.
+
 ## 2026-09-10 (Fable — reboot audit; SPEC-sizing-cap shipped; R-007 root cause)
 
 - Windows Update forced three chained reboots 00:01-00:03 UTC (ignored a 2-day
