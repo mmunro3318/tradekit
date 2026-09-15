@@ -107,8 +107,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   prompts, `(red)` commit convention.
 
 ## Current focus
-**2026-09-10 — SIZING CAP + R-007 SHIPPED; seed:
-`docs/handoff/HANDOFF-2026-09-10-paper-record-r007-unlocked.md` (READ FIRST).**
+**2026-09-15 — POST-MERGE TAPE CLEAN (10 entries, 0 denials); COMPACTION
+AUTOMATED; seed:
+`docs/handoff/HANDOFF-2026-09-15-paper-record-compaction-automated.md` (READ
+FIRST).** Mike still has to run `scripts/register_compaction_task.ps1`
+elevated; the backlog catch-up loop may still be running (check
+`D:\tradekit-data\logs\compaction.log`). Everything below is history.
+
+**2026-09-10 — SIZING CAP + R-007 SHIPPED (history); seed:
+`docs/handoff/HANDOFF-2026-09-10-paper-record-r007-unlocked.md`.**
 One sizing basis (ASSUMPTIONS 182: ticket price, dial equity, dial cap, strategy
 scale — all INTO `mae.size_position`); R-007 counts entry `OrderSubmitted`, not
 proposals (previews were locking the paper account daily). Hourly task "TradeKit
