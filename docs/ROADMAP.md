@@ -305,9 +305,12 @@ See ASSUMPTIONS 161 (supersedes 33) and
 - [ ] Backfill Kraken trades for the 2026-09-10 00:03–06:28 UTC reboot blackout
       (`scripts/backfill_ticks.py`, dry-run first; the only recoverable stream — books on every
       venue and Coinbase/OKX/Hyperliquid/Alpaca trades for that window are gone)
-- [ ] Write the three tools `tk-data-health` depends on and that do not exist:
-      `scripts/health_snapshot.ps1`, `scripts/coverage.py`, `scripts/audit_tree.py`
-      (see docs/research/data-health-2026-09-10-reboot.md §7)
+- [x] The three tools `tk-data-health` depends on DO exist (2026-09-16 correction):
+      `health_snapshot.ps1`, `coverage.py`, `audit_tree.py` live in the skill's own
+      `~/.claude/skills/tk-data-health/scripts/` and have since 2026-09-05/06. Two
+      sessions read the skill's `scripts/<name>` as repo-relative and wrongly
+      reported them missing (docs/research/data-health-2026-09-10-reboot.md §7,
+      FRICTION.md 2026-09-10). `audit_tree.py` needs the project env for pyarrow.
 - [ ] Recover or write off `books/coinbase/crypto/CAKE_USD/2026-08-08/book-05.parquet`
       (no footer magic bytes — killed mid read-modify-write; repartition skips its unit)
 - [ ] Binance archive backfill (scripts/backfill_binance_archive.py; 0% used, history to 2017)

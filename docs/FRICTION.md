@@ -6,6 +6,16 @@ tk-learn promotes solved+generalizable entries to global memory.
 
 ---
 
+## 2026-09-16 — A TaskStop'd subagent kept running and deleted a file it was told to keep `subagent,taskstop,scope-fence,data-loss`
+- **Symptom:** survey-global was stopped with TaskStop (notification confirmed status=killed). It later completed anyway, and in that final turn deleted docs/research/skills-survey-2026-09-16-memories.md — a file I had explicitly instructed its child to write after redirecting it. The harness flagged the turn 'Irreversible Local Destruction'
+- **Cause:** two compounding facts: (1) TaskStop does not reliably terminate an agent mid-turn, so a killed agent can still act; (2) the agent was enforcing the one-file scope fence from its ORIGINAL dispatch prompt, which my later redirect to its children had superseded. It had no way to know the contract had changed, so it read a legitimate sibling deliverable as contraband and cleaned it up
+- **Solution:** content survived in the global report, so no real loss this time. Rules: (a) after TaskStop, treat the agent as possibly still live — verify its file outputs are intact before building on them; (b) never write a 'delete anything outside your one file' fence, only 'do not create files outside X' — deletion authority in a scope fence is what turns a stale contract into data loss; (c) when redirecting a child, also update or stop the parent's contract, or the parent will police the old one
+
+## 2026-09-16 — A coordinator subagent that spawns its own children deadlocks waiting for them `subagent,dispatch,deadlock,tokens`
+- **Symptom:** survey-global (sonnet, general-purpose) was dispatched to scrape a corpus and instead spawned 3 sub-agents, then burned ~95k tokens across 5 turns reporting 'I'll wait for their replies' and produced zero output; two explicit 'write the file now' instructions were ignored in favour of pinging children again
+- **Cause:** a subagent has no scheduler: its children's task-notifications are delivered to the PARENT SESSION, not to it, so waiting for them is a deadlock it cannot observe. Nothing in the dispatch prompt forbade it from fanning out, and 'synthesize from these sources' reads as a coordination job to a model that has the Agent tool
+- **Solution:** dispatch prompts for scrape/synthesis work must say 'do the reads yourself; do NOT spawn subagents' in the scope fence. If a coordinator has already deadlocked: message its children directly and have each WRITE A FILE (message-passing to a retired parent is lost), then TaskStop the coordinator. Deliverable-as-file is robust to any messaging topology; deliverable-as-message is not
+
 ## 2026-09-15 — Bash-tool heredoc turns a doubled backslash-n into a real newline `tooling,bash,heredoc`
 - **Symptom:** python - <<'PYEOF' writing test source with a doubled-backslash n inside a quoted string produced a literal newline in the written file (unterminated f-string); happened three times in one session
 - **Cause:** the Bash tool (or its rtk rewrite hook) un-escapes doubled backslash sequences before the shell sees the heredoc, even with a quoted delimiter; a doubled backslash-d survived, only backslash-n was converted
@@ -164,4 +174,14 @@ command — keep `git commit` in its own call.
 ## 2026-09-10 — `tk-data-health` names three repo scripts that were never written `skills,data-health,tooling`
 - **Symptom:** the post-reboot archive audit (docs/research/data-health-2026-09-10-reboot.md) found `scripts/health_snapshot.ps1`, `scripts/coverage.py`, `scripts/audit_tree.py` absent; the skill and its ARCHIVE-MAP cite all three as the workflow's steps 1-3. The agent improvised read-only PowerShell + an ad hoc pyarrow spot-check instead.
 - **Cause:** the skill was written from the data-vacuum sprint's intended tooling, not from what shipped.
-- **Solution:** NOT SOLVED — ROADMAP item under Data vacuum to write the three tools; until then the skill's steps 1-3 are manual. Also: the ARCHIVE-MAP's "known-open" S4U item was the exact cause of this reboot's 6h25m loss.
+- **Solution:** SOLVED 2026-09-16, and the original diagnosis was wrong. All three
+  scripts exist and have since 2026-09-05/06 — in the skill's OWN
+  `~/.claude/skills/tk-data-health/scripts/`, which is what the skill's
+  `scripts/<name>` references mean (identical to tk-gate's `scripts/gate.py`).
+  Two sessions read them as repo-relative, found nothing in
+  `C:\Users\admin\dev\tradekit\scripts\`, and improvised. The real gotcha, now
+  documented in the skill: `audit_tree.py` imports pyarrow, so a bare `python`
+  raises ModuleNotFoundError — it needs the project environment
+  (`uv run --group collector python "<skill>/scripts/audit_tree.py"`).
+  `coverage.py` and the ps1 run standalone. Also: the ARCHIVE-MAP's "known-open"
+  S4U item was the exact cause of this reboot's 6h25m loss.
